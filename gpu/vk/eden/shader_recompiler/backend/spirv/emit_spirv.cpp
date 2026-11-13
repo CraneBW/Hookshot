@@ -381,7 +381,7 @@ void DefineEntryPoint(const IR::Program& program, EmitContext& ctx, Id main) {
     default:
         throw NotImplementedException("Stage {}", program.stage);
     }
-    // (eglantine) EDEN_NX2_MAXRECONV=1: a program with subgroup operations reconverges where its structure says
+    // (hookshot) EDEN_NX2_MAXRECONV=1: a program with subgroup operations reconverges where its structure says
     // (SPV_KHR_maximal_reconvergence), so a ballot or shuffle after a divergent loop sees every lane still running.
     // A test for the culling's ballots (ground plants); off by default
     const Info& sg_info{program.info};

@@ -247,8 +247,8 @@ bool create_device() {
     optional(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, dev.coop_matrix);
     dlss_device_extensions(want, exts);   // (hookshot: NVIDIA DLSS's, vk_dlss.cpp)
     reflex_device_extensions(want, exts);   // (hookshot: NVIDIA Reflex's, vk_reflex.cpp)
-    optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, dev.float_atomic_add);   // (eglantine: native float adds, emit_spirv_atomic.cpp)
-    // (eglantine) EDEN_NX2_MAXRECONV=1: maximal reconvergence for programs with subgroup operations (emit_spirv.cpp). It needs
+    optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, dev.float_atomic_add);   // (hookshot: native float adds, emit_spirv_atomic.cpp)
+    // (hookshot) EDEN_NX2_MAXRECONV=1: maximal reconvergence for programs with subgroup operations (emit_spirv.cpp). It needs
     // VK_KHR_shader_subgroup_uniform_control_flow. Off by default: a test
     bool uniform_cf = false;
     if (const char* m = getenv("EDEN_NX2_MAXRECONV"); m && strcmp(m, "0") != 0) {
@@ -399,7 +399,7 @@ bool create_device() {
     dev.vk13 = f13;
     {   // (hookshot, after TotK Recomp's vk_caps.c) NVN's programs are written for 32 lanes: the translator is told 32, and the lane
         // shuffles of OoT's networks and the lane masks of its mesh programs depend on it. NVIDIA's GPUs have no other size; AMD's
-        // default to 64 where they like, and the networks' output came out as coloured noise (Hookshot issues 10 and 14)
+        // default to 64 where they like, and the networks' output came out as coloured noise (upstream issues 10 and 14)
         VkPhysicalDeviceSubgroupSizeControlProperties sc{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
         VkPhysicalDeviceSubgroupProperties sg{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
         sg.pNext = &sc;

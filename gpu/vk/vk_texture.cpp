@@ -174,7 +174,7 @@ struct KeyHash {
 };
 std::unordered_map<Key, std::unique_ptr<Texture>, KeyHash> textures;
 std::unordered_multimap<uint64_t, Texture*> by_gpu;
-// (eglantine, RX_VK_WB_LAZY: texture_storage_overlaps) every texture's storage by GPU address, merged, as of the frame
+// (hookshot, RX_VK_WB_LAZY: texture_storage_overlaps) every texture's storage by GPU address, merged, as of the frame
 // storage_spans_frame, and the storage of the textures made since
 std::vector<std::pair<uint64_t, uint64_t>> storage_spans, storage_recent;
 uint64_t storage_spans_frame = ~0ull;
@@ -184,10 +184,10 @@ uint64_t total_bytes = 0;
 thread_local bool tl_prefetching = false;
 int64_t st_pf_hits, st_pf_evicted, st_pf_remade, st_pf_skipped_fmt, st_pf_lead[4];
 std::unordered_set<uint64_t> pf_evicted_gpu;
-// (eglantine, diagnostic, RX_VK_PASS_TRACE=1) the last texture frame in which a wide image the GPU drew was uploaded over
+// (hookshot, diagnostic, RX_VK_PASS_TRACE=1) the last texture frame in which a wide image the GPU drew was uploaded over
 // from the game's memory (texture_touch): the frame log's thread writes the passes around it (vk_replay.cpp)
 std::atomic<uint64_t> upload_over_drawn_at{0};
-// (eglantine, 12/11) the images the operation being replayed on this thread is about to write (texture_write_targets): see
+// (hookshot, 12/11) the images the operation being replayed on this thread is about to write (texture_write_targets): see
 // texture_touch
 thread_local const Texture* tl_write_targets[9];
 thread_local int tl_write_n = 0;
@@ -229,11 +229,11 @@ struct Dead {
     std::vector<VkDeviceMemory> memory;   // (a sparse image's)
     VkBuffer buffer = VK_NULL_HANDLE;     // (the BC3 scratch's output buffer: given back with its image)
     VmaAllocation buffer_alloc = nullptr;
-    VkImageCreateInfo ci{};   // (eglantine: sType set: its image may be recycled)
+    VkImageCreateInfo ci{};   // (hookshot: sType set: its image may be recycled)
     uint64_t bytes = 0;
 };
 std::deque<Dead> dead;
-// (eglantine) The images of destroyed textures, kept a few seconds for the next texture made with the same description: the game makes
+// (hookshot) The images of destroyed textures, kept a few seconds for the next texture made with the same description: the game makes
 // and finalizes transient targets every frame (~3.5 a frame outdoors), and making an image and binding its memory was 4% of the replay
 // thread. RX_VK_NO_RECYCLE=1: every image made anew, as before
 struct Spare {
@@ -800,7 +800,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         if (overlaps(dirty, (uint64_t)layer * layer_size + tail0, (uint64_t)(layer + 1) * layer_size)) layers.push_back(layer);
     if (layers.empty()) return true;
     const bool all = layers.size() == tex.layers;
-    // (eglantine) The decoder reads the storage where it is, in its imported pool, as the GPU unswizzle does: the copy into
+    // (hookshot) The decoder reads the storage where it is, in its imported pool, as the GPU unswizzle does: the copy into
     // staging was most of a scene change's replay time on the way to Saria (548 textures, 190 MB in one frame: 99 ms).
     // Only when every layer's whole chain lies in the storage (the decoder must not read past the pool) and no shadow
     // keeps the storage as it was at its submit. RX_VK_ASTC_STAGE=1: staged as before. A source is (buffer, offset of
@@ -838,7 +838,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     if ((st_astc + 1) % 2000 == 0)
         logf("vk: ASTC decodes: %lld, %lld of them read in place in their pool", (long long)(st_astc + 1), (long long)st_astc_direct);
     VkCommandBuffer cmd = upload_cmd();
-    // (eglantine, RX_VK_PASS_TIMING: what a texture's decode costs the GPU; items: its layers, bytes: its ASTC data)
+    // (hookshot, RX_VK_PASS_TIMING: what a texture's decode costs the GPU; items: its layers, bytes: its ASTC data)
     GprofSpan gp(cmd, tex.bc ? "astc>bc3 a texture decoded and re-encoded" : "astc a texture decoded");
     gp.items = (int)layers.size(), gp.bytes = tail * layers.size();
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe);
@@ -1006,7 +1006,7 @@ bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         if (g.offset + (uint64_t)(tex.layers - 1) * tex.L.layer_size + g.swizzled > total) return false;
     }
     VkCommandBuffer cmd = upload_cmd();
-    GprofSpan gp(cmd, "unswizzle a texture unswizzled from its pool");   // (eglantine, RX_VK_PASS_TIMING)
+    GprofSpan gp(cmd, "unswizzle a texture unswizzled from its pool");   // (hookshot, RX_VK_PASS_TIMING)
     gp.bytes = total;
     full_barrier(cmd);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, unsw_pipe);
@@ -1437,7 +1437,7 @@ bool upload(Texture& tex, const Ranges* dirty) {
     if (!copies.empty()) {
         texture_resident_flush(&tex);
         checkpoint_mark(upload_cmd(), tex.gpu, 'u');
-        GprofSpan gp(upload_cmd(), "texcopy a texture's staged copy");   // (eglantine, RX_VK_PASS_TIMING)
+        GprofSpan gp(upload_cmd(), "texcopy a texture's staged copy");   // (hookshot, RX_VK_PASS_TIMING)
         gp.items = (int)copies.size(), gp.bytes = total;
         vkCmdCopyBufferToImage(upload_cmd(), buffer, tex.image, VK_IMAGE_LAYOUT_GENERAL, (uint32_t)copies.size(),
                                copies.data());
@@ -1802,7 +1802,7 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
              x.sparse_req.imageMipTailFirstLod, (unsigned long long)(x.sparse_req.imageMipTailSize >> 10),
              x.sparse_req.formatProperties.flags & VK_SPARSE_IMAGE_FORMAT_SINGLE_MIPTAIL_BIT ? ", one for all layers" : " a layer");
     } else if (![&] {
-                   if (recycle_on())   // (eglantine) a spare image of the same description first
+                   if (recycle_on())   // (hookshot) a spare image of the same description first
                        for (size_t i = spares.size(); i-- > 0;)
                            if (same_image(spares[i].ci, ci)) {
                                x.image = spares[i].image, x.allocation = spares[i].allocation;
@@ -1812,7 +1812,7 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
                                return true;
                            }
                    st_fresh++;
-                   // (eglantine, RX_VK_ASSET_POOL=1) the game's assets (ASTC and other block-compressed textures) apart from what
+                   // (hookshot, RX_VK_ASSET_POOL=1) the game's assets (ASTC and other block-compressed textures) apart from what
                    // is rendered (vk_vma.cpp image_pool_hint): long-lived textures and render targets remade at each
                    // dynamic-resolution step shared 128 MB blocks, which kept ~1.9 GB free and counted (hs195)
                    image_pool_hint = (astc || is_bc(vf) || is_astc(vf)) ? 1 : 0;
@@ -1833,7 +1833,7 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
                  x.levels, (int)x.format, d.format);
         return nullptr;
     }
-    if (!x.sparse) x.ci = ci;   // (eglantine: its image may be recycled once the texture goes)
+    if (!x.sparse) x.ci = ci;   // (hookshot: its image may be recycled once the texture goes)
     // what it costs: the level chain's texels
     uint64_t px = 0;
     for (uint32_t l = 0; l < x.levels; l++)
@@ -1890,7 +1890,7 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
         storage_recent.push_back({p->gpu, p->gpu + std::max<uint64_t>(p->guest_size, 1)});
     if (tl_prefetching) p->prefetched_frame = frame_no;
     else if (!pf_evicted_gpu.empty() && pf_evicted_gpu.erase(p->gpu)) st_pf_remade++;
-    {   // (eglantine, diagnostic: RX_VK_LOG_PREFETCH=1) a frame that makes many textures: how long before had each been registered
+    {   // (hookshot, diagnostic: RX_VK_LOG_PREFETCH=1) a frame that makes many textures: how long before had each been registered
         static const bool on = getenv("RX_VK_LOG_PREFETCH") != nullptr;
         static uint64_t at_frame = ~0ull;
         static int64_t hist[8], mb[8], n;
@@ -1988,7 +1988,7 @@ void full_barrier(VkCommandBuffer cmd, const char* why) {
     last_barrier_cmd = cmd, last_barrier_epoch = work_epoch.load(std::memory_order_relaxed);
 }
 
-// (eglantine) Scene changes made hundreds of textures in one frame (leaving the house: 562 textures in frame 2702, the way to
+// (hookshot) Scene changes made hundreds of textures in one frame (leaving the house: 562 textures in frame 2702, the way to
 // Saria: 329, then 431 at her cutscene): the replay and the GPU's ASTC decodes took that frame to 60-110 ms. Nearly all of them
 // had been registered by the game more than 30 frames before their first draw (hs176, RX_VK_LOG_PREFETCH). So each new
 // registered texture object is queued (vk_bank.cpp) and, at the start of a recording, once a frame, a few compressed ones
@@ -2133,7 +2133,7 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     tex->last_frame = frame_no;
     tex->last_value = rec_value;
     if (!for_sampling) return tex;
-    // (eglantine, 12/11) A finalized image the GPU drew that the operation being replayed is about to write (a draw's own
+    // (hookshot, 12/11) A finalized image the GPU drew that the operation being replayed is about to write (a draw's own
     // render target bound as one of its textures too, a copy's or a texture clear's destination): left as it is. Below, such an
     // image whose storage was written since it was finalized is uploaded from the game's memory; the marks on a transient
     // target's storage are the GPU's own (the heap it lives in), and the game's memory has none of its texels. OoT's linear
@@ -2168,7 +2168,7 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     // sharing an edge page once re-uploaded garbage over a drawn LUT (the rainbow sky). Opt-in (RX_VK_CPU_OVER_GPU=1): transient render targets share memory the CPU writes for other things, and took that over their texels, and the menus' letters stayed missing with it.
     if (tex->gpu_written && !tex->released) {
         // (hookshot) and a texture the GPU only cleared: the game's font cache, whose letters the CPU writes as text appears. Its menu text
-        // went missing at random (Hookshot issues 40 and 44), whenever the clear reached the image first
+        // went missing at random (upstream issues 40 and 44), whenever the clear reached the image first
         static const bool take = getenv("RX_VK_CPU_OVER_GPU") != nullptr;
         if ((!take && !tex->only_cleared) || tex->checked_epoch == epoch) return tex;
         tex->checked_epoch = epoch;
@@ -2310,7 +2310,7 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
                  "%llu KB dirty in %zu ranges%s", tex->id, (unsigned long long)tex->gpu, tex->width, tex->height, tex->depth,
                  tex->layers, tex->nvn_format, (unsigned long long)(frame_no - 1), (unsigned long long)frame_no,
                  tex->released ? "finalized" : "live", (unsigned long long)kb, dirty.size(), gpu_dirty ? ", a GPU buffer wrote it" : "");
-        // (eglantine, 12/11, diagnostic, RX_VK_PASS_TRACE=1: where in the frame's stream it falls, and the passes around it
+        // (hookshot, 12/11, diagnostic, RX_VK_PASS_TRACE=1: where in the frame's stream it falls, and the passes around it
         // written to upl_<frame>_passes.txt: vk_replay.cpp)
         if (pass_trace_on()) {
             trace_line("UPLOAD over drawn #%u %#llx %ux%u f%#x %s, %llu KB dirty%s, drawn at frame %llu, uploaded gen %u, "
@@ -2770,7 +2770,7 @@ void texture_describe_written(uint64_t lo, uint64_t size, std::string& out) {
     if (n > 6) out += " (" + std::to_string(n) + " in all)";
 }
 
-/// (eglantine, RX_VK_WB_LAZY) A texture's storage lies in [gpu, gpu + size): what a program writes there through a buffer may be
+/// (hookshot, RX_VK_WB_LAZY) A texture's storage lies in [gpu, gpu + size): what a program writes there through a buffer may be
 /// uploaded from guest memory again (gpu_wrote_into), so the write-back of that range cannot wait for the frame's end. The
 /// storage of every texture alive when the frame began (a texture gone since only makes the answer careful) and of those made since
 bool texture_storage_overlaps(uint64_t gpu, uint64_t size) {
@@ -2862,7 +2862,7 @@ void texture_written(Texture* tex) {
         if (logged++ < 20) logf("vk: sparse texture %#llx written by the GPU (#%u)", (unsigned long long)tex->gpu, tex->id);
     }
     watch_tex(tex, "written");
-    if (tex->width >= 1024 && pass_trace_on())   // (eglantine, diagnostic: the writes of the wide images, in stream order)
+    if (tex->width >= 1024 && pass_trace_on())   // (hookshot, diagnostic: the writes of the wide images, in stream order)
         trace_line("written #%u %#llx %ux%u f%#x%s%s", tex->id, (unsigned long long)tex->gpu, tex->width, tex->height,
                    tex->nvn_format, tex->released ? " (was finalized)" : "", tex->gpu_written ? "" : " (first write)");
     if (!tex->gpu_written || tex->released) tex->first_written = frame_no;
@@ -3180,7 +3180,7 @@ VkBufferView texel_buffer_view(const nvn_tex* t, const nvn_view* v, bool storage
     return bv;
 }
 
-const Texture* presented[4];   // (eglantine: the last presents' textures, which the defragmentation leaves where they are)
+const Texture* presented[4];   // (hookshot: the last presents' textures, which the defragmentation leaves where they are)
 Texture* texture_for_present(const nvn_tex* t) {
     Texture* tex = texture_get(t, false);
     Texture* best = nullptr;   // (one rendered at its storage in another description)
@@ -3196,7 +3196,7 @@ Texture* texture_for_present(const nvn_tex* t) {
     return r;
 }
 
-// (eglantine, RX_VK_DEFRAG=<MB a pass>, default 32, 0: off) The image pool defragmented (vk_vma.cpp says why): at a submission's first
+// (hookshot, RX_VK_DEFRAG=<MB a pass>, default 32, 0: off) The image pool defragmented (vk_vma.cpp says why): at a submission's first
 // recording, nothing recorded yet, a pass's images are made again in the free space VMA picked, their contents copied by the
 // upload command buffer (after the work before, before this recording's), and the texture's image and views swapped. The old
 // image and views go once the GPU passed the next present, and VMA then frees the blocks that emptied. Spare images in the way
@@ -3464,10 +3464,10 @@ void texture_frame(uint64_t completed) {
         }
     }
     bc_scratch_idle();
-    // (eglantine) at most RX_VK_DESTROY_PER_FRAME (default 24) dead textures a frame, the rest at the next ones: the sweep every 600
+    // (hookshot) at most RX_VK_DESTROY_PER_FRAME (default 24) dead textures a frame, the rest at the next ones: the sweep every 600
     // frames retired ~300 at once outdoors, and their destruction (kernel calls each) was a 15-30 ms hitch every 10 s
     static const int per_frame_cfg = getenv("RX_VK_DESTROY_PER_FRAME") ? std::max(1, atoi(getenv("RX_VK_DESTROY_PER_FRAME"))) : 24;
-    // (eglantine) VRAM within 5% of what the driver allows, or past it: the dead go without the cap and none is kept as a spare. The
+    // (hookshot) VRAM within 5% of what the driver allows, or past it: the dead go without the cap and none is kept as a spare. The
     // village centre's streaming (hs381) retired ~800 textures in 2 s while making 1.5 GB of new ones; freed 24 a frame, VRAM ran to
     // 8077 MB of 7238 allowed, the driver paged it out and frames took 64 ms for 6 s, which freed even fewer a second.
     // RX_VK_TIGHT_FREE=0: the cap always, as before
@@ -3484,7 +3484,7 @@ void texture_frame(uint64_t completed) {
         destroyed++;
         for (VkImageView v : it->views) vkDestroyImageView(dev.device, v, nullptr);
         if (!tight && recycle_on() && it->ci.sType == VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO && it->image && it->memory.empty() && it->bytes <= kSpareBytes / 4) {
-            spares.push_back({it->ci, it->image, it->allocation, frame_no, it->bytes});   // (eglantine: kept for the next of its kind)
+            spares.push_back({it->ci, it->image, it->allocation, frame_no, it->bytes});   // (hookshot: kept for the next of its kind)
             spare_bytes += it->bytes;
         } else {
             destroy_image(it->image, it->allocation);
@@ -3493,7 +3493,7 @@ void texture_frame(uint64_t completed) {
         for (VkDeviceMemory m : it->memory) vkFreeMemory(dev.device, m, nullptr);
         it = dead.erase(it);
     }
-    // (eglantine) spare images: none kept over 300 frames, nor past kSpareBytes (the oldest go first)
+    // (hookshot) spare images: none kept over 300 frames, nor past kSpareBytes (the oldest go first)
     for (size_t i = 0; i < spares.size();) {
         if ((frame_no - spares[i].frame > 300 || spare_bytes > kSpareBytes || tight) && destroyed < per_frame) {
             destroyed++;
@@ -3549,7 +3549,7 @@ void texture_frame(uint64_t completed) {
         const uint64_t over = pressure - allowed / 10 * 9;
         budget = std::min(budget, total_bytes > over ? total_bytes - over : 0);
     }
-    // (eglantine) not while the blocks hold much free: evicting then frees space inside them, not what the driver counts, so the
+    // (hookshot) not while the blocks hold much free: evicting then frees space inside them, not what the driver counts, so the
     // squeeze came back 10 frames later. Outdoors in OoT (VRAM 7.18 of 7.26 GB, 1.5 GB of it free in the blocks) the same textures
     // went and were made, decoded and uploaded again every few frames: an upload hitch every 40 frames. New images take the
     // blocks' free space first. RX_VK_SQUEEZE_FREE_MB: the free space under which it squeezes (default 512)
@@ -3557,7 +3557,7 @@ void texture_frame(uint64_t completed) {
     // (past what the driver allows, it squeezes anyway, gently: only textures unused for 64 presents go, below)
     const bool hard_short = known && pressure > allowed / 10 * 9;
     bool squeezed = false;
-    // (eglantine, RX_VK_SQUEEZE_FUTILE=1, experiment) past what the driver allows but with the excess free inside the blocks
+    // (hookshot, RX_VK_SQUEEZE_FUTILE=1, experiment) past what the driver allows but with the excess free inside the blocks
     // already, evicting frees space in the blocks again, not what the driver counts: outdoors (hs186: 7.5 of 7.25 GB, 1-1.6 GB
     // free in the blocks) it squeezed every 10 frames, ~17000 textures evicted in 300 s, textures in use made again
     static const bool futile_skip = getenv("RX_VK_SQUEEZE_FUTILE") && atoi(getenv("RX_VK_SQUEEZE_FUTILE")) != 0;
@@ -3642,14 +3642,14 @@ void texture_frame(uint64_t completed) {
              verify_dim().second, checked, changed, missed);
     }
     static const bool no_evict = getenv("RX_VK_NO_EVICT") != nullptr;   // (an experiment: nothing evicted)
-    // (eglantine) A gentle trim, before the driver's limit: past RX_VK_TRIM_PCT (default 88) of what the driver allows, once a second,
+    // (hookshot) A gentle trim, before the driver's limit: past RX_VK_TRIM_PCT (default 88) of what the driver allows, once a second,
     // textures nothing used for 600 presents (10 s) that guest memory can make again (not what the GPU wrote) go, oldest first,
     // until 3 points under it. Textures grew to the 5 GB budget over a quarter of an hour in the player's Kokiri Forest, VRAM went
     // past what the driver allows (7.7 of 7.3 GB), and the squeeze then evicted textures used 8 presents before: 1000-3000 made
     // again every 5 s, 33-50 fps. Space freed inside the blocks goes back to the driver through the defragmentation. 0: off
     {
         static const int trim_pct = getenv("RX_VK_TRIM_PCT") ? std::clamp(atoi(getenv("RX_VK_TRIM_PCT")), 0, 99) : 88;
-        // (eglantine, 11/11) and past RX_VK_TRIM_HARD_PCT (off by default; 93 was tried), three times a second, those unused
+        // (hookshot, 11/11) and past RX_VK_TRIM_HARD_PCT (off by default; 93 was tried), three times a second, those unused
         // for 180 presents (3 s): arriving in an area, the textures of the one left were kept their 10 s while the new ones
         // loaded, VRAM went past what the driver allows (7.5 of 7.27 GB, hs1112) and the squeeze at 97 % then took textures
         // used a second before. MEASURED with 93 (hs1170, 8 areas at 75 %): 27 such trims, the peak the same (7523 MB), as
@@ -3695,7 +3695,7 @@ void texture_frame(uint64_t completed) {
     // sweep or the budget, ~200 dead ones (1.2 GB) filled an 8 GB card's VRAM in Hyrule Field, the driver paged it out and the
     // GPU's frame went from 15 to 35 ms. RX_VK_DEAD_TARGETS=0: as before
     static const bool dead_targets = !getenv("RX_VK_DEAD_TARGETS") || atoi(getenv("RX_VK_DEAD_TARGETS")) != 0;
-    // (eglantine, 10/11 22:00) and every 4 presents while images are being made in numbers (32 and more since the last pass): in
+    // (hookshot, 10/11 22:00) and every 4 presents while images are being made in numbers (32 and more since the last pass): in
     // Hyrule Castle Town's market, while the camera turns, the game's transient heap shifts every frame and ~20 targets a frame
     // are new images (27 384 x 384 depth targets, the screen-sized ones, a square depth target whose size changes by a pixel
     // or two a frame). Their old images, dead at once, waited up to 60 presents for this pass, so none was a spare when the

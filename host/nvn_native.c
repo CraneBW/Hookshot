@@ -139,7 +139,7 @@ int nvn_gpu_write(uint64_t gpu, const void *src, uint64_t n) {
 /* ---- device ---- */
 static volatile LONG depth_minus_w = 1;   /* (OoT's mode from the start: the shaders prepared before the game made its device were
                                             translated without the depth conversion, and the menu's text and logo fell outside the depth range
-                                            on a first start. d3zessete, Hookshot PR 54) */
+                                            on a first start. d3zessete, upstream PR 54) */
 int nvn_depth_minus_w(void) { return depth_minus_w != 0; }
 uint64_t nvn_native_proc(const char *name);
 
@@ -963,7 +963,7 @@ static int set_shaders(nvn_prog *o, int n, const uint8_t *sd, int stride) {
         }
     }
     o->serial = new_serial();
-    /* (eglantine) a compute program (one stage, its control section's stage 5): its pipeline made ahead, on the back end's workers */
+    /* (hookshot) a compute program (one stage, its control section's stage 5): its pipeline made ahead, on the back end's workers */
     if (n == 1 && o->sd[0].control) {
         uint16_t st = 0;
         memcpy(&st, (const uint8_t *)GP(o->sd[0].control) + 0x56, 2);
@@ -1201,7 +1201,7 @@ NV(nvnCommandBufferInitialize) {
     RET(1);
 }
 static volatile LONG64 seg_bytes, seg_count;   /* (the command buffers' segments, for the recordings' log line) */
-/* (eglantine) A segment's block starts with room for a recording copy's prefix (copy_prefix, below: SEG_PREFIX bytes), its
+/* (hookshot) A segment's block starts with room for a recording copy's prefix (copy_prefix, below: SEG_PREFIX bytes), its
    records after it: EndRecording hands a big recording's whole block over as its copy instead of copying it (see there). */
 #define SEG_PREFIX 24
 static uint8_t *seg_block(const nvn_cmd *o) { return o->seg - SEG_PREFIX; }
@@ -1447,7 +1447,7 @@ NV(nvnCommandBufferEndRecording) {
     put_hdr(p, NOP_END, 8);
     o->hw_used -= 8;
     o->recording = 0;
-    /* (eglantine) A big recording's segment is its copy: the block is handed over as it is (its prefix filled in) and the
+    /* (hookshot) A big recording's segment is its copy: the block is handed over as it is (its prefix filled in) and the
        command buffer takes a new one of the same size at its next record. OoT's main thread ends the frame's big recordings
        (~2 MB of records in the Kokiri village, 2850 draws) between the frame's command generation and its submits: copying
        them was ~0.5 ms of every frame on that thread, 2.5 % of the frame (hs800: 273 of its 359 memcpy samples). Only a
@@ -2327,7 +2327,7 @@ NV(nvnWindowGetCrop) {
     }
     r->x = o->crop[0], r->y = o->crop[1], r->width = o->crop[2], r->height = o->crop[3];
 }
-/* (eglantine, HOS_FRAMES_AHEAD=<n>, experiment; unset or 0: off) the game at most n frames ahead of the GPU: an acquire waits
+/* (hookshot, HOS_FRAMES_AHEAD=<n>, experiment; unset or 0: off) the game at most n frames ahead of the GPU: an acquire waits
    until the GPU finished what was submitted by the present n presents back. On the console an acquire blocks while every
    window texture waits for display, which holds its CPU near its GPU; here the acquire's sync is signaled at once and the
    limiter paces by time alone, so in heavy views the game may run frames ahead of the replay and rewrite data it has yet to

@@ -782,7 +782,7 @@ def main():
             # (what the code takes for granted, which newer C++ libraries bring in by themselves and older ones do not: issue 48)
             "-include", "algorithm", "-include", "cstdio", "-include", "cstdlib", "-include", "cstring", "-include", "functional",
             "-include", "string", "-include", "vector",
-            # (eglantine, RX_VK_DEBUGINFO=1: CodeView line tables and a PDB for the back end, for line-level profiles; same code)
+            # (hookshot, RX_VK_DEBUGINFO=1: CodeView line tables and a PDB for the back end, for line-level profiles; same code)
             "-std=c++20", "-O2", "-gcodeview" if os.environ.get("RX_VK_DEBUGINFO") == "1" else "-g0", "-DNDEBUG", "-Wno-everything", "-DVK_NO_PROTOTYPES", "-DMKWVK_BUILDING",
             *(["-DHOOKSHOT_RELEASE"] if os.environ.get("RX_RELEASE") == "1" else []),   # (the shaders precompiled before the game)
             # (Eden's recompiler before suyu's root: suyu has its own shader_recompiler/ headers, and a Shader::Info
@@ -805,7 +805,7 @@ def main():
                                    os.path.join(GPU, "compat"))
         vdeps = tree_headers(vk, os.path.join(GPU, "render"), os.path.join(GPU, "compat"),
                              os.path.join(GPU, "third_party", "suyu", "video_core", "textures"))
-        # (eglantine) RX_VK_PGO=gen: the back end's own files (not Eden's recompiler nor sirit) count their branches, and host/pgo_rt.c
+        # (hookshot) RX_VK_PGO=gen: the back end's own files (not Eden's recompiler nor sirit) count their branches, and host/pgo_rt.c
         # in the DLL writes them (RX_VK_PGO_FILE=<path>, <path>.reset and <path>.dump as HOS_PGO's); RX_VK_PGO=<merged .profdata>:
         # built with that profile. The replay on the game's render thread is the frame's limit in heavy places (Kokiri village)
         vk_pgo = os.environ.get("RX_VK_PGO", "")

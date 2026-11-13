@@ -155,7 +155,7 @@ int hos_vk_take_key_press(int key) {
 #define host_take_key_press NULL
 #endif
 
-/* (eglantine) the game's freed address space inside [lo, hi), decommitted (hos_mem.c): the back end's ranges no import holds */
+/* (hookshot) the game's freed address space inside [lo, hi), decommitted (hos_mem.c): the back end's ranges no import holds */
 uint64_t hos_region_release_gaps(uint64_t lo, uint64_t hi);
 static uint64_t host_region_release_gaps(uint64_t lo, uint64_t hi) { return hos_region_release_gaps(lo, hi); }
 
@@ -231,7 +231,7 @@ static void flush_early(void) {
     ReleaseSRWLockExclusive(&early_lock);
 }
 
-static void (*program_set_fn)(const nvn_prog *p);   /* (eglantine) hookshot_vk.dll's hookshot_program_set, when there */
+static void (*program_set_fn)(const nvn_prog *p);   /* (hookshot) hookshot_vk.dll's hookshot_program_set, when there */
 /* dll: mkw_vk.dll (our Vulkan back end) or mkw_eden.dll (Eden's renderer driven natively, gpu/eden): one export */
 static const MkwVkRenderer *load_vulkan(const char *dll) {
     char path[MAX_PATH];
@@ -246,7 +246,7 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     }
     vk_module = m;
     mkwvk_init_fn init = (mkwvk_init_fn)(void *)GetProcAddress(m, "mkwvk_init");
-    /* (eglantine) the back end's own extra entry, when it has it: compute programs made ahead of their first dispatch */
+    /* (hookshot) the back end's own extra entry, when it has it: compute programs made ahead of their first dispatch */
     program_set_fn = (void (*)(const nvn_prog *))(void *)GetProcAddress(m, "hookshot_program_set");
     const MkwVkRenderer *r = init ? init(&vk_host) : NULL;
     if (!r || r->version != MKWVK_API_VERSION) {
@@ -437,7 +437,7 @@ int rx_guest_imported(uint64_t lo, uint64_t hi) {
     if (away) hos_vcore_back();
     return r;
 }
-/* (eglantine, hos_mem.c: the game freed the address region [lo, hi)) the back end takes the range and, at its next
+/* (hookshot, hos_mem.c: the game freed the address region [lo, hi)) the back end takes the range and, at its next
    submission, has the host decommit what no import holds of it (a short list lock: no wait on the replay) */
 void rx_guest_release(uint64_t lo, uint64_t hi) {
     if (vk && vk->guest_release) vk->guest_release(lo, hi);

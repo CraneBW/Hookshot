@@ -352,7 +352,7 @@ void dump_image(VkCommandBuffer cmd, Texture* tex, uint32_t level, uint32_t laye
         seq++;
         return;
     }
-    {   // (eglantine, RX_VK_DUMP_Z=<z>[,<z>...]: a 3D image's slices z, each its own picture, instead of slice 0)
+    {   // (hookshot, RX_VK_DUMP_Z=<z>[,<z>...]: a 3D image's slices z, each its own picture, instead of slice 0)
         static const std::vector<uint32_t> zs = [] {
             std::vector<uint32_t> v;
             if (const char* e = getenv("RX_VK_DUMP_Z"))

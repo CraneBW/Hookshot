@@ -1344,7 +1344,7 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
     }};
     // (hookshot) the helpers below are DontInline: inlined at each of a culling program's hundreds of global accesses, with EvilOOT's
     // fuller buffer search, NVIDIA's compiler took 41 s on 53caac5f and the driver reset. Lichii PR 408 found the same (161 s for 68 programs)
-    // (eglantine, after Fritchii 151c77c85, which found them ~2.6 fps faster inlined in Hyrule Field) EDEN_NX2_INLINE_GLOBALS=1: the
+    // (hookshot, after Fritchii 151c77c85, which found them ~2.6 fps faster inlined in Hyrule Field) EDEN_NX2_INLINE_GLOBALS=1: the
     // graphics stages inline them (the forest's geometry passes call them in their mesh stages, per vertex), compute keeps
     // DontInline; =2: inlined everywhere. Off by default: tried as the default (hs349), the driver compiled the house's pipelines
     // for 28.5 + 9.8 + 7.1 s at their first draws after the preparation, and the house's GPU time went up (8.9 -> 9.4 ms)
@@ -1877,7 +1877,7 @@ void EmitContext::DefineStorageBuffers(const Info& info, u32& binding) {
         decrement_cas_ssbo = CasLoop(*this, Operation::Decrement, storage_types.U32.array,
                                      storage_types.U32.element, U32[1], spv::Scope::Device);
     }
-    if (info.uses_atomic_f32_add && profile.support_float32_atomic_add) {   // (eglantine: emit_spirv_atomic.cpp)
+    if (info.uses_atomic_f32_add && profile.support_float32_atomic_add) {   // (hookshot: emit_spirv_atomic.cpp)
         AddExtension("SPV_EXT_shader_atomic_float_add");
         AddCapability(spv::Capability::AtomicFloat32AddEXT);
     }

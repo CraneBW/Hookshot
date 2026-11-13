@@ -68,7 +68,7 @@ static void no_power_throttling(void) {
 }
 #endif
 
-/* (eglantine) HOS_PROCESS_PRIORITY=0 normal, 1 above normal (default), 2 high: the process's own priority class while it runs (Windows puts
+/* (hookshot) HOS_PROCESS_PRIORITY=0 normal, 1 above normal (default), 2 high: the process's own priority class while it runs (Windows puts
    it back when it exits). The game's threads run at the normal level, as the foreground window's threads do, and Windows raises
    those for a while on their window's events: on the terrace the 40-90 ms stalls came with another app's interface busy
    (its renderer 53 % of a core in the seconds with a stall against 6 % otherwise, hs205), the game's threads waiting, its
@@ -1229,7 +1229,7 @@ static int game_main(int argc, char **argv) {
     const char *protect_hearts = getenv("HOS_OOT_PROTECT_HEARTS");
     hos_oot_protect_hearts = protect_hearts && !strcmp(protect_hearts, "1");
     {   // (the whole process, not only the window's thread: the renderer asks the window's size from its own, and on a 4K screen at 150%
-        // Windows answered such a thread 2560 x 1440: the picture was that size, in the corner of the window. Hookshot issues 15, 18, 20)
+        // Windows answered such a thread 2560 x 1440: the picture was that size, in the corner of the window. upstream issues 15, 18, 20)
         typedef BOOL(WINAPI * SetAware)(void *);
         SetAware set = (SetAware)(void *)GetProcAddress(GetModuleHandleA("user32.dll"), "SetProcessDpiAwarenessContext");
         if (set && !getenv("HOS_DPI_UNAWARE")) set((void *)(intptr_t)-4);

@@ -1135,7 +1135,7 @@ def main(a=None):
         # (hookshot) a compile or link that failed forgets the lift: the next build translates the game again. A lifted file cut short
         # (an antivirus, a full disk, a stopped run: "g_module_b" for g_module_base, issue 1197) or lifted C another builder left (20
         # undefined game functions at the link, issue 1176) otherwise failed the same way at every try, the key still matching
-        # (eglantine, 13/11: not with HOOKSHOT_KEEP_BUILD_FILES=1, a developer's incremental builds: a compile error in one file of
+        # (hookshot, 13/11: not with HOOKSHOT_KEEP_BUILD_FILES=1, a developer's incremental builds: a compile error in one file of
         # the Vulkan back end threw away the game's 445 compiled units, 48 minutes to build them again, twice in one night)
         if os.environ.get("HOOKSHOT_KEEP_BUILD_FILES", "0") not in ("", "0"):
             print("the build failed: its lifted code and objects are kept (HOOKSHOT_KEEP_BUILD_FILES=1)", flush=True)
@@ -1155,10 +1155,10 @@ def main(a=None):
     built = os.path.join(work, "sa", "build")
     # (the new files are copied in beside the old ones as <name>.new and swapped in only once all are complete: a build stopped while
     # copying, or a full disk, left a half-written 460 MB hookshot.exe and no game to play. The old game stays playable until the swap)
-    # (Windows) hookshot.exe in the folder is the game's launcher: the builder's small setup, which opens the installed builder as a
-    # launcher for this folder (Play, and Update left of it when a newer release is out: builder/setup/setup.c launch mode), or starts
-    # the game when no builder is installed. The game and its DLLs are in bin\; its files (image.bin, romfs, saves, settings, caches)
-    # stay in the folder (host/hos_paths.h). Without the setup (a development build) the game stays hookshot.exe in the folder
+    # (Windows) Hookshot.exe in the folder is the game's launcher: the small setup, which opens the installed launcher for this
+    # folder (Play, the settings, and Update when a newer release is out: launcher/setup/setup.c launch mode), or starts the game
+    # when no launcher is installed. The game (hookshot.exe) and its DLLs are in bin\; its files (image.bin, romfs, saves,
+    # settings, caches) stay in the folder (host/hos_paths.h). Without the setup (a development build) hookshot.exe is in the folder
     staged = []
     # (Linux) the same launcher, as a script, when this is a packaged builder (the AppImage sets HOOKSHOT_TOOLS). A source
     # checkout leaves hookshot in the folder, as a development build on Windows does when the setup exe is not beside it
@@ -1195,7 +1195,7 @@ def main(a=None):
                  "Staged replacements remain beside the installed files; the compiled source remains at %s." % (dst, src))
     if launcher:   # (a folder built before the launcher: its libraries left the folder for bin\; hookshot is the launcher now)
         stale = [] if LINUX else sorted(f for f in os.listdir(out) if f.endswith(".dll") and f.startswith(("av", "sw")))
-        for n in BESIDE + stale + ["hookshot.map", "hookshot-game.exe"]:
+        for n in BESIDE + stale + ["hookshot.map", "hookshot.exe"]:
             try:
                 if os.path.isfile(os.path.join(out, n)):
                     os.remove(os.path.join(out, n))

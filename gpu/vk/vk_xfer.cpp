@@ -60,7 +60,7 @@ bool resolve(const nvn_tex* t, const nvn_view* v, bool has_v, const NVNcopyRegio
     if (!t || !t->gpu) return false;
     const nvn_view* view = has_v ? v : nullptr;
     if (dst) {
-        // (eglantine, 12/11) a destination the GPU drew and the game finalized is not uploaded over from the game's memory
+        // (hookshot, 12/11) a destination the GPU drew and the game finalized is not uploaded over from the game's memory
         // first (vk_texture.cpp texture_touch): a copy or a clear of part of it kept the rest as that memory had it. One the
         // CPU filled is uploaded as before: a copy into part of it needs the rest
         Texture* w = texture_get(t, false);
@@ -221,7 +221,7 @@ void copy_b2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_bt& p, bool to
         warn(5, "copy of a buffer into a depth-stencil texture: skipped");
         return;
     }
-    if (pass_trace_on())   // (eglantine, diagnostic)
+    if (pass_trace_on())   // (hookshot, diagnostic)
         trace_line("copy %s #%u %#llx %ux%u f%#x%s, buffer %#llx (guest %#llx), %llu bytes", to_image ? "b2t" : "t2b", s.tex->id,
                    (unsigned long long)s.tex->gpu, s.tex->width, s.tex->height, s.tex->nvn_format, s.tex->released ? " (finalized)" : "",
                    (unsigned long long)p.buf, (unsigned long long)host->gpu_guest(p.buf), (unsigned long long)size);
@@ -256,7 +256,7 @@ void copy_t2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_tt& p) {
                  d.w, d.h, p.flags);
     }
     log_big_copy("texture", d.tex, d.level, d.layer, d.x, d.y, d.w, d.h, s.tex->gpu);
-    if (pass_trace_on())   // (eglantine, diagnostic: the copies in the frame's pass trace)
+    if (pass_trace_on())   // (hookshot, diagnostic: the copies in the frame's pass trace)
         trace_line("copy t2t #%u %#llx %ux%u f%#x%s -> #%u %#llx %ux%u f%#x%s", s.tex->id, (unsigned long long)s.tex->gpu,
                    s.tex->width, s.tex->height, s.tex->nvn_format, s.tex->released ? " (finalized)" : "", d.tex->id,
                    (unsigned long long)d.tex->gpu, d.tex->width, d.tex->height, d.tex->nvn_format, d.tex->released ? " (finalized)" : "");
@@ -332,7 +332,7 @@ void clear_tex(VkCommandBuffer cmd, NvnState& st, const nvn_p_clear_tex& p) {
     const uint32_t lw = std::max(1u, s.tex->width >> s.level), lh = std::max(1u, s.tex->height >> s.level);
     const bool whole = !s.x && !s.y && s.w == lw && s.h == lh;
     if ((p.mask & 0xf) != 0xf && (s.tex->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) warn(8, "texture clear with a channel mask: cleared whole");
-    if (pass_trace_on())   // (eglantine, diagnostic)
+    if (pass_trace_on())   // (hookshot, diagnostic)
         trace_line("clear tex #%u %#llx %ux%u f%#x%s", s.tex->id, (unsigned long long)s.tex->gpu, s.tex->width, s.tex->height,
                    s.tex->nvn_format, s.tex->released ? " (finalized)" : "");
     end_pass(cmd);

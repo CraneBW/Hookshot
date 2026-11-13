@@ -246,7 +246,7 @@ void rx_nvn_set_texture_pool_size(int n);
 void rx_nvn_texture_released(const nvn_tex *t);
 void rx_nvn_texture_created(const nvn_tex *t);
 void rx_nvn_program_released(const nvn_prog *p);
-/* (eglantine) the game set a program's shaders: the Vulkan back end makes a compute program's pipeline ahead (gpu/vk vk_draw.cpp) */
+/* (hookshot) the game set a program's shaders: the Vulkan back end makes a compute program's pipeline ahead (gpu/vk vk_draw.cpp) */
 void rx_nvn_program_set(const nvn_prog *p);
 /* CPU reads / writes of a texture (ReadTexels / WriteTexels) */
 void rx_nvn_read_texels(const nvn_tex *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, uint8_t *dst,

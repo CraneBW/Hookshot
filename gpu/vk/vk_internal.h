@@ -57,8 +57,8 @@ struct Device {
          sparse_buffers = false, // (sparse-bound buffers on the queue: a pool imported as several dma-bufs)
          view_2d_of_3d = false, // (VK_EXT_image_2d_view_of_3d: a 3D texture a 2D sample instruction reads)
          coop_matrix = false,   // (VK_KHR_cooperative_matrix with its feature)
-         max_reconvergence = false,   // (eglantine, EDEN_NX2_MAXRECONV=1: VK_KHR_shader_maximal_reconvergence with its feature)
-         float_atomic_add = false,    // (eglantine: VK_EXT_shader_atomic_float, buffer float32 adds)
+         max_reconvergence = false,   // (hookshot, EDEN_NX2_MAXRECONV=1: VK_KHR_shader_maximal_reconvergence with its feature)
+         float_atomic_add = false,    // (hookshot: VK_EXT_shader_atomic_float, buffer float32 adds)
          native_mma = false;    // (HMMA on it: the cooperative matrix test passed, vk_coopmat.cpp)
     bool eds3_polygon = false, eds3_clamp = false, eds3_blend = false, eds3_a2c = false;
     bool mesh_fallback = false;   // (hookshot) no VK_EXT_mesh_shader: task and mesh programs as compute shaders (vk_shader.cpp)
@@ -115,7 +115,7 @@ bool probe_serial();
 void probe_dump_all(const char* why);
 void probe_log(uint64_t frame);
 void memory_end_submission(VkCommandBuffer cmd);
-/// (eglantine, RX_VK_WB_LAZY) pages whose write-back was put off wait for the frame's flush; and that flush queued into the
+/// (hookshot, RX_VK_WB_LAZY) pages whose write-back was put off wait for the frame's flush; and that flush queued into the
 /// recording being made (between its memory_begin_submission and memory_end_submission)
 bool memory_wb_pending();
 void memory_wb_flush_queue();
@@ -134,7 +134,7 @@ void checkpoint_mark(VkCommandBuffer cmd, uint64_t key, char kind);
 /// what they share (textures and their uploads, programs, pipelines, samplers, pools and memory stamps) is used under
 /// one lock; the per-draw caches are each thread's own
 extern std::atomic<bool> par_active;
-// (eglantine) set by dispatch() when it records one of OoT's exposure programs (vk_draw.cpp: the sky light sums): the parallel
+// (hookshot) set by dispatch() when it records one of OoT's exposure programs (vk_draw.cpp: the sky light sums): the parallel
 // replay keeps such a command buffer on one thread (vk_replay.cpp replay_handle)
 extern thread_local bool replay_saw_exposure;
 extern std::atomic<int64_t> par_lock_wait_ns, par_locks;   // (contention: the time threads waited for it)
@@ -159,12 +159,12 @@ struct ParLock {
 void memory_pool_created(uint64_t gpu, uint64_t size);
 /// Whether guest memory in [lo, hi) is in an imported pool, live or retired (the GPU may read or write it)
 int memory_guest_imported(uint64_t lo, uint64_t hi);
-/// (eglantine) The newest write-back of guest [guest, guest + size) the GPU is past (`done`), 0 when none is known (vk_memory.cpp)
+/// (hookshot) The newest write-back of guest [guest, guest + size) the GPU is past (`done`), 0 when none is known (vk_memory.cpp)
 uint64_t memory_readback_landed(uint64_t guest, uint64_t size, uint64_t done, uint64_t* pending);
-/// (eglantine) The game freed the address region [lo, hi): what no import holds of it is decommitted (vk_memory.cpp)
+/// (hookshot) The game freed the address region [lo, hi): what no import holds of it is decommitted (vk_memory.cpp)
 void memory_guest_release(uint64_t lo, uint64_t hi);
 void memory_stats(int64_t* mirrors, uint64_t* mirror_mb, int64_t* sync_bytes, int64_t* sync_copies, int64_t* wb_bytes);
-/// (eglantine) pools imported on a replay thread (and their ns), waits for the background importer (and their ns)
+/// (hookshot) pools imported on a replay thread (and their ns), waits for the background importer (and their ns)
 void memory_import_stats(int64_t* imports, int64_t* import_ns, int64_t* bg_waits, int64_t* bg_wait_ns);
 // Page write generations (vk_memory.cpp, after totk-pc-recomp's vk_memory.c): at each submit the guest pages the CPU
 // wrote since the last one (the soft write watch) are stamped with a new generation; a texture uploaded at
@@ -205,7 +205,7 @@ void memory_drop_shadow(uint64_t guest, uint64_t size);   // (a write the captur
 /// (EvilBoyce) the newest submission value whose write-back reaches into [guest, guest + size) (0: none ever); *ever set
 /// when any write-back ever did
 uint64_t memory_writeback_value(uint64_t guest, uint64_t size, bool* ever);
-/// (eglantine) the waits on those write-backs, opt-in: RX_VK_READBACK_WAIT=1 (a CPU read of GPU results, invalidate) and
+/// (hookshot) the waits on those write-backs, opt-in: RX_VK_READBACK_WAIT=1 (a CPU read of GPU results, invalidate) and
 /// RX_VK_CAPTURE_WAIT=1 (a submit's capture of pages a write-back still on the GPU writes). On, each held the game's thread
 /// for the GPU: 45 fps above the Kokiri forest against 51 with the capture wait off (hs330 / hs336); the white flashes they
 /// were for are the sky sums, zeroed on the GPU at their own dispatches (vk_draw.cpp)
@@ -218,17 +218,17 @@ void memory_rb_recording_begun();   // (hookshot) at a recording's start, on its
 void memory_rb_segments_begin(uint64_t base, uint64_t n);   // (and a parallel replay's segments: their order, base on)
 /// (hookshot) a range a program may write in the mirror that is not bound as written (not copied back): memory_rb_refresh
 void memory_note_gpu_write(uint64_t gpu, uint64_t size);
-/// (eglantine) a small buffer bound by a draw of a 2D pass (one colour target, no depth): what the submit-time capture takes by
+/// (hookshot) a small buffer bound by a draw of a 2D pass (one colour target, no depth): what the submit-time capture takes by
 /// default (vk_memory.cpp capture_mode 2)
 void memory_note_ui_buffer(uint64_t gpu, uint64_t size);
-extern thread_local uint64_t ui_note_max;   // (eglantine: the largest buffer it notes on this thread, 64 KB unless a dispatch narrows it)
-extern thread_local bool ui_note_rb_only;   // (eglantine: only buffers on a page the game reads GPU results in)
-void memory_note_read_range(uint64_t guest, uint64_t size);   // (eglantine: the game is about to read GPU results there)
+extern thread_local uint64_t ui_note_max;   // (hookshot: the largest buffer it notes on this thread, 64 KB unless a dispatch narrows it)
+extern thread_local bool ui_note_rb_only;   // (hookshot: only buffers on a page the game reads GPU results in)
+void memory_note_read_range(uint64_t guest, uint64_t size);   // (hookshot: the game is about to read GPU results there)
 /// (vk_replay.cpp) The GPU's progress on the recordings' timeline, and a wait for it to reach v
 uint64_t vk_timeline_completed();
-bool vk_on_present_thread();   // (eglantine: the calling thread is the game's presenting thread)
-int vk_value_is_mine(uint64_t v);   // (eglantine, diagnostic: the calling thread began that timeline value's recording: 1, 0, -1 unknown)
-uint64_t vk_present_value();        // (eglantine: the newest timeline value begun when the last present came)
+bool vk_on_present_thread();   // (hookshot: the calling thread is the game's presenting thread)
+int vk_value_is_mine(uint64_t v);   // (hookshot, diagnostic: the calling thread began that timeline value's recording: 1, 0, -1 unknown)
+uint64_t vk_present_value();        // (hookshot: the newest timeline value begun when the last present came)
 void vk_timeline_wait(uint64_t v);
 uint32_t memory_generation();
 /// 1: a page of [guest, guest + size) was written after generation gen; 0: none was
@@ -259,8 +259,8 @@ void destroy_image(VkImage image, VmaAllocation allocation);
 uint64_t allocation_size(VmaAllocation allocation);
 /// (dedicated: its own memory object, not a share of a 64 MB block: for the 16 to 32 MB ones that fit two to a block and leave
 /// the rest of it free; RX_VK_BLOCK_BUFFERS=1: as before)
-extern thread_local int image_pool_hint;   // vk_vma.cpp (eglantine): 1 = a game asset (RX_VK_ASSET_POOL), 0 = the rest
-// (eglantine) The image pool's defragmentation (vk_vma.cpp, driven by vk_texture.cpp texture_defrag_step): a pass moves some
+extern thread_local int image_pool_hint;   // vk_vma.cpp (hookshot): 1 = a game asset (RX_VK_ASSET_POOL), 0 = the rest
+// (hookshot) The image pool's defragmentation (vk_vma.cpp, driven by vk_texture.cpp texture_defrag_step): a pass moves some
 // allocations; each move's image is made again at dst and its contents copied, or the move ignored, or the allocation destroyed
 struct ImageMove {
     VmaAllocation src, dst;

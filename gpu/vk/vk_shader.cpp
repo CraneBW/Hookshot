@@ -437,7 +437,7 @@ public:
     }
     u32 SharedMemorySize() const override {
         // (what the program declares, from the control section: 48 KB for every one was past an RX 9070 XT's 32 KB, and its
-        // pipelines were invalid. klimovich008, Hookshot PR 91. RX_VK_SHARED_48K=1: as before)
+        // pipelines were invalid. klimovich008, upstream PR 91. RX_VK_SHARED_48K=1: as before)
         static const bool old = getenv("RX_VK_SHARED_48K") != nullptr;
         return old ? 48u << 10 : nvn.shared_memory;
     }
@@ -527,7 +527,7 @@ Shader::Profile make_profile() {
     p.max_subgroup_size = 32;
     p.min_ssbo_alignment = dev.props.limits.minStorageBufferOffsetAlignment;
     p.support_maximal_reconvergence = dev.max_reconvergence;
-    p.support_float32_atomic_add = dev.float_atomic_add && !getenv("EDEN_NX2_NO_FADD");   // (eglantine: native float adds)
+    p.support_float32_atomic_add = dev.float_atomic_add && !getenv("EDEN_NX2_NO_FADD");   // (hookshot: native float adds)
     return p;
 }
 
@@ -601,7 +601,7 @@ uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uin
     return 0;
 }
 
-// (eglantine) A draw asks for the same handles twice (its variant's check in program_for, then its descriptors): each thread that
+// (hookshot) A draw asks for the same handles twice (its variant's check in program_for, then its descriptors): each thread that
 // replays numbers its draws (handle_memo_next) and keeps the handles its current draw evaluated. Threads that never number theirs
 // (translation jobs) keep nothing.
 namespace {
@@ -654,7 +654,7 @@ namespace {
 /// a handle the shader reads from a storage buffer, its handle program's)
 uint32_t descriptor_handle(const NvnState& s, const Stage& st, const Shader::TextureDescriptor& d) {
     if (d.handle_program != ~0U) return stage_handle(s, st, d.handle_program);
-    // (eglantine) from any constant buffer, as vk_draw.cpp's handle_of: the driver bank alone gave 0 for the game's uniform buffers
+    // (hookshot) from any constant buffer, as vk_draw.cpp's handle_of: the driver bank alone gave 0 for the game's uniform buffers
     uint32_t h = stage_cbuf_word(s, st, d.cbuf_index, d.cbuf_offset);
     if (d.has_secondary) h = h << d.shift_left | stage_cbuf_word(s, st, d.secondary_cbuf_index, d.secondary_cbuf_offset) << d.secondary_shift_left;
     return h;
@@ -667,7 +667,7 @@ uint32_t descriptor_handle(const NvnState& s, const Stage& st, const Shader::Ima
 uint8_t texture_answer(uint32_t handle) {
     if (!handle) return 0xFF;
     // (by the texture slot, until a slot is registered anew: variant checks ask on every draw)
-    // (eglantine: a table indexed by the slot, version << 9 | 0x100 | answer, instead of an unordered_map: asked on every draw)
+    // (hookshot: a table indexed by the slot, version << 9 | 0x100 | answer, instead of an unordered_map: asked on every draw)
     static thread_local std::vector<uint64_t> known;
     const uint32_t id = handle & 0xFFFFF;
     const uint32_t version = texture_slot_version((int)id);
@@ -1416,7 +1416,7 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
                      t->program.workgroup_size[0], t->program.workgroup_size[1], t->program.workgroup_size[2],
                      t->program.shared_memory_size, t->program.local_memory_size);
             // (hookshot) The movie upscaler's dozen networks, on a card that cannot run them as the console does: their software matrix multiplies
-            // took minutes each for AMD's compiler (the black screen with sound, Hookshot issue 26: JaredEzz's analysis) and the movies ran at 10 fps
+            // took minutes each for AMD's compiler (the black screen with sound, upstream issue 26: JaredEzz's analysis) and the movies ran at 10 fps
             // (issues 38, 43). Left out, the last pass becomes a linear upscale of the movie (upscale_stub in vk_draw.cpp): the same picture at 60
             // fps, a little softer. The gameplay TAAU network stays. RX_VK_NETWORK_KEEP=<key prefixes>, "all": every one runs
             if (t->program.info.uses_cooperative_matrix) {
@@ -1555,7 +1555,7 @@ std::array<u32, 3> mesh_registers_of(const Code* task, const Code& mesh) {
     // (the control section's topology in GL's numbers: 3 triangles; 1 points, not lines. OoT's four mesh programs with a 1 (the grass
     // drawn into the 2400 x 2400 shadow map around Link) write one index byte per primitive, the primitive count = their vertex
     // count, and a point size. Read as lines, each joined vertex 2i to 2i + 1 of its meshlet: a mesh of long thin dark stripes on
-    // the ground, the water and Link around him, on AMD; Hookshot issue 302)
+    // the ground, the water and Link around him, on AMD; upstream issue 302)
     const uint32_t topology = mesh.topology == 3 ? 4 : mesh.topology == 1 ? 0 : mesh.topology;
     const uint32_t lines = task ? (task->payload_bytes + 127) / 128 : 0;
     // (the larger of the two for both: the control section's pair is not always vertices and primitives in that order. The door's
@@ -1689,7 +1689,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         if (fsc) {
             Env fenv{s, *fsc, Shader::Stage::Fragment};
             auto fs = translate(fenv, true);
-            dump_ir(p, "fragment", fs->program, fsc->key);   // (eglantine: a mesh program's fragment stage too)
+            dump_ir(p, "fragment", fs->program, fsc->key);   // (hookshot: a mesh program's fragment stage too)
             questions += fenv.texture_questions;
             Shader::RuntimeInfo frt{};
             // (what the mesh program stores, and its per-primitive generics: Eden's MakeRuntimeInfo)
@@ -1830,12 +1830,12 @@ uint64_t pick_inputs(const NvnState& s, const uint8_t color_types[8]) {
 void answer_handles(const NvnState& s, const Program& p, std::vector<uint32_t>& out) {
     out.clear();
     for (const Program::Answer& a : p.answers) {
-        const uint32_t h = answer_handle(s, p, a);   // (eglantine: the whole handle, so still_valid_handles needs no second read)
+        const uint32_t h = answer_handle(s, p, a);   // (hookshot: the whole handle, so still_valid_handles needs no second read)
         out.push_back(h);
         out.push_back(texture_slot_version((int)(h & 0xFFFFF)));
     }
 }
-/// (eglantine) still_valid from the handles answer_handles just read: the draws of a program with other textures (most of a
+/// (hookshot) still_valid from the handles answer_handles just read: the draws of a program with other textures (most of a
 /// frame's: each material its own) read every handle twice
 bool still_valid_handles(const Program& p, const std::vector<uint32_t>& hs) {
     for (size_t i = 0; i < p.answers.size() && 2 * i < hs.size(); i++) {

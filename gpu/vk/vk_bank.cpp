@@ -36,11 +36,11 @@ struct SampReg {
     bool ok = false;
 };
 std::mutex reg_mu;
-std::unordered_map<uint64_t, uint64_t> first_reg_frame;   // (eglantine, diagnostic: texture_first_registered below)
+std::unordered_map<uint64_t, uint64_t> first_reg_frame;   // (hookshot, diagnostic: texture_first_registered below)
 std::vector<TexReg> tex_regs;
 std::vector<SampReg> samp_regs;
 std::unordered_map<uint64_t, std::vector<int>> regs_by_serial;
-// (eglantine) textures made ahead of their first draw (vk_texture.cpp texture_prefetch_some): each texture object the game
+// (hookshot) textures made ahead of their first draw (vk_texture.cpp texture_prefetch_some): each texture object the game
 // registers for the first time (a new serial) is queued; its image is made a few at a time between frames
 std::deque<nvn_tex> prefetch_q;
 std::unordered_set<uint64_t> prefetch_seen;
@@ -189,7 +189,7 @@ void register_texture_copy(int id, const nvn_tex& tex, const nvn_view* v) {
     slot_versions[id].fetch_add(1, std::memory_order_acq_rel);
     reg_gen++;
 }
-// (eglantine, diagnostic) the frame each texture storage was first registered in (by GPU address): how long before its
+// (hookshot, diagnostic) the frame each texture storage was first registered in (by GPU address): how long before its
 // first draw the game made a texture known, i.e. whether its image could be made ahead (vk_texture.cpp logs it at bursts)
 /// (vk_texture.cpp) the next texture queued for making ahead that the game still has registered, false when none is left
 bool texture_prefetch_pop(nvn_tex* out) {

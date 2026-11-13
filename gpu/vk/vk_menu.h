@@ -9,7 +9,7 @@ namespace mkwvk {
 struct Options {
     int framegen = 0;     // made frames: 0 off, or 2, 3, 4 times the game's frames
     int pace = 0;         // frames shown on an even line (vk_framegen.cpp)
-    // (eglantine: 1 by default, the 3D at the picture's size. Auto ran at 1536 x 864 and below for a 2048 x 1152 picture)
+    // (hookshot: 1 by default, the 3D at the picture's size. Auto ran at 1536 x 864 and below for a 2048 x 1152 picture)
     int resolution = 1;   // the 3D's (Render resolution): 0 Auto (the game's dynamic resolution), else a share of the output,
                           // 1..6 = 100%, 75%, 67%, 50%, 58%, 33% (upscaler_rows.h; nx2/oot_patches.py)
     int output_res = 0;   // the game's whole frame, docked: 0 its 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080; read once, at the start (host/nn_applet.c)

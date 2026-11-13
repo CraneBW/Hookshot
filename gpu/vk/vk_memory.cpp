@@ -66,13 +66,13 @@ struct Pool {
     bool inherit_pending = false;
     uint64_t retired_epoch = 0;
     bool prefetched = false;     // (amd-fix) imported ahead by the background thread, not bound yet
-    uint64_t dead_since = 0;     // (eglantine) the submission at which no pool of the game was found over it any more (0: one is)
+    uint64_t dead_since = 0;     // (hookshot) the submission at which no pool of the game was found over it any more (0: one is)
     // (hookshot) the write-back's diff: what guest memory holds of the pool, in VRAM, and the pages of it known to be so
     VkBuffer shadow = VK_NULL_HANDLE;
     VmaAllocation shadow_alloc = nullptr;
     VkDeviceAddress shadow_address = 0;
     std::vector<uint64_t> shadow_known;   // (a bit a page)
-    // (eglantine, RX_VK_WB_LAZY: "the write-back put off to the frame's end", below) the pages whose GPU writes are in the mirror
+    // (hookshot, RX_VK_WB_LAZY: "the write-back put off to the frame's end", below) the pages whose GPU writes are in the mirror
     // alone until the frame's flush, and the pages of such runs the CPU was seen to write as well (not put off again); a bit a page
     std::vector<uint64_t> wb_pending, wb_mixed;
     std::vector<uint32_t> wb_gen;   // (a page put off: its generation when it was, the GPU's own stamp of its write)
@@ -689,9 +689,9 @@ void memory_drop_shadow(uint64_t guest, uint64_t size);
 std::mutex gpu_pages_mu;
 std::unordered_map<uint32_t, uint32_t> gpu_pages;   // page -> the generation of the GPU's last write
 int64_t st_sync_gpu_pages, st_sync_gpu_live;
-std::unordered_map<uint64_t, int64_t> gpu_over_by_pool;   // (eglantine: those syncs by pool, since the last report)
+std::unordered_map<uint64_t, int64_t> gpu_over_by_pool;   // (hookshot: those syncs by pool, since the last report)
 bool gpu_pages_on() {
-    // (eglantine: RX_VK_PAGES_GPU=1 is the same switch under a name that is not one of the program cache's stamp prefixes
+    // (hookshot: RX_VK_PAGES_GPU=1 is the same switch under a name that is not one of the program cache's stamp prefixes
     // (vk_shader.cpp disk_stamp: "RX_VK_GP..."): RX_VK_GPU_PAGES=1 emptied the 7.5 GB program cache of the folder it ran in)
     static const bool v = getenv("RX_VK_GPU_PAGES") != nullptr || getenv("RX_VK_PAGES_GPU") != nullptr;
     return v;
@@ -823,7 +823,7 @@ inline void cap_entry_set(uint64_t page, CapEntry e) {
 // (each kept capture's copy on the GPU, by its generation)
 struct CapBuf {
     uint64_t value; VkBuffer buffer; VmaAllocation alloc; uint64_t size; void* map; uint64_t last_use = 0;
-    // (eglantine, 10/11) the pages a submission still on the GPU was writing back when the capture was made (page, slot in the
+    // (hookshot, 10/11) the pages a submission still on the GPU was writing back when the capture was made (page, slot in the
     // buffer) and that submission: copied again the first time the capture is read, once it is done (capture_late_fix)
     uint64_t late_value = 0;
     std::vector<std::pair<uint32_t, uint32_t>> late;
@@ -947,7 +947,7 @@ void refresh_pool_ranges_locked() {   // (cap_ranges_mu held)
     }
     pool_cap_ranges.swap(m);
 }
-/// (eglantine) 0: no capture; 1: all, as upstream (RX_VK_CAPTURE=1); 2, the default: the 2D pass's small buffers only
+/// (hookshot) 0: no capture; 1: all, as upstream (RX_VK_CAPTURE=1); 2, the default: the 2D pass's small buffers only
 int capture_mode() {
     static const int m = [] {
         const char* e = getenv("RX_VK_CAPTURE");
@@ -961,7 +961,7 @@ int capture_mode() {
 std::vector<std::pair<uint64_t, uint64_t>> ui_cap_ranges;   // (capture_mode 2: what the captures take, merged; cap_ranges_mu)
 bool capture_on() {
     static const bool on = [] {
-        // (eglantine) opt-in here, RX_VK_CAPTURE=1: the copies are made on the game's thread at each submit (~1070 pages, 4 MB a
+        // (hookshot) opt-in here, RX_VK_CAPTURE=1: the copies are made on the game's thread at each submit (~1070 pages, 4 MB a
         // submit above the Kokiri forest), and the game's main thread then ran in turn with the replay instead of beside it: 51 fps
         // there against 59.8 without (hs337 / hs345, same GPU time). OoT's replay keeps up within its buffering, as the
         // console's GPU reads guest memory as it is; the white flashes this guarded against are the sky sums (vk_draw.cpp)
@@ -1238,7 +1238,7 @@ void memory_drop_shadow(uint64_t guest, uint64_t size) {
 // For invalidate (vk_replay.cpp): a CPU read of GPU results waits until the submission that writes them there is done, as
 // the console's coherent memory has them once that work is. Guest page number -> the recording's timeline value (write-backs
 // from a mirror, and small bindings written in place). RX_VK_NO_READBACK_WAIT=1: none
-// (eglantine: opt-in, RX_VK_READBACK_WAIT=1 / RX_VK_CAPTURE_WAIT=1; vk_internal.h)
+// (hookshot: opt-in, RX_VK_READBACK_WAIT=1 / RX_VK_CAPTURE_WAIT=1; vk_internal.h)
 bool memory_readback_wait_on() {
     static const bool on = getenv("RX_VK_READBACK_WAIT") && atoi(getenv("RX_VK_READBACK_WAIT")) != 0 && !getenv("RX_VK_NO_READBACK_WAIT");
     return on;
@@ -1292,7 +1292,7 @@ struct WbPages {
     }
     bool empty() const { return !any; }
 } wb_pages;
-// (eglantine, 10/11) The pages the CPU reads small GPU results in (invalidate, vk_replay.cpp): each one's last write-backs,
+// (hookshot, 10/11) The pages the CPU reads small GPU results in (invalidate, vk_replay.cpp): each one's last write-backs,
 // newest first, so that a read can tell which is the newest the GPU is past (memory_readback_landed). A few dozen pages,
 // sorted; a write-back's run looks its pages up by bisection (wb_pages_mu)
 struct RbTrack {
@@ -1316,7 +1316,7 @@ void wb_pages_note(uint64_t guest_lo, uint64_t guest_hi, uint64_t value) {
     }
 }
 } // namespace
-/// (eglantine) The newest write-back of [guest, guest + size) that the GPU is past (`done`: its progress on the recordings'
+/// (hookshot) The newest write-back of [guest, guest + size) that the GPU is past (`done`: its progress on the recordings'
 /// timeline), 0 when none is known; and in *pending the oldest one recorded that the GPU is not past yet (0: none). The
 /// range's pages are followed from their first call on
 uint64_t memory_readback_landed(uint64_t guest, uint64_t size, uint64_t done, uint64_t* pending) {
@@ -1438,12 +1438,12 @@ void copy_pages(const uint32_t* pages, int64_t n, uint8_t* out, uint8_t* ok) {  
     copy_helpers.done.wait(lk, [] { return copy_helpers.pending == 0; });
 }
 
-// (eglantine, RX_VK_CAPTURE_ONLY=<lo>-<hi>[,...] (hex guest addresses), experiment) the captures take only those ranges of
+// (hookshot, RX_VK_CAPTURE_ONLY=<lo>-<hi>[,...] (hex guest addresses), experiment) the captures take only those ranges of
 // their usual ones. The whole capture costs ~10 fps in Kokiri although capture_make itself is ~0.3 ms a submit: its write
 // marks are taken again over ~3 GB of pools at every submit, and the game's writes there fault again. OoT's HUD reads each
 // sprite's transform from a per-frame ring in the 16 MB pool at 0x1070000000 (sb6 of its sprite programs, hs404); read
 // after the game had rewritten it, a heart drew empty, black, as the big heart at the bottom right or as a wedge
-// (eglantine, RX_VK_CAPTURE_MIRRORED=0: the captures leave the mirrored pools out: with RX_VK_TEX_CAPTURE=0 they take only the
+// (hookshot, RX_VK_CAPTURE_MIRRORED=0: the captures leave the mirrored pools out: with RX_VK_TEX_CAPTURE=0 they take only the
 // game's small pools (RX_VK_CAPTURE_POOL_MB and under), where its per-frame rings are)
 bool capture_mirrored() {
     static const bool on = !getenv("RX_VK_CAPTURE_MIRRORED") || atoi(getenv("RX_VK_CAPTURE_MIRRORED")) != 0;
@@ -1482,9 +1482,9 @@ void clip_to_capture_only(std::vector<std::pair<uint64_t, uint64_t>>& v) {
     std::sort(r.begin(), r.end());
     v.swap(r);
 }
-/// (eglantine, capture_mode 2) A small buffer a 2D draw binds (vk_draw.cpp): its pages join what the captures take, 64 MB at most
-thread_local uint64_t ui_note_max = 64u << 10;   // (eglantine: the largest buffer noted; a compute dispatch sets its own, vk_draw.cpp)
-// (eglantine, 10/11 10:25) The pages the game reads small GPU results in (invalidate, vk_replay.cpp): a compute dispatch's
+/// (hookshot, capture_mode 2) A small buffer a 2D draw binds (vk_draw.cpp): its pages join what the captures take, 64 MB at most
+thread_local uint64_t ui_note_max = 64u << 10;   // (hookshot: the largest buffer noted; a compute dispatch sets its own, vk_draw.cpp)
+// (hookshot, 10/11 10:25) The pages the game reads small GPU results in (invalidate, vk_replay.cpp): a compute dispatch's
 // buffers are noted only where they lie on one of them (ui_note_rb_only, set by dispatch()). Capturing every dispatch's small
 // buffers stopped the exposure's steps but took 140 to 1100 ranges and ~50 pages a capture that a submission on the GPU was
 // still writing back, each capture waiting for it (take_capture's late pages): 52.9 -> 46.9 frames a second in the village
@@ -1582,7 +1582,7 @@ std::unique_ptr<Capture> capture_make() {
             ver = cap_ranges_ver;
             std::vector<std::pair<uint64_t, uint64_t>> all;
             if (capture_mode() == 2) {
-                all = ui_cap_ranges;   // (eglantine: the 2D pass's small buffers alone)
+                all = ui_cap_ranges;   // (hookshot: the 2D pass's small buffers alone)
             } else {
                 if (capture_mirrored()) all = cap_ranges;
                 all.insert(all.end(), tex_cap_ranges.begin(), tex_cap_ranges.end());
@@ -1605,7 +1605,7 @@ std::unique_ptr<Capture> capture_make() {
     const int64_t n = mirrored.empty() || !host->collect_written_in ? 0
                     : host->collect_written_in(reinterpret_cast<const uint64_t(*)[2]>(mirrored.data()), (int)mirrored.size(), &pages);
     const auto t_scan = std::chrono::steady_clock::now();
-    {   // (eglantine, RX_VK_CAPTURE_STATS=1: where the captures' pages lie, by 16 MB of guest memory, every 600 captures: which
+    {   // (hookshot, RX_VK_CAPTURE_STATS=1: where the captures' pages lie, by 16 MB of guest memory, every 600 captures: which
         // pools make a capture's megabytes, to choose what a cheaper capture may leave out)
         static const bool stats = getenv("RX_VK_CAPTURE_STATS") != nullptr;
         if (stats && n > 0) {
@@ -1642,7 +1642,7 @@ std::unique_ptr<Capture> capture_make() {
     if (n > 0) {
         static const int cap_wait = getenv("RX_VK_CAPTURE_WAIT") ? atoi(getenv("RX_VK_CAPTURE_WAIT")) : 2;
         uint64_t v = 0;
-        // (eglantine, 10/11 10:40) RX_VK_CAPTURE_LATE_ONLY=<guest page address, hex>,...: only those pages wait; RX_VK_LOG_LATE=1:
+        // (hookshot, 10/11 10:40) RX_VK_CAPTURE_LATE_ONLY=<guest page address, hex>,...: only those pages wait; RX_VK_LOG_LATE=1:
         // which pages are late, every 600 captures with one. The wait is what stops the exposure's steps (without it, the
         // compute dispatches' buffers captured all the same: 7.4 and 12.4 a thousand, hs73) and what the capture costs: ~50 pages
         // a capture are late, the newest submission's among them, so every submission's recording waits for the one before on
@@ -1659,7 +1659,7 @@ std::unique_ptr<Capture> capture_make() {
             return v;
         }();
         static const bool log_late = getenv("RX_VK_LOG_LATE") != nullptr;
-        // (eglantine, 10/11 10:55) RX_VK_CAPTURE_WAIT_WHO=1: only the captures of the thread that presents wait; 2: only the
+        // (hookshot, 10/11 10:55) RX_VK_CAPTURE_WAIT_WHO=1: only the captures of the thread that presents wait; 2: only the
         // others'. The village's profile (hs760) had the game's main thread in vk_timeline_wait for 53 % of the instants no
         // frame thread ran (8 % of the time): its own submits' captures wait there, with the whole frame behind them
         static const int wait_who = getenv("RX_VK_CAPTURE_WAIT_WHO") ? atoi(getenv("RX_VK_CAPTURE_WAIT_WHO")) : 0;
@@ -1701,7 +1701,7 @@ std::unique_ptr<Capture> capture_make() {
                     }
                 }
         }
-        // (eglantine, 10/11 18:40) RX_VK_CAPTURE_WAIT_WHO=3: a capture waits only for the work of the frames presented so far (the
+        // (hookshot, 10/11 18:40) RX_VK_CAPTURE_WAIT_WHO=3: a capture waits only for the work of the frames presented so far (the
         // wait stops at the newest value begun when the last present came); 4: only for work begun since. The game's main thread
         // waits twice a frame in the village (hs840): ~0.5 ms right after the present, for the frame before's last work, and
         // ~0.8 ms at its later submits, for what the presenting thread has just sent of the new frame
@@ -1767,7 +1767,7 @@ const std::vector<std::pair<uint64_t, uint64_t>>& capture_ranges_merged() {
         ver = cap_ranges_ver;
         std::vector<std::pair<uint64_t, uint64_t>> all;
         if (capture_mode() == 2) {
-            all = ui_cap_ranges;   // (eglantine: the 2D pass's small buffers alone)
+            all = ui_cap_ranges;   // (hookshot: the 2D pass's small buffers alone)
         } else {
             if (capture_mirrored()) all = cap_ranges;
             all.insert(all.end(), tex_cap_ranges.begin(), tex_cap_ranges.end());
@@ -1789,7 +1789,7 @@ void memory_recording_value(uint64_t value, uint64_t completed) {
     mem_rec_value = value;
     if (completed > mem_completed) mem_completed = completed;
 }
-/// (eglantine, 10/11 10:20) A kept capture's late pages copied again, when the capture is first read (a mirror sync of a pool
+/// (hookshot, 10/11 10:20) A kept capture's late pages copied again, when the capture is first read (a mirror sync of a pool
 /// with a page of it, a read of guest memory as submitted, a mirror made). take_capture did it as each submission's recording
 /// began: with the small buffers of compute dispatches captured (vk_draw.cpp compute_now: the exposure meter's page is one, which
 /// is what stops the exposure's steps) that was a wait for the frame before on the GPU at the very start of each frame's
@@ -1828,7 +1828,7 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
     static const bool late_eager = getenv("RX_VK_CAPTURE_LATE_LAZY") == nullptr;
     const bool late_now = late_eager || tex_capture_on();   // (RX_VK_CAPTURE=1 reads the copies below, for its texture shadow)
     if (c->late_value && c->map && late_now) {   // (the pages a submission still on the GPU writes back: see capture_make)
-        // (eglantine, RX_VK_LOG_CAPWAIT=1, diagnostic: who waits here, for whose work and how long, every 1200 such captures)
+        // (hookshot, RX_VK_LOG_CAPWAIT=1, diagnostic: who waits here, for whose work and how long, every 1200 such captures)
         static const bool log_wait = getenv("RX_VK_LOG_CAPWAIT") != nullptr;
         const bool pending = log_wait && vk_timeline_completed() < c->late_value;
         const auto w0 = std::chrono::steady_clock::now();
@@ -1921,7 +1921,7 @@ bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed
     const auto tk1 = std::chrono::steady_clock::now();
     if (!c->copied.empty() && g && c->map) {   // (its buffer kept with the captures, for the mirror syncs)
         CapBuf b{value, c->buffer, c->alloc, c->bsize, c->map};
-        if (c->late_value && !late_now) {   // (eglantine: copied again at the capture's first use, capture_late_fix)
+        if (c->late_value && !late_now) {   // (hookshot: copied again at the capture's first use, capture_late_fix)
             b.late_value = c->late_value;
             b.late.reserve(c->late.size());
             for (uint32_t i : c->late) b.late.push_back({c->pages[i], i});
@@ -2013,7 +2013,7 @@ void bg_start() {   // (bg_mu held)
         std::thread(bg_main).detach();
     }
 }
-std::atomic<int64_t> st_sync_imports{0}, st_sync_import_ns{0}, st_bg_wait_ns{0};   // (eglantine: RX_VK_LONG_FRAMES)
+std::atomic<int64_t> st_sync_imports{0}, st_sync_import_ns{0}, st_bg_wait_ns{0};   // (hookshot: RX_VK_LONG_FRAMES)
 
 void bg_main() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk imports");
@@ -2308,7 +2308,7 @@ struct WriteBack {
     uint64_t lo, hi;   // offsets in the pool
 };
 std::vector<WriteBack> writebacks;
-// ---- (eglantine, 11/11) the write-back put off to the frame's end: RX_VK_WB_LAZY=1 (off by default until it is validated) ----
+// ---- (hookshot, 11/11) the write-back put off to the frame's end: RX_VK_WB_LAZY=1 (off by default until it is validated) ----
 // Each submission compares, at its end, every range it bound for writing with the pool's shadow and writes what differs back
 // to guest memory. In OoT one 144 MB pool has 6-15 MB of such ranges bound for writing by most of a frame's ~9 submissions:
 // ~58 MB compared a frame, 3.2 ms of the GPU's 16.8 at Hyrule Castle (hs996), and the game's main thread waits for the frame's
@@ -2345,7 +2345,7 @@ int64_t wb_lazy_period() {   // (RX_VK_WB_LAZY_FRAMES=<n>: a page put off is wri
     static const int64_t period = getenv("RX_VK_WB_LAZY_FRAMES") ? std::max(1, atoi(getenv("RX_VK_WB_LAZY_FRAMES"))) : 30;
     return period;
 }
-// ---- (eglantine, a diagnostic for RX_VK_WB_LAZY) RX_VK_WB_GUARD=1: who touches a page put off before its write-back ----
+// ---- (hookshot, a diagnostic for RX_VK_WB_LAZY) RX_VK_WB_GUARD=1: who touches a page put off before its write-back ----
 // A page put off is made PAGE_NOACCESS in the game's address space (the GPU's import has its own view of the pages) until it
 // is written back or no longer put off. The first touch of it faults: counted as a read or a write, with the code that did it,
 // and the page is given back until it is put off again. A READ is the case the write-back put off gets wrong: the CPU saw
@@ -2813,7 +2813,7 @@ void mirror_sync(Pool& p) {
         for (const VkBufferCopy& r : runs) st_sync_bytes += (int64_t)r.size, gp.bytes += r.size;
         st_sync_copies += (int64_t)runs.size();
     }
-    // (eglantine) the write-back diff's shadow as the mirror's baseline, with the submit-time capture off: the pages just copied
+    // (hookshot) the write-back diff's shadow as the mirror's baseline, with the submit-time capture off: the pages just copied
     // into the mirror go into the shadow too, so after the GPU's work the two differ exactly where the GPU wrote, and only
     // those words are written back: never the mirror's older words over what the game wrote since (see shadow_written).
     // RX_VK_SHADOW_BASELINE=0: off (upstream's scheme alone, which needs the capture)
@@ -3228,7 +3228,7 @@ void reap_mirrors() {   // (pools_mu held)
         st_retired_imports_freed++, st_retired_import_bytes_freed += dead_imports.front().bytes;
         const uint64_t lo = dead_imports.front().lo, hi = lo + dead_imports.front().bytes;
         dead_imports.pop_front();
-        release_uncovered(lo, hi);   // (eglantine: what the game freed under it goes back to Windows)
+        release_uncovered(lo, hi);   // (hookshot: what the game freed under it goes back to Windows)
     }
 }
 void retired_imports_give_back() {   // (pools_mu held)
@@ -3301,7 +3301,7 @@ void mirrors_give_back(uint64_t want_bytes) {   // (pools_mu held)
             !p.wb_pending_n && wb_orphans.empty())
             idle.push_back(&p);
     std::sort(idle.begin(), idle.end(), [](const Pool* a, const Pool* b) { return a->synced_epoch < b->synced_epoch; });
-    // (eglantine, 11/11) A mirror over which no pool of the game stands any more (the area was left: the game freed its pools)
+    // (hookshot, 11/11) A mirror over which no pool of the game stands any more (the area was left: the game freed its pools)
     // goes as soon as it is idle (kIdleEpochs, ~1 s), not after kLongIdle (~11 s). On an 8 GB card the area arrived in
     // loads its textures while the one left still holds its mirrors (2000 MB of mirrors at the peak of a tour, 15 GB given
     // back over 8 areas, hs1112) and its textures: VRAM went to 7.5 GB of the 7.27 allowed, the write-back's shadows were
@@ -3354,7 +3354,7 @@ int64_t st_imports_evicted = 0;
 uint64_t st_import_bytes_evicted = 0;
 constexpr uint64_t kImportIdle = 600;
 
-// ---- (eglantine, night 10/11) the game's freed address space given back to Windows. The game frees an address region without
+// ---- (hookshot, night 10/11) the game's freed address space given back to Windows. The game frees an address region without
 // unmapping its pages, the host only discarded them (their content dropped, their commit kept) and whatever lay under an import
 // had to stay: the regions' commit stood at their whole span, 8 GB for the ~2.9 GB mapped at a time, and the process at 29 GB
 // after a few areas on a 16 GB PC (vmmap.ps1, hs491). Here, under pools_mu, where every import is made (the background thread's,
@@ -3430,13 +3430,13 @@ void imports_give_back() {   // (pools_mu held)
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
         const uint64_t lo = p.lo, hi = p.hi;
         evicted_pools.pop_front();
-        release_uncovered(lo, hi);   // (eglantine: what the game freed under it goes back to Windows)
+        release_uncovered(lo, hi);   // (hookshot: what the game freed under it goes back to Windows)
     }
     // (hookshot) Off by default on Windows, as giving retired imports back is (RX_VK_KEEP_RETIRED, retired_imports_give_back:
     // device losses on Intel Arc and AMD right after imports went back): RX_VK_IMPORT_HIGH=85 turns it on there
     static const char* env_high = getenv("RX_VK_IMPORT_HIGH");
 #ifdef _WIN32
-    // (eglantine, night 10/11: on by default on NVIDIA, as giving retired imports back is (issue 1057). A tour of the game's
+    // (hookshot, night 10/11: on by default on NVIDIA, as giving retired imports back is (issue 1057). A tour of the game's
     // areas on an RTX 3060 Ti with 16 GB took this heap from 2.6 GB in the first area to 7714 of 7475 MB by the ninth, where
     // 16 imports failed (VK_ERROR_OUT_OF_DEVICE_MEMORY) and the tenth lost the device (hs483; hs451 at the twelfth). With idle
     // imports given back the same tour ran its 27 areas, the heap under 4.5 GB, no import refused (hs491, 55 / 45). 70 / 60
@@ -3450,7 +3450,7 @@ void imports_give_back() {   // (pools_mu held)
 #endif
     static uint64_t calls = 0;
     if (high <= 0 || ++calls % 16) return;   // (the driver asked every 16 submissions)
-    {   // (eglantine, 10/11 06:30) An import no pool of the game stands over any more goes back whatever the heap's state. A
+    {   // (hookshot, 10/11 06:30) An import no pool of the game stands over any more goes back whatever the heap's state. A
         // 16 MB chunk stayed imported after the pools it was made for were gone (the game changed area), pinned, and with it
         // the pages of the regions the game freed there, which release_uncovered leaves to their import: the regions stood
         // at 7.95 GB of commit for the ~2.9 GB the game maps (hs494, vmmap.ps1). Given back once no pool has stood over it
@@ -3757,7 +3757,7 @@ void shadows_reap() {
         dead_shadows.pop_front();
     }
 }
-/// (eglantine) RX_VK_WB_SHADOW_PCT=<make>,<drop>[,<slack>]: a shadow is made while VRAM would stay under <make> % of what the
+/// (hookshot) RX_VK_WB_SHADOW_PCT=<make>,<drop>[,<slack>]: a shadow is made while VRAM would stay under <make> % of what the
 /// driver allows, and all are given back past <drop> %. <slack> 1: for giving back, the free space inside the allocator's
 /// blocks is not counted as used. Default 92,95,1; it was 85,95,0 ("the textures and the mirrors come first"). On an 8 GB
 /// card OoT sits at 87-91 % of what the driver allows, so a shadow given back was hardly ever made again (it needed 85 %
@@ -3901,7 +3901,7 @@ bool wbd_pipe_ready() {
     return ok;
 }
 void shadow_written(const uint32_t* pages, int64_t n) {
-    // (eglantine) with the submit-time capture off the shadow is the mirror's baseline, kept at each sync (mirror_sync): a page
+    // (hookshot) with the submit-time capture off the shadow is the mirror's baseline, kept at each sync (mirror_sync): a page
     // the CPU wrote is not read from guest memory again, which put the game's newer words in the shadow and had the pass write
     // the mirror's older ones over them (the HUD's records: white polygons and wedges, hs415)
     if (n <= 0 || !wb_diff_on() || !capture_on()) return;
@@ -3965,7 +3965,7 @@ WbdTable* wbd_table_get(uint64_t bytes) {
     return &t;
 }
 
-// ---- (eglantine, RX_VK_WB_LAZY) the write-back put off to the frame's end: see wb_lazy_on, above ----
+// ---- (hookshot, RX_VK_WB_LAZY) the write-back put off to the frame's end: see wb_lazy_on, above ----
 bool ranges_overlap(const std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t lo, uint64_t hi) {   // (sorted, merged)
     auto it = std::upper_bound(v.begin(), v.end(), std::make_pair(lo, ~uint64_t(0)));
     if (it != v.begin() && std::prev(it)->second > lo) return true;
@@ -4150,7 +4150,7 @@ void memory_end_submission(VkCommandBuffer cmd) {
                  (long long)(st_sync_old_pages - l_old), (long long)(st_sync_live_pages - l_live), cap_bufs.size(),
                  (long long)st_sync_gpu_pages, (long long)st_sync_gpu_live, (long long)st_prot_kept.load());
             l_cap = st_sync_cap_pages, l_live = st_sync_live_pages, l_old = st_sync_old_pages;
-            if (!gpu_over_by_pool.empty()) {   // (eglantine, RX_VK_PAGES_GPU: which pools those pages are in)
+            if (!gpu_over_by_pool.empty()) {   // (hookshot, RX_VK_PAGES_GPU: which pools those pages are in)
                 std::vector<std::pair<int64_t, uint64_t>> top;
                 for (const auto& [lo, k] : gpu_over_by_pool) top.push_back({k, lo});
                 std::sort(top.rbegin(), top.rend());
@@ -4220,7 +4220,7 @@ void memory_end_submission(VkCommandBuffer cmd) {
     }
     static const bool no_writeback = getenv("RX_VK_NO_WRITEBACK") != nullptr;   // (an experiment: none)
     if (no_writeback) writebacks.clear();
-    {   // (eglantine, RX_VK_WB_SKIP_POOL=<pool start hex>[,...] (an experiment): those pools' ranges not written back)
+    {   // (hookshot, RX_VK_WB_SKIP_POOL=<pool start hex>[,...] (an experiment): those pools' ranges not written back)
         static const std::vector<uint64_t> skip_pools = [] {
             std::vector<uint64_t> v;
             for (const char* q = getenv("RX_VK_WB_SKIP_POOL"); q && *q;) {

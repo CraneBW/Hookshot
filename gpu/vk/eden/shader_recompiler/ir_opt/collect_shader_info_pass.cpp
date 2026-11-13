@@ -691,7 +691,7 @@ void VisitUsages(Info& info, IR::Inst& inst) {
         break;
     case IR::Opcode::GlobalAtomicAddF32:
     case IR::Opcode::StorageAtomicAddF32:
-        // (eglantine: F32 too, for the native float add where the device has it, emit_spirv_atomic.cpp)
+        // (hookshot: F32 too, for the native float add where the device has it, emit_spirv_atomic.cpp)
         info.used_storage_buffer_types |= IR::Type::U32 | IR::Type::F32;
         info.uses_atomic_f32_add = true;
         break;

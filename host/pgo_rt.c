@@ -92,7 +92,7 @@ static DWORD WINAPI pgo_thread(void *arg) {
     return 0;
 }
 
-/* (eglantine) the Vulkan back end's own copy (nx2/build.py, RX_VK_PGO=gen) reads another variable: -DPGO_ENV="RX_VK_PGO_FILE" */
+/* (hookshot) the Vulkan back end's own copy (nx2/build.py, RX_VK_PGO=gen) reads another variable: -DPGO_ENV="RX_VK_PGO_FILE" */
 #ifndef PGO_ENV
 #define PGO_ENV "HOS_PGO"
 #endif

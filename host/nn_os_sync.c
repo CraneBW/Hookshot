@@ -204,8 +204,8 @@ static Obj *obj(uint64_t key, int kind) {
 static Obj *obj_nockpt(uint64_t key, int kind) {
     /* (hookshot: 128 still missed: obj_lookup was the busiest leaf in dense Kokiri, 3.2% of all samples, 4.3% of the instants when one
        thread alone ran; each actor has its own mutexes) */
-    /* (eglantine: 4096; at 1024 obj_lookup was still 2.2% of OoT's game threads outdoors) */
-    /* (eglantine, 10/11, MEASURED, not kept: 32768 entries (a table per thread made at its first call) for these 4096. In the
+    /* (hookshot: 4096; at 1024 obj_lookup was still 2.2% of OoT's game threads outdoors) */
+    /* (hookshot, 10/11, MEASURED, not kept: 32768 entries (a table per thread made at its first call) for these 4096. In the
        Kokiri village obj_lookup is the main thread's busiest leaf while the frame's commands are generated (5.3% of its running
        time, hs800), but the bigger cache gave nothing: 52.1 and 50.7 fps with it, 53.1 without (hs880 / hs882 / hs881)) */
     static _Thread_local struct { uint64_t key; Obj *o; } cache[4096];
@@ -694,7 +694,7 @@ void hos_event_signal(uint64_t guest_event) { event_signal(obj(guest_event, K_EV
 
 HLE(_ZN2nn2os15InitializeEventEPNS0_9EventTypeEbNS0_14EventClearModeE) { event_init(ARG(0), (int)(ARG(1) & 1), (int)ARG(2)); }
 HLE(_ZN2nn2os13FinalizeEventEPNS0_9EventTypeE) { drop(ARG(0)); }
-/* (eglantine) HOS_EVENT_WATCH_LR=<hex> (diagnostic): WaitEvent calls returning there are timed, and the threads (and callers) that
+/* (hookshot) HOS_EVENT_WATCH_LR=<hex> (diagnostic): WaitEvent calls returning there are timed, and the threads (and callers) that
    SignalEvent the events they wait on are counted; every 5 s. OoT's main thread waits so every 40 frames, outdoors */
 static uint64_t ew_lr = ~0ull;
 static uint64_t ew_keys[16];
@@ -1245,7 +1245,7 @@ HLE(_ZN2nn2os11SystemEventD2Ev) { drop(ARG(0)); }
 
 /* ---- the remaining waits on the HLE's objects ----------------------------------------------------------------- */
 HLE(_ZN2nn2os9WaitEventEPNS0_9EventTypeE) {
-    if (ew_on() && c->x[30] == ew_lr) {   /* (eglantine, HOS_EVENT_WATCH_LR) */
+    if (ew_on() && c->x[30] == ew_lr) {   /* (hookshot, HOS_EVENT_WATCH_LR) */
         const uint64_t key = ARG(0);
         AcquireSRWLockExclusive(&ew_lk);
         int known = 0;

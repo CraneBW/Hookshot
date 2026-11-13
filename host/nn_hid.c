@@ -49,7 +49,7 @@ static int64_t sampling;
 int rx_option(int id, int otherwise);
 /* (the Insert menu takes the keyboard while it is open) */
 static int key(int vk) { return !rx_option(1, 0) && (GetAsyncKeyState(vk) & 0x8000) != 0; }
-/* (eglantine) Letter and digit keys by their place on the keyboard, not their label: the bindings are a US keyboard's
+/* (hookshot) Letter and digit keys by their place on the keyboard, not their label: the bindings are a US keyboard's
    (WASD, Q, E, Z...), and on a French AZERTY one 'W' 'A' 'S' 'D' by label put the left stick on W A S D, a scattered
    cross. A US key's scan code is looked up in the layout of the window in front: Z Q S D on AZERTY, W A S D on QWERTY. */
 static int pos(int us) {
@@ -630,7 +630,7 @@ static int bound_down(int i, int mouse) {
         const int vk = (int)key_bind[i][k];
         if (vk <= 0) continue;
         const int m = mouse_vk_slot(vk);
-        if (m >= 0 ? mouse && mouse_armed[m] && key(vk) : kmap_down(key_bind[i][k], kpos)) return 1;   /* (eglantine) keys by their place: ZQSD on AZERTY where WASD is bound */
+        if (m >= 0 ? mouse && mouse_armed[m] && key(vk) : kmap_down(key_bind[i][k], kpos)) return 1;   /* (hookshot) keys by their place: ZQSD on AZERTY where WASD is bound */
     }
     return 0;
 }

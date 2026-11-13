@@ -96,7 +96,7 @@ HLE(_ZN2nn2vi15GetNativeWindowEPPvPNS0_5LayerE) {
    HOS_NO_PACING=1: as fast as it can. */
 static volatile int present_interval = 1;
 static int64_t next_frame_at, window_start, frames_in_window;
-/* (eglantine) The frame rate cap: the game's 60, or unlocked (HOS_FPS_UNLOCKED=1):
+/* (hookshot) The frame rate cap: the game's 60, or unlocked (HOS_FPS_UNLOCKED=1):
    up to the display's refresh, game time following the clock (realtime_step below, whatever the Game speed row says: per frame
    at 100 fps the game would run 1.67 times too fast). HOS_FPS_MAX=<fps>: that cap instead of the display's (60 to 240). */
 static int display_hz(void) {
@@ -114,7 +114,7 @@ static int fps_max(void) {
     int rx_option(int id, int otherwise);
     static int env = -1;
     if (env < 0) env = getenv("HOS_FPS_MAX") ? atoi(getenv("HOS_FPS_MAX")) : 0;
-    static int unlocked = -1;   /* (eglantine, on upstream: HOS_FPS_UNLOCKED=1 only; option 4 is the pads' row there) */
+    static int unlocked = -1;   /* (hookshot, on upstream: HOS_FPS_UNLOCKED=1 only; option 4 is the pads' row there) */
     if (unlocked < 0) unlocked = getenv("HOS_FPS_UNLOCKED") && atoi(getenv("HOS_FPS_UNLOCKED")) != 0;
     (void)rx_option;
     if (!unlocked && env <= 60) return 60;
@@ -382,7 +382,7 @@ void hos_vi_native_presented(void) {
         const int64_t d = now - last_present;
         hist[d < 15500000 ? 0 : d < 17800000 ? 1 : d < 22000000 ? 2 : d < 30000000 ? 3 : d < 40000000 ? 4 : 5]++;
     }
-    {   /* (eglantine) HOS_PRESENT_LOG=<file>: every present's time (ns since the first), one per line, for the stutter's pattern */
+    {   /* (hookshot) HOS_PRESENT_LOG=<file>: every present's time (ns since the first), one per line, for the stutter's pattern */
         static FILE *plog;
         static int plog_read;
         static int64_t plog_t0;
