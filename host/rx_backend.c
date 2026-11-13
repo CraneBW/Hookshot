@@ -155,13 +155,17 @@ int hos_vk_take_key_press(int key) {
 #define host_take_key_press NULL
 #endif
 
+/* (eglantine) the game's freed address space inside [lo, hi), decommitted (hos_mem.c): the back end's ranges no import holds */
+uint64_t hos_region_release_gaps(uint64_t lo, uint64_t hi);
+static uint64_t host_region_release_gaps(uint64_t lo, uint64_t hi) { return hos_region_release_gaps(lo, hi); }
+
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
     nvn_tex_level_offset, nvn_fmt_bpb, nvn_tex_level_tiles, nvn_tex_linear_stride, nvn_depth_minus_w, hos_gpu_pools,
     hos_gpu_maps_generation, nvn_vmap_generation, hos_reserved_cpus, host_collect_in, host_guest_alloc,
     host_watch_guest_writes, hos_pad_raw, hos_binding, hos_bind, host_aspect_ratio, host_take_key_press,
-    hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status,
+    hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status, host_region_release_gaps,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
@@ -227,6 +231,7 @@ static void flush_early(void) {
     ReleaseSRWLockExclusive(&early_lock);
 }
 
+static void (*program_set_fn)(const nvn_prog *p);   /* (eglantine) hookshot_vk.dll's hookshot_program_set, when there */
 /* dll: mkw_vk.dll (our Vulkan back end) or mkw_eden.dll (Eden's renderer driven natively, gpu/eden): one export */
 static const MkwVkRenderer *load_vulkan(const char *dll) {
     char path[MAX_PATH];
@@ -241,6 +246,8 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     }
     vk_module = m;
     mkwvk_init_fn init = (mkwvk_init_fn)(void *)GetProcAddress(m, "mkwvk_init");
+    /* (eglantine) the back end's own extra entry, when it has it: compute programs made ahead of their first dispatch */
+    program_set_fn = (void (*)(const nvn_prog *))(void *)GetProcAddress(m, "hookshot_program_set");
     const MkwVkRenderer *r = init ? init(&vk_host) : NULL;
     if (!r || r->version != MKWVK_API_VERSION) {
         hos_log("rx: the Vulkan back end did not start: WebGPU");
@@ -386,6 +393,9 @@ void rx_nvn_texture_created(const nvn_tex *t) {
     }
     if (vk && vk->nvn_texture_created) vk->nvn_texture_created(t);
 }
+void rx_nvn_program_set(const nvn_prog *p) {
+    if (vk && program_set_fn) program_set_fn(p);
+}
 void rx_nvn_program_released(const nvn_prog *p) { vk ? vk->nvn_program_released(p) : wgr_nvn_program_released(p); }
 void rx_nvn_read_texels(const nvn_tex *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, uint8_t *dst,
                         size_t row, size_t img) {
@@ -426,6 +436,11 @@ int rx_guest_imported(uint64_t lo, uint64_t hi) {
     const int r = vk && vk->guest_imported ? vk->guest_imported(lo, hi) : 0;
     if (away) hos_vcore_back();
     return r;
+}
+/* (eglantine, hos_mem.c: the game freed the address region [lo, hi)) the back end takes the range and, at its next
+   submission, has the host decommit what no import holds of it (a short list lock: no wait on the replay) */
+void rx_guest_release(uint64_t lo, uint64_t hi) {
+    if (vk && vk->guest_release) vk->guest_release(lo, hi);
 }
 /* (nvn_native.c: the CPU set an event's value) in order with the submits, for the GPU's waits on it */
 int rx_option(int id, int otherwise) { return vk && vk->option ? vk->option(id) : otherwise; }

@@ -247,6 +247,14 @@ bool create_device() {
     optional(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, dev.coop_matrix);
     dlss_device_extensions(want, exts);   // (hookshot: NVIDIA DLSS's, vk_dlss.cpp)
     reflex_device_extensions(want, exts);   // (hookshot: NVIDIA Reflex's, vk_reflex.cpp)
+    optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, dev.float_atomic_add);   // (eglantine: native float adds, emit_spirv_atomic.cpp)
+    // (eglantine) EDEN_NX2_MAXRECONV=1: maximal reconvergence for programs with subgroup operations (emit_spirv.cpp). It needs
+    // VK_KHR_shader_subgroup_uniform_control_flow. Off by default: a test
+    bool uniform_cf = false;
+    if (const char* m = getenv("EDEN_NX2_MAXRECONV"); m && strcmp(m, "0") != 0) {
+        optional(VK_KHR_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_EXTENSION_NAME, uniform_cf);
+        if (uniform_cf) optional(VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME, dev.max_reconvergence);
+    }
 
     // the queue: one family for graphics, compute and transfer
     vkGetPhysicalDeviceQueueFamilyProperties(dev.physical, &n, nullptr);
@@ -327,7 +335,17 @@ bool create_device() {
     VkPhysicalDeviceCooperativeMatrixFeaturesKHR coop{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
     if (dev.coop_matrix) *tail = &coop, tail = &coop.pNext;
     reflex_device_features(tail);   // (present ids, when NVIDIA Reflex's extensions are there)
+    VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR ucf{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR};
+    VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR maxr{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR};
+    if (dev.max_reconvergence) *tail = &ucf, ucf.pNext = &maxr, tail = &maxr.pNext;
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT afloat{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT};
+    if (dev.float_atomic_add) *tail = &afloat, tail = &afloat.pNext;
     vkGetPhysicalDeviceFeatures2(dev.physical, &f);
+    dev.float_atomic_add = dev.float_atomic_add && afloat.shaderBufferFloat32AtomicAdd;
+    if (dev.float_atomic_add) logf("vk: native float32 atomic add on storage buffers (VK_EXT_shader_atomic_float)");
+    dev.max_reconvergence = dev.max_reconvergence && ucf.shaderSubgroupUniformControlFlow && maxr.shaderMaximalReconvergence;
+    if (uniform_cf || dev.max_reconvergence) logf("vk: maximal reconvergence %s (EDEN_NX2_MAXRECONV)", dev.max_reconvergence ? "on" : "not supported");
     dev.view_2d_of_3d = dev.view_2d_of_3d && v2d3d.sampler2DViewOf3D;
     coop.cooperativeMatrixRobustBufferAccess = VK_FALSE;
     dev.coop_matrix = dev.coop_matrix && coop.cooperativeMatrix &&

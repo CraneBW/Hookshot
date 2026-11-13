@@ -526,6 +526,8 @@ Shader::Profile make_profile() {
     p.need_declared_frag_colors = false;
     p.max_subgroup_size = 32;
     p.min_ssbo_alignment = dev.props.limits.minStorageBufferOffsetAlignment;
+    p.support_maximal_reconvergence = dev.max_reconvergence;
+    p.support_float32_atomic_add = dev.float_atomic_add && !getenv("EDEN_NX2_NO_FADD");   // (eglantine: native float adds)
     return p;
 }
 
@@ -599,8 +601,32 @@ uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uin
     return 0;
 }
 
+// (eglantine) A draw asks for the same handles twice (its variant's check in program_for, then its descriptors): each thread that
+// replays numbers its draws (handle_memo_next) and keeps the handles its current draw evaluated. Threads that never number theirs
+// (translation jobs) keep nothing.
+namespace {
+thread_local uint64_t handle_epoch = 0;
+struct HandleMemo {
+    uint64_t epoch;
+    const void* st;
+    const void* s;
+    uint32_t program, value;
+};
+thread_local HandleMemo handle_memo[32];
+uint32_t stage_handle_eval(const NvnState& s, const Stage& st, uint32_t program);
+} // namespace
+void handle_memo_next() { handle_epoch++; }
 uint32_t stage_handle(const NvnState& s, const Stage& st, uint32_t program) {
     if (program >= st.info.handle_programs.size()) return 0;
+    if (!handle_epoch) return stage_handle_eval(s, st, program);
+    HandleMemo& m = handle_memo[(((uintptr_t)&st >> 4) * 31 + program) & 31];
+    if (m.epoch == handle_epoch && m.st == &st && m.s == &s && m.program == program) return m.value;
+    const uint32_t v = stage_handle_eval(s, st, program);
+    m = {handle_epoch, &st, &s, program, v};
+    return v;
+}
+namespace {
+uint32_t stage_handle_eval(const NvnState& s, const Stage& st, uint32_t program) {
     return Shader::EvaluateHandleProgram(
                st.info.handle_programs[program],
                [&](u32 index, u32 offset) -> u32 { return stage_cbuf_word(s, st, index, offset); },
@@ -619,6 +645,7 @@ uint32_t stage_handle(const NvnState& s, const Stage& st, uint32_t program) {
                })
         .value_or(0U);
 }
+} // namespace
 
 namespace {
 
@@ -627,27 +654,30 @@ namespace {
 /// a handle the shader reads from a storage buffer, its handle program's)
 uint32_t descriptor_handle(const NvnState& s, const Stage& st, const Shader::TextureDescriptor& d) {
     if (d.handle_program != ~0U) return stage_handle(s, st, d.handle_program);
-    const int stage = st.nvn_stage;
-    uint32_t h = driver_bank_word(s, (int)d.cbuf_index, stage, d.cbuf_offset);
-    if (d.has_secondary)
-        h = h << d.shift_left | driver_bank_word(s, (int)d.secondary_cbuf_index, stage, d.secondary_cbuf_offset)
-                                    << d.secondary_shift_left;
+    // (eglantine) from any constant buffer, as vk_draw.cpp's handle_of: the driver bank alone gave 0 for the game's uniform buffers
+    uint32_t h = stage_cbuf_word(s, st, d.cbuf_index, d.cbuf_offset);
+    if (d.has_secondary) h = h << d.shift_left | stage_cbuf_word(s, st, d.secondary_cbuf_index, d.secondary_cbuf_offset) << d.secondary_shift_left;
     return h;
 }
 /// (hookshot) a storage image descriptor's handle word (its handle program's, read from a storage buffer)
 uint32_t descriptor_handle(const NvnState& s, const Stage& st, const Shader::ImageDescriptor& d) {
     if (d.handle_program != ~0U) return stage_handle(s, st, d.handle_program);
-    return driver_bank_word(s, (int)d.cbuf_index, st.nvn_stage, d.cbuf_offset);
+    return stage_cbuf_word(s, st, d.cbuf_index, d.cbuf_offset);
 }
 uint8_t texture_answer(uint32_t handle) {
     if (!handle) return 0xFF;
     // (by the texture slot, until a slot is registered anew: variant checks ask on every draw)
-    static thread_local std::unordered_map<uint32_t, std::pair<uint32_t, uint8_t>> known;   // slot -> (version, answer)
+    // (eglantine: a table indexed by the slot, version << 9 | 0x100 | answer, instead of an unordered_map: asked on every draw)
+    static thread_local std::vector<uint64_t> known;
     const uint32_t id = handle & 0xFFFFF;
     const uint32_t version = texture_slot_version((int)id);
-    if (auto it = known.find(id); it != known.end() && it->second.first == version) return it->second.second;
+    if (id < known.size()) {
+        const uint64_t k = known[id];
+        if ((k & 0x100) && (uint32_t)(k >> 9) == version) return (uint8_t)k;
+    }
     const uint8_t a = (uint8_t)((uint8_t)handle_texture_type(handle) | (handle_is_integer(handle) ? 0x80 : 0));
-    known[id] = {version, a};
+    if (id >= known.size()) known.resize(std::max<size_t>((size_t)id + 1, known.size() * 2), 0);
+    known[id] = (uint64_t)version << 9 | 0x100 | a;
     return a;
 }
 /// What the bound textures answer now, for a program whose translation asked about them
@@ -1659,6 +1689,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         if (fsc) {
             Env fenv{s, *fsc, Shader::Stage::Fragment};
             auto fs = translate(fenv, true);
+            dump_ir(p, "fragment", fs->program, fsc->key);   // (eglantine: a mesh program's fragment stage too)
             questions += fenv.texture_questions;
             Shader::RuntimeInfo frt{};
             // (what the mesh program stores, and its per-primitive generics: Eden's MakeRuntimeInfo)
@@ -1799,10 +1830,19 @@ uint64_t pick_inputs(const NvnState& s, const uint8_t color_types[8]) {
 void answer_handles(const NvnState& s, const Program& p, std::vector<uint32_t>& out) {
     out.clear();
     for (const Program::Answer& a : p.answers) {
-        const uint32_t id = answer_handle(s, p, a) & 0xFFFFF;
-        out.push_back(id);
-        out.push_back(texture_slot_version((int)id));
+        const uint32_t h = answer_handle(s, p, a);   // (eglantine: the whole handle, so still_valid_handles needs no second read)
+        out.push_back(h);
+        out.push_back(texture_slot_version((int)(h & 0xFFFFF)));
     }
+}
+/// (eglantine) still_valid from the handles answer_handles just read: the draws of a program with other textures (most of a
+/// frame's: each material its own) read every handle twice
+bool still_valid_handles(const Program& p, const std::vector<uint32_t>& hs) {
+    for (size_t i = 0; i < p.answers.size() && 2 * i < hs.size(); i++) {
+        const uint32_t h = hs[2 * i];
+        if (h && answer_of(h, p.answers[i].image) != p.answers[i].type) return false;
+    }
+    return true;
 }
 } // namespace
 
@@ -1949,7 +1989,7 @@ const Program* program_for(const NvnState& s, ProgramKind kind, const uint8_t co
         answer_handles(s, *pk.p, now);
         if (now == pk.handles) return st_hit++, keep(pk.p);
         st_differ++;
-        if (still_valid(s, *pk.p)) {   // (other textures of the same types: the same variant)
+        if (still_valid_handles(*pk.p, now)) {   // (other textures of the same types: the same variant)
             pk.handles.swap(now);
             return keep(pk.p);
         }

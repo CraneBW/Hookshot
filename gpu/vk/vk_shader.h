@@ -28,6 +28,7 @@ struct Stage {
 /// A texture handle the stage reads from a storage buffer: its handle program (Shader::Info::handle_programs, Eden's
 /// recompiler) run over the stage's constant banks and storage buffers as the draw has them
 uint32_t stage_handle(const NvnState& s, const Stage& st, uint32_t program);
+void handle_memo_next();   // (eglantine) a new draw or dispatch on this thread: the handles kept for the last one go
 
 /// A translated program variant: its stages, in descriptor order. The pipeline layout and pipelines made for it live
 /// in vk_pipeline.cpp (keyed by key).

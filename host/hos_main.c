@@ -68,6 +68,22 @@ static void no_power_throttling(void) {
 }
 #endif
 
+/* (eglantine) HOS_PROCESS_PRIORITY=0 normal, 1 above normal (default), 2 high: the process's own priority class while it runs (Windows puts
+   it back when it exits). The game's threads run at the normal level, as the foreground window's threads do, and Windows raises
+   those for a while on their window's events: on the terrace the 40-90 ms stalls came with another app's interface busy
+   (its renderer 53 % of a core in the seconds with a stall against 6 % otherwise, hs205), the game's threads waiting, its
+   render thread pinned to one core */
+#ifdef _WIN32
+static void process_priority(void) {
+    const char *e = getenv("HOS_PROCESS_PRIORITY");
+    const int level = e ? atoi(e) : 1;   /* (above normal by default since hs206-hs209, the same route alternated: frames >= 40 ms
+                                             6 and 7 against 17 and 10, gaps >= 28 ms 23 and 21 against 34 and 27, the terrace's
+                                             repeats 0.51 and 0.36 a second against 0.65 and 0.55) */
+    const DWORD cls = level >= 2 ? HIGH_PRIORITY_CLASS : level == 1 ? ABOVE_NORMAL_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS;
+    if (level > 0 && SetPriorityClass(GetCurrentProcess(), cls)) hos_log("process priority class: %s", level >= 2 ? "high" : "above normal");
+}
+#endif
+
 int hos_game_is_mkw(void) { return !strcmp(hos_main_build_id, "d00e4f399e411d0613aa8d26b1c02fef"); }
 
 /* gen/hos_image.c (build.py lift) */
@@ -1408,6 +1424,7 @@ static int game_main(int argc, char **argv) {
 #ifdef _WIN32
     timeBeginPeriod(1);   /* 1 ms timer resolution: the 60 Hz vsync and the game's frame pacing sleep in short steps */
     no_power_throttling();
+    process_priority();
 #endif
     void hos_display_start(void);
     hos_display_start();  /* the game's window; HOS_HEADLESS=1 for none */

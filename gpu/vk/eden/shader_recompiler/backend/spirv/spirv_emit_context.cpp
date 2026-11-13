@@ -1344,9 +1344,31 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
     }};
     // (hookshot) the helpers below are DontInline: inlined at each of a culling program's hundreds of global accesses, with EvilOOT's
     // fuller buffer search, NVIDIA's compiler took 41 s on 53caac5f and the driver reset. Lichii PR 408 found the same (161 s for 68 programs)
+    // (eglantine, after Fritchii 151c77c85, which found them ~2.6 fps faster inlined in Hyrule Field) EDEN_NX2_INLINE_GLOBALS=1: the
+    // graphics stages inline them (the forest's geometry passes call them in their mesh stages, per vertex), compute keeps
+    // DontInline; =2: inlined everywhere. Off by default: tried as the default (hs349), the driver compiled the house's pipelines
+    // for 28.5 + 9.8 + 7.1 s at their first draws after the preparation, and the house's GPU time went up (8.9 -> 9.4 ms)
+    static const int gm_inline{[] {
+        const char* e{std::getenv("EDEN_NX2_INLINE_GLOBALS")};
+        return e ? std::atoi(e) : 0;
+    }()};
+    const spv::FunctionControlMask gm_ctl{gm_inline >= 2 || (gm_inline == 1 && stage != Stage::Compute)
+                                              ? spv::FunctionControlMask::MaskNone
+                                              : spv::FunctionControlMask::DontInline};
     const auto define_load{[&](DefPtr ssbo_member, Id element_pointer, Id type, u32 shift) {
         const Id function_type{TypeFunction(type, U64)};
-        const Id func_id{OpFunction(type, spv::FunctionControlMask::DontInline, function_type)};
+        // (upstream f78c1757, PR 1334, tracker 994: the floating trees; brought here 11/11 after the player saw pines in the
+        // sky at Hyrule Castle, there in our builds since night8 at least) the task and mesh stages' load helpers are
+        // inlined (EDEN_NX2_GM_INLINE=0: not; an EDEN_ switch, so in the program cache's stamp). Not inlined, NVIDIA's
+        // compiler (RTX 3070, Windows) gave OoT's tree task 3cb76827 a wrong address for its third load:
+        // n = load(file + 4), code = load(cells[e]), then load(file + (n + 9 + e) * 4) went to file + (code + 9 + e) * 4, the
+        // second call's result in place of the first's, though the SPIR-V names the first. That load, the cell's end in the
+        // placement file's prefix sums, read 0 outside every buffer, and min(end - start, 256) made every visible cell 256
+        // trees, the next cells' trees drawn in its place: the wall of trees in the sky. The culling's compute programs, with
+        // hundreds of global loads, keep the helper (NVIDIA took 41 s on one inlined, above)
+        static const bool tm_inline{!std::getenv("EDEN_NX2_GM_INLINE") || std::getenv("EDEN_NX2_GM_INLINE")[0] != '0'};
+        const bool inline_here{tm_inline && (stage == Stage::Task || stage == Stage::Mesh)};
+        const Id func_id{OpFunction(type, inline_here ? spv::FunctionControlMask::Inline : gm_ctl, function_type)};
         const Id addr{OpFunctionParameter(U64)};
         define_body(ssbo_member, addr, element_pointer, shift,
                     [&](Id ssbo_pointer) { OpReturnValue(OpLoad(type, ssbo_pointer)); });
@@ -1360,7 +1382,7 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
     }};
     const auto define_write{[&](DefPtr ssbo_member, Id element_pointer, Id type, u32 shift) {
         const Id function_type{TypeFunction(void_id, U64, type)};
-        const Id func_id{OpFunction(void_id, spv::FunctionControlMask::DontInline, function_type)};
+        const Id func_id{OpFunction(void_id, gm_ctl, function_type)};
         const Id addr{OpFunctionParameter(U64)};
         const Id data{OpFunctionParameter(type)};
         define_body(ssbo_member, addr, element_pointer, shift, [&](Id ssbo_pointer) {
@@ -1854,6 +1876,10 @@ void EmitContext::DefineStorageBuffers(const Info& info, u32& binding) {
     if (info.uses_global_decrement) {
         decrement_cas_ssbo = CasLoop(*this, Operation::Decrement, storage_types.U32.array,
                                      storage_types.U32.element, U32[1], spv::Scope::Device);
+    }
+    if (info.uses_atomic_f32_add && profile.support_float32_atomic_add) {   // (eglantine: emit_spirv_atomic.cpp)
+        AddExtension("SPV_EXT_shader_atomic_float_add");
+        AddCapability(spv::Capability::AtomicFloat32AddEXT);
     }
     if (info.uses_atomic_f32_add) {
         f32_add_cas = CasLoop(*this, Operation::FPAdd, storage_types.U32.array,

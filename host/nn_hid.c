@@ -49,6 +49,30 @@ static int64_t sampling;
 int rx_option(int id, int otherwise);
 /* (the Insert menu takes the keyboard while it is open) */
 static int key(int vk) { return !rx_option(1, 0) && (GetAsyncKeyState(vk) & 0x8000) != 0; }
+/* (eglantine) Letter and digit keys by their place on the keyboard, not their label: the bindings are a US keyboard's
+   (WASD, Q, E, Z...), and on a French AZERTY one 'W' 'A' 'S' 'D' by label put the left stick on W A S D, a scattered
+   cross. A US key's scan code is looked up in the layout of the window in front: Z Q S D on AZERTY, W A S D on QWERTY. */
+static int pos(int us) {
+    static const unsigned char letters[26] = {0x1E, 0x30, 0x2E, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32,
+                                              0x31, 0x18, 0x19, 0x10, 0x13, 0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C};
+    unsigned scan = us >= 'A' && us <= 'Z' ? letters[us - 'A'] : us >= '1' && us <= '9' ? 0x02u + (unsigned)(us - '1')
+                  : us == '0' ? 0x0Bu : us == VK_OEM_MINUS ? 0x0Cu : us == VK_OEM_PLUS ? 0x0Du : 0u;
+    if (!scan) return us;
+    static HKL cached_for;
+    static int vk_of[128];
+    HKL hkl = GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), NULL));
+    if (!hkl) hkl = GetKeyboardLayout(0);
+    if (hkl != cached_for) {
+        cached_for = hkl;
+        memset(vk_of, 0, sizeof vk_of);
+    }
+    if (!vk_of[scan]) {
+        const UINT vk = MapVirtualKeyExW(scan, MAPVK_VSC_TO_VK, hkl);
+        vk_of[scan] = vk ? (int)vk : us;
+    }
+    return vk_of[scan];
+}
+static int kpos(int us) { return key(pos(us)); }
 
 int hos_mouse_take(int32_t *dx, int32_t *dy);   /* display.c */
 
@@ -606,7 +630,7 @@ static int bound_down(int i, int mouse) {
         const int vk = (int)key_bind[i][k];
         if (vk <= 0) continue;
         const int m = mouse_vk_slot(vk);
-        if (m >= 0 ? mouse && mouse_armed[m] && key(vk) : kmap_down(key_bind[i][k], key)) return 1;
+        if (m >= 0 ? mouse && mouse_armed[m] && key(vk) : kmap_down(key_bind[i][k], kpos)) return 1;   /* (eglantine) keys by their place: ZQSD on AZERTY where WASD is bound */
     }
     return 0;
 }
@@ -665,7 +689,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
        used to follow the player's pad (and pressed things in its own menus). */
     /* (hookshot) The player's devices count during a script too (the user plays along in test runs, 2026-11-05):
        the presses add to theirs. HOS_INPUT_EXCLUSIVE=1: the script alone until 5 s after its last press, as before */
-    static int exclusive = -1;
+    static int exclusive = -1, script_only = -1;
     if (exclusive < 0) exclusive = getenv("HOS_INPUT_EXCLUSIVE") != NULL;
     if (exclusive && npresses > 0 && script_elapsed_ms(hos_now_ns()) < script_end_ms + 5000)
         return;

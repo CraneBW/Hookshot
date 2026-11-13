@@ -1,4 +1,4 @@
-"""The parts HookshotBuilder-Setup.exe downloads (builder/setup/setup.c), from a Hookshot Builder package folder.
+"""The parts Hookshot-Setup.exe downloads (launcher/setup/setup.c), from a Hookshot package folder.
 
     python -I scripts/make_setup_parts.py <package folder> <tag> <out folder> [--base <url the parts are served from>]
                                           [--reuse <an earlier release's hookshot-setup.txt>]
@@ -8,12 +8,12 @@ in every release, the .NET runtime, Python, emsdk, the CPM packages and third_pa
 its official release. Each zip is deterministic (sorted names, fixed dates and attributes): a part whose files did not change
 has the same SHA-256 in the next release, and the setup takes it from its download cache instead of downloading it again.
 
-Writes <out>/hookshot-setup.txt and one HookshotBuilder-<part>-<sha256 prefix>.zip per part (upload the ones the builder-parts
+Writes <out>/hookshot-setup.txt and one Hookshot-<part>-<sha256 prefix>.zip per part (upload the ones the builder-parts
 release lacks). Scripts the build does not use (.ps1, .bat, .js,
 .html: antivirus machine-learning guesses fire on them) are left out.
 
 --reuse: a part whose tools/<name> folder the package lacks is taken from that list as it is (its line, with its URL), so a
-package made in CI (.github/workflows/windows-builder.yml) carries the Python, emsdk, CPM and wgpu-native parts the maintainer
+package made in CI (.github/workflows/windows.yml) carries the Python, emsdk, CPM and wgpu-native parts the maintainer
 made. Without the folder and without the part in that list it is an error.
 """
 import argparse
@@ -44,7 +44,7 @@ def write_zip(path, root, names):
     """Deterministic: the same files give the same bytes (sorted, a fixed date, fixed attributes)"""
     with zipfile.ZipFile(path + ".new", "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for n in sorted(names):
-            info = zipfile.ZipInfo("HookshotBuilder/" + n, date_time=(2026, 1, 1, 0, 0, 0))
+            info = zipfile.ZipInfo("Hookshot/" + n, date_time=(2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             with open(os.path.join(root, n.replace("/", os.sep)), "rb") as f:
@@ -66,18 +66,18 @@ def main():
     p.add_argument("--reuse", help="an earlier hookshot-setup.txt: the parts the package has no folder for, from it")
     a = p.parse_args()
     root = os.path.abspath(a.package)
-    if not os.path.isfile(os.path.join(root, "HookshotBuilder.exe")):
-        sys.exit("not a Hookshot Builder package folder: %s" % root)
+    if not os.path.isfile(os.path.join(root, "Hookshot.exe")):
+        sys.exit("not a Hookshot package folder: %s" % root)
     # (the parts live in one release of their own, named by their checksum: a part that did not change is not uploaded again, and a
-    # release itself holds only HookshotBuilder.exe (the setup) and the list it reads)
-    base = (a.base or "https://github.com/NotRexed/Hookshot/releases/download/builder-parts").rstrip("/")
+    # release itself holds only Hookshot.exe (the setup) and the list it reads)
+    base = (a.base or "https://git.notrexed.dev/Hookshot/Hookshot/releases/download/builder-parts").rstrip("/")
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(root, "tools", "version.txt"), "w", newline="\n") as f:
         f.write(a.tag + "\n")
 
     top = sorted(os.listdir(root))
     builder_files = [n for n in top if os.path.isfile(os.path.join(root, n)) and
-                     (n.startswith("HookshotBuilder") or n in ("LICENSE", "README.txt"))]   # (HookshotBuilder-Setup.exe too: Repair runs it)
+                     (n.startswith("Hookshot") or n in ("LICENSE", "README.txt"))]   # (Hookshot-Setup.exe too: Repair runs it)
     runtime_files = [n for n in top if os.path.isfile(os.path.join(root, n)) and n not in builder_files]
     runtime_dirs = [n for n in top if os.path.isdir(os.path.join(root, n)) and n != "tools"]
     tools = sorted(os.listdir(os.path.join(root, "tools")))
@@ -94,8 +94,9 @@ def main():
         with open(a.reuse, encoding="utf-8") as f:
             for line in f.read().splitlines():
                 w = line.split()
-                if len(w) == 7 and w[0] == "part" and w[6].rsplit("/", 1)[-1].startswith("HookshotBuilder-"):
-                    reuse[w[6].rsplit("/", 1)[-1][len("HookshotBuilder-"):].rsplit("-", 1)[0]] = line
+                # (a part made under another name unpacks into another folder: scripts/release_parts.py adopt repacks it first)
+                if len(w) == 7 and w[0] == "part" and w[6].rsplit("/", 1)[-1].startswith("Hookshot-"):
+                    reuse[w[6].rsplit("/", 1)[-1][len("Hookshot-"):].rsplit("-", 1)[0]] = line
     lines = ["tag %s" % a.tag]
     for name in ("app", "dotnet") + TOOLS_PARTS:
         if not parts.get(name):
@@ -105,15 +106,15 @@ def main():
                 lines.append(reuse[name])
                 print("%-12s (as in %s)" % (name, os.path.basename(a.reuse)), flush=True)
             continue
-        zp = os.path.join(a.out, "HookshotBuilder-%s.zip" % name)
+        zp = os.path.join(a.out, "Hookshot-%s.zip" % name)
         sha, size = write_zip(zp, root, parts[name])
-        named = os.path.join(a.out, "HookshotBuilder-%s-%s.zip" % (name, sha[:12]))
+        named = os.path.join(a.out, "Hookshot-%s-%s.zip" % (name, sha[:12]))
         os.replace(zp, named)
         zp = named
         lines.append("part %s %d . - - %s/%s" % (sha, size, base, os.path.basename(zp)))
         print("%-12s %5d files %5d MB  %s" % (name, len(parts[name]), size >> 20, sha[:16]), flush=True)
-    lines.append("part %s %d HookshotBuilder/tools %s llvm-mingw %s" % LLVM)
-    lines.append("run HookshotBuilder/HookshotBuilder.exe")
+    lines.append("part %s %d Hookshot/tools %s llvm-mingw %s" % LLVM)
+    lines.append("run Hookshot/Hookshot.exe")
     with open(os.path.join(a.out, "hookshot-setup.txt"), "w", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
 

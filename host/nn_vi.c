@@ -96,6 +96,35 @@ HLE(_ZN2nn2vi15GetNativeWindowEPPvPNS0_5LayerE) {
    HOS_NO_PACING=1: as fast as it can. */
 static volatile int present_interval = 1;
 static int64_t next_frame_at, window_start, frames_in_window;
+/* (eglantine) The frame rate cap: the game's 60, or unlocked (HOS_FPS_UNLOCKED=1):
+   up to the display's refresh, game time following the clock (realtime_step below, whatever the Game speed row says: per frame
+   at 100 fps the game would run 1.67 times too fast). HOS_FPS_MAX=<fps>: that cap instead of the display's (60 to 240). */
+static int display_hz(void) {
+    static int hz;
+    if (!hz) {
+        DEVMODEA dm;
+        memset(&dm, 0, sizeof dm);
+        dm.dmSize = sizeof dm;
+        hz = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1 ? (int)dm.dmDisplayFrequency : 60;
+        hz = hz < 60 ? 60 : hz > 240 ? 240 : hz;
+    }
+    return hz;
+}
+static int fps_max(void) {
+    int rx_option(int id, int otherwise);
+    static int env = -1;
+    if (env < 0) env = getenv("HOS_FPS_MAX") ? atoi(getenv("HOS_FPS_MAX")) : 0;
+    static int unlocked = -1;   /* (eglantine, on upstream: HOS_FPS_UNLOCKED=1 only; option 4 is the pads' row there) */
+    if (unlocked < 0) unlocked = getenv("HOS_FPS_UNLOCKED") && atoi(getenv("HOS_FPS_UNLOCKED")) != 0;
+    (void)rx_option;
+    if (!unlocked && env <= 60) return 60;
+    const int cap = env > 60 ? env : display_hz();
+    return cap < 60 ? 60 : cap > 240 ? 240 : cap;
+}
+static int64_t frame_period(void) {   /* (the display interval the frames are paced to) */
+    const int cap = fps_max();
+    return present_interval == 1 && cap > 60 ? 1000000000LL / cap : 1000000000LL / 60 * present_interval;
+}
 static volatile LONG64 presents;
 int hos_vi_native_interval(Ctx *c, int requested) {
     (void)c;
@@ -246,9 +275,12 @@ static void realtime_step(int64_t now) {
             hos_log("vi: frame limiter %d, vrr %d %d, nominal %d, controller +0x58.. %d %d %d %d", *limit, *(uint8_t *)GP(mod + 0x231),
                     *(uint8_t *)GP(mod + 0x232), *(int *)GP(mod + 0x2c8), *(int *)GP(mod + 0x270 + 0x58), *(int *)GP(mod + 0x270 + 0x28),
                     *(int *)GP(mod + 0x270 + 0x2c), *(int *)GP(mod + 0x270 + 0x30));
-        if (target && *limit > 0 && *limit < target) *limit = target;
+        const int cap = fps_max();
+        if (cap > 60 && *limit > 0 && *limit < cap) *limit = cap;   /* (unlocked: the game's limiter up to the cap) */
+        else if (target && *limit > 0 && *limit < target) *limit = target;
     }
-    if (!rx_option(0, 1)) {   /* (the Insert menu: per frame) */
+    const int cap = fps_max();
+    if (!rx_option(0, 1) && cap <= 60) {   /* (the Insert menu: per frame) */
         int *slot = (int *)GP(mod + 0x2c8);
         if (*slot >= 15 && *slot <= 60) *slot = 60;
         return;
@@ -271,11 +303,12 @@ static void realtime_step(int64_t now) {
     double sum = 0;
     for (unsigned i = 0; i < count; i++) sum += samples[i];
     double ratio = sum / count * 60.0 + carry;
-    ratio = ratio < 1.0 ? 1.0 : ratio > 4.0 ? 4.0 : ratio;
+    const double least = 60.0 / cap;   /* (unlocked: steps shorter than 1/60 s) */
+    ratio = ratio < least ? least : ratio > 4.0 ? 4.0 : ratio;
     int fps = (int)(60.0 / ratio + 0.5);
-    fps = fps < 15 ? 15 : fps > 60 ? 60 : fps;
+    fps = fps < 15 ? 15 : fps > cap ? cap : fps;
     int *slot = (int *)GP(mod + 0x2c8);
-    if (*slot < 15 || *slot > 60) {
+    if (*slot < 15 || *slot > 240) {
         static int logged;
         if (!logged++) hos_log("vi: the graphics module's frame rate reads %d: no real-time step", *slot);
         return;
@@ -321,7 +354,7 @@ void hos_vi_native_presented(void) {
         if (ms < 0) ms = getenv("HOS_FRAME_SLEEP_MS") ? atoi(getenv("HOS_FRAME_SLEEP_MS")) : 0;
         if (ms) hos_sleep_ns(ms * 1000000LL);
     }
-    const int64_t period = 1000000000LL / 60 * present_interval, now = hos_now_ns();
+    const int64_t period = frame_period(), now = hos_now_ns();
     realtime_step(now);
     /* (behind by more than a frame: the next one is paced from now, with no burst to catch up) */
     next_frame_at = next_frame_at && now - next_frame_at < period ? next_frame_at + period : now + period;
@@ -348,6 +381,22 @@ void hos_vi_native_presented(void) {
     if (last_present) {
         const int64_t d = now - last_present;
         hist[d < 15500000 ? 0 : d < 17800000 ? 1 : d < 22000000 ? 2 : d < 30000000 ? 3 : d < 40000000 ? 4 : 5]++;
+    }
+    {   /* (eglantine) HOS_PRESENT_LOG=<file>: every present's time (ns since the first), one per line, for the stutter's pattern */
+        static FILE *plog;
+        static int plog_read;
+        static int64_t plog_t0;
+        if (!plog_read) {
+            plog_read = 1;
+            if (getenv("HOS_PRESENT_LOG")) {
+                plog = fopen(getenv("HOS_PRESENT_LOG"), "w"), plog_t0 = now;
+                hos_log("vi: present log starts at %lld ns", (long long)now);   /* (aligns it with HOS_SAMPLE_ALL's "t0") */
+            }
+        }
+        if (plog) {
+            fprintf(plog, "%lld\n", (long long)(now - plog_t0));
+            if (!(n % 60)) fflush(plog);
+        }
     }
     last_present = now;
     if (now - window_start >= 5000000000LL) {

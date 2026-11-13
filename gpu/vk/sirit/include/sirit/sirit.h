@@ -1386,6 +1386,9 @@ public:
     /// 3) store the New Value back through Pointer.
     Id OpAtomicIAdd(Id result_type, Id pointer, Id memory, Id semantics, Id value);
 
+    /// (eglantine) The same with floating-point addition (SPV_EXT_shader_atomic_float_add, OpAtomicFAddEXT).
+    Id OpAtomicFAdd(Id result_type, Id pointer, Id memory, Id semantics, Id value);
+
     /// Perform the following steps atomically with respect to any other atomic accesses within
     /// Scope to the same location:
     /// 1) load through Pointer to get an Original Value,

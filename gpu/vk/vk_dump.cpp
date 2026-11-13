@@ -352,6 +352,28 @@ void dump_image(VkCommandBuffer cmd, Texture* tex, uint32_t level, uint32_t laye
         seq++;
         return;
     }
+    {   // (eglantine, RX_VK_DUMP_Z=<z>[,<z>...]: a 3D image's slices z, each its own picture, instead of slice 0)
+        static const std::vector<uint32_t> zs = [] {
+            std::vector<uint32_t> v;
+            if (const char* e = getenv("RX_VK_DUMP_Z"))
+                for (const char* q = e; *q;) {
+                    v.push_back((uint32_t)atoi(q));
+                    while (*q && *q != ',') q++;
+                    if (*q) q++;
+                }
+            return v;
+        }();
+        static thread_local bool inner = false;
+        if (!inner && !zs.empty() && tex->type == VK_IMAGE_TYPE_3D) {
+            inner = true;
+            for (const uint32_t z : zs) {
+                const std::string w = std::string(what) + "_z" + std::to_string(z);
+                dump_image(cmd, tex, level, z, w.c_str());
+            }
+            inner = false;
+            return;
+        }
+    }
     level = std::min(level, tex->levels - 1);
     Item it;
     it.kind = kind_of(tex->format);

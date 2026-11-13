@@ -372,6 +372,15 @@ Id EmitStorageAtomicExchange32x2(EmitContext& ctx, const IR::Value& binding,
 
 Id EmitStorageAtomicAddF32(EmitContext& ctx, const IR::Value& binding, const IR::Value& offset,
                            Id value) {
+    // (eglantine) the device's own float add where it has one (VK_EXT_shader_atomic_float): the compare-exchange loop below
+    // spun under contention, OoT's sky light sums (ab7699ee, every thread adding into the same 4 floats) took 1.4 ms of a
+    // frame over the Kokiri village (hs371). EDEN_NX2_NO_FADD=1: the loop everywhere, as before
+    if (ctx.profile.support_float32_atomic_add && binding.IsImmediate() && Sirit::ValidId(ctx.ssbos[binding.U32()].F32)) {
+        const Id pointer{StoragePointer(ctx, ctx.storage_types.F32, &StorageDefinitions::F32, binding, offset,
+                                        sizeof(f32))};
+        const auto [scope, semantics]{AtomicArgs(ctx)};
+        return ctx.OpAtomicFAdd(ctx.F32[1], pointer, scope, semantics, value);
+    }
     const Id ssbo{ctx.ssbos[binding.U32()].U32};
     const Id base_index{StorageIndex(ctx, offset, sizeof(u32))};
     return ctx.OpFunctionCall(ctx.F32[1], ctx.f32_add_cas, base_index, value, ssbo);

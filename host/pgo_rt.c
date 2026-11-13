@@ -24,18 +24,27 @@ __declspec(allocate(".lprfd$Z")) __attribute__((used, aligned(8))) char pgo_dat_
 __declspec(allocate(".lprfn$A")) __attribute__((used)) const char pgo_nam_a[1] = {0};
 __declspec(allocate(".lprfn$Z")) __attribute__((used)) const char pgo_nam_z[1] = {0};
 
-enum { DATA_SIZE = 72 };
+/* (raw format 10 for clang 22 and older: 64-byte records, no uniform counter fields in the header; 11 after) */
+#if defined(__clang_major__) && __clang_major__ <= 22
+enum { DATA_SIZE = 64, RAW_VERSION = 10 };
+#define RAW_VERSION_11_FIELDS 0
+#else
+enum { DATA_SIZE = 72, RAW_VERSION = 11 };
+#define RAW_VERSION_11_FIELDS 1
+#endif
 
 static void pgo_write(const char *path) {
-    const char *cb = pgo_cnt_a + 8, *ce = pgo_cnt_z, *db = pgo_dat_a + DATA_SIZE, *de = pgo_dat_z, *nb = pgo_nam_a + 1, *ne = pgo_nam_z;
+    const char *cb = pgo_cnt_a + 8, *ce = pgo_cnt_z, *db = pgo_dat_a + sizeof pgo_dat_a, *de = pgo_dat_z, *nb = pgo_nam_a + 1, *ne = pgo_nam_z;
     const uint64_t ndata = (uint64_t)(de - db) / DATA_SIZE, ncnt = (uint64_t)(ce - cb) / 8, nnames = (uint64_t)(ne - nb);
     const uint64_t header[] = {
         0xff6c70726f667281ULL,        /* magic: \xfflprofr\x81 */
-        11,                           /* (the format llvm-profdata 24 reads) */
+        RAW_VERSION,                  /* (11: the format llvm-profdata 24 reads; 10 for clang 22) */
         0,                            /* binary ids */
         ndata, 0, ncnt, 0,
         0, 0,                         /* bitmap */
+#if RAW_VERSION_11_FIELDS
         0, 0, 0,                      /* uniform counters */
+#endif
         nnames,
         (uint64_t)(uintptr_t)cb - (uint64_t)(uintptr_t)db,   /* CountersDelta */
         (uint64_t)0,                  /* BitmapDelta */
@@ -83,7 +92,11 @@ static DWORD WINAPI pgo_thread(void *arg) {
     return 0;
 }
 
+/* (eglantine) the Vulkan back end's own copy (nx2/build.py, RX_VK_PGO=gen) reads another variable: -DPGO_ENV="RX_VK_PGO_FILE" */
+#ifndef PGO_ENV
+#define PGO_ENV "HOS_PGO"
+#endif
 __attribute__((constructor)) static void pgo_start(void) {
-    const char *e = getenv("HOS_PGO");
+    const char *e = getenv(PGO_ENV);
     if (e) CreateThread(NULL, 0, pgo_thread, _strdup(e), 0, NULL);
 }

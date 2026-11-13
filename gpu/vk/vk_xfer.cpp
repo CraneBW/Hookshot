@@ -53,11 +53,23 @@ void log_big_copy(const char* kind, const Texture* t, uint32_t level, uint32_t l
          (unsigned long long)src, t->gpu_written ? " (rendered)" : "", t->released ? " (finalized)" : "");
 }
 
-bool resolve(const nvn_tex* t, const nvn_view* v, bool has_v, const NVNcopyRegion& r_in, Sub& s, bool scaled_ok = false) {
+/// (dst: the texture the copy or the clear writes)
+bool resolve(const nvn_tex* t, const nvn_view* v, bool has_v, const NVNcopyRegion& r_in, Sub& s, bool scaled_ok = false,
+             bool dst = false) {
     NVNcopyRegion r = r_in;
     if (!t || !t->gpu) return false;
     const nvn_view* view = has_v ? v : nullptr;
-    s.tex = texture_get(t, true);
+    if (dst) {
+        // (eglantine, 12/11) a destination the GPU drew and the game finalized is not uploaded over from the game's memory
+        // first (vk_texture.cpp texture_touch): a copy or a clear of part of it kept the rest as that memory had it. One the
+        // CPU filled is uploaded as before: a copy into part of it needs the rest
+        Texture* w = texture_get(t, false);
+        texture_write_targets(&w, w ? 1 : 0, nullptr);
+        s.tex = texture_get(t, true);
+        texture_write_targets(nullptr, 0, nullptr);
+    } else {
+        s.tex = texture_get(t, true);
+    }
     if (!s.tex) {
         warn(0, "copy of a texture with no image: skipped");
         return false;
@@ -196,7 +208,7 @@ void copy_b2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_bt& p, bool to
         if (astc) return;   // (others without CPU access to the buffer: on the GPU, below)
     }
     Sub s;
-    if (!resolve(p.tex, &p.view, p.has_view != 0, p.r, s)) return;
+    if (!resolve(p.tex, &p.view, p.has_view != 0, p.r, s, false, to_image)) return;
     uint64_t size = 0;
     VkBufferImageCopy c{};
     BufferRef span;
@@ -209,6 +221,10 @@ void copy_b2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_bt& p, bool to
         warn(5, "copy of a buffer into a depth-stencil texture: skipped");
         return;
     }
+    if (pass_trace_on())   // (eglantine, diagnostic)
+        trace_line("copy %s #%u %#llx %ux%u f%#x%s, buffer %#llx (guest %#llx), %llu bytes", to_image ? "b2t" : "t2b", s.tex->id,
+                   (unsigned long long)s.tex->gpu, s.tex->width, s.tex->height, s.tex->nvn_format, s.tex->released ? " (finalized)" : "",
+                   (unsigned long long)p.buf, (unsigned long long)host->gpu_guest(p.buf), (unsigned long long)size);
     end_pass(cmd);
     GprofSpan gp(cmd, to_image ? "xfer copy buffer->texture (with its barriers)" : "xfer copy texture->buffer (with its barriers)");
     gp.bytes = size;
@@ -228,7 +244,7 @@ void copy_b2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_bt& p, bool to
 void copy_t2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_tt& p) {
     Sub s, d;
     if (!resolve(p.src, &p.sv, p.has_sv != 0, p.sr, s, true)) return;
-    if (!resolve(p.dst, &p.dv, p.has_dv != 0, p.dr, d, true)) return;
+    if (!resolve(p.dst, &p.dv, p.has_dv != 0, p.dr, d, true, true)) return;
     {   // (RX_VK_LOG_COPY: the texture copies, 400 of them)
         static const bool log_copy = getenv("RX_VK_LOG_COPY") != nullptr;
         static int logged;
@@ -240,6 +256,10 @@ void copy_t2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_tt& p) {
                  d.w, d.h, p.flags);
     }
     log_big_copy("texture", d.tex, d.level, d.layer, d.x, d.y, d.w, d.h, s.tex->gpu);
+    if (pass_trace_on())   // (eglantine, diagnostic: the copies in the frame's pass trace)
+        trace_line("copy t2t #%u %#llx %ux%u f%#x%s -> #%u %#llx %ux%u f%#x%s", s.tex->id, (unsigned long long)s.tex->gpu,
+                   s.tex->width, s.tex->height, s.tex->nvn_format, s.tex->released ? " (finalized)" : "", d.tex->id,
+                   (unsigned long long)d.tex->gpu, d.tex->width, d.tex->height, d.tex->nvn_format, d.tex->released ? " (finalized)" : "");
     if (s.tex == d.tex && s.level == d.level && s.layer == d.layer) {
         warn(6, "texture copy within one subresource: skipped");
         return;
@@ -308,10 +328,13 @@ void copy_t2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_tt& p) {
 
 void clear_tex(VkCommandBuffer cmd, NvnState& st, const nvn_p_clear_tex& p) {
     Sub s;
-    if (!resolve(p.tex, &p.view, p.has_view != 0, p.r, s)) return;
+    if (!resolve(p.tex, &p.view, p.has_view != 0, p.r, s, false, true)) return;
     const uint32_t lw = std::max(1u, s.tex->width >> s.level), lh = std::max(1u, s.tex->height >> s.level);
     const bool whole = !s.x && !s.y && s.w == lw && s.h == lh;
     if ((p.mask & 0xf) != 0xf && (s.tex->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) warn(8, "texture clear with a channel mask: cleared whole");
+    if (pass_trace_on())   // (eglantine, diagnostic)
+        trace_line("clear tex #%u %#llx %ux%u f%#x%s", s.tex->id, (unsigned long long)s.tex->gpu, s.tex->width, s.tex->height,
+                   s.tex->nvn_format, s.tex->released ? " (finalized)" : "");
     end_pass(cmd);
     GprofSpan gp(cmd, "xfer clear texture (with its barriers)");
     full_barrier(cmd);

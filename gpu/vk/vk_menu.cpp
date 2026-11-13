@@ -1649,6 +1649,7 @@ void menu_init() {
         for (Row& r : rows)
             if (r.value == &opts.upscale) *r.value = std::min(std::max(atoi(e), r.lo), r.hi);
     if (const char* e = getenv("HOS_REALTIME_STEP")) opts.realtime = atoi(e) != 0;
+    if (const char* e = getenv("HOS_FPS_UNLOCKED")) opts.framerate = atoi(e) != 0;
     if (const char* e = getenv("HOS_DYNRES")) opts.resolution = atoi(e) != 0 ? 0 : 1;
     if (const char* e = getenv("HOS_OUTPUT_RES")) opts.output_res = output_choice(atoi(e));
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)

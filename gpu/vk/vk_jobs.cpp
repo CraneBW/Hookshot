@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <exception>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -23,8 +24,11 @@ struct Entry {
     const std::atomic<bool>* flag;   // (what the job sets when done, for jobs_wait to find it while queued)
 };
 std::deque<Entry> queue;
+std::deque<std::function<void()>> later;   // (eglantine: background work, taken only when queue is empty: jobs_push_background)
 std::atomic<int> pending{0};
 bool started = false;
+unsigned workers_n = 0;
+int background_running = 0;   // (eglantine: workers on background jobs now; at most workers_n / 2, the rest kept for what draws wait on)
 
 // (a job that throws: the game ended at once ("approach Malon, crash": an exception escaped a worker, KERNELBASE's RaiseException
 // with no handler, 2026-11-08). It is logged and let go; what it was making stays not ready and is asked for again)
@@ -46,20 +50,37 @@ void worker() {
     ub_thread_off();
     for (;;) {
         std::function<void()> fn;
+        bool background = false;
         {
             std::unique_lock lk(mu);
-            work_cv.wait(lk, [] { return !queue.empty(); });
-            fn = std::move(queue.front().fn);
-            queue.pop_front();
+            const auto may_take_later = [] { return !later.empty() && background_running < (int)std::max(1u, workers_n / 2); };
+            work_cv.wait(lk, [&] { return !queue.empty() || may_take_later(); });
+            background = queue.empty();
+            if (background) {
+                fn = std::move(later.front());
+                later.pop_front();
+                background_running++;
+            } else {
+                fn = std::move(queue.front().fn);
+                queue.pop_front();
+            }
         }
         run_guarded(fn);
+        if (background) {
+            std::lock_guard lk(mu);
+            background_running--;
+            work_cv.notify_one();   // (another background job may start now)
+        }
         pending--;
         jobs_notify();
     }
 }
 
 void start() {
-    const unsigned n = std::clamp(std::thread::hardware_concurrency() / 3, 2u, 4u);
+    // (eglantine: half the hardware threads, 2 to 6, and background work (compute pipelines made ahead) on half of them at most: with
+    // four workers all in multi-second compute compiles, a pipeline a draw waited on had no worker for seconds)
+    const unsigned n = std::clamp(std::thread::hardware_concurrency() / 2, 2u, 6u);
+    workers_n = n;
     for (unsigned i = 0; i < n; i++) std::thread(worker).detach();
     started = true;
     logf("vk: %u background workers (shader translation, pipelines)", n);
@@ -106,6 +127,13 @@ void jobs_push_serial(std::function<void()> fn) {
     sq.push_back(std::move(fn));
     scv.notify_one();
 }
+void jobs_push_background(std::function<void()> fn) {
+    std::lock_guard lk(mu);
+    if (!started) start();
+    pending++;
+    later.push_back(std::move(fn));
+    work_cv.notify_one();
+}
 void jobs_notify() {
     std::lock_guard lk(mu);
     done_cv.notify_all();
@@ -129,6 +157,10 @@ void jobs_wait(const std::atomic<bool>& flag) {
                 break;
             }
     done_cv.wait(lk, [&] { return flag.load(std::memory_order_acquire); });
+}
+bool jobs_wait_until(const std::atomic<bool>& flag, std::chrono::steady_clock::time_point deadline) {
+    std::unique_lock lk(mu);
+    return done_cv.wait_until(lk, deadline, [&] { return flag.load(std::memory_order_acquire); });
 }
 int jobs_pending() {
     return pending.load();

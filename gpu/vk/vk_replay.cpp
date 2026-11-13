@@ -81,6 +81,30 @@ enum { FR_OTHER, FR_POLL, FR_WAIT, FR_SLOT, FR_PRESENT, FR_CAP, FR_VALUE, FR_COU
 int64_t st_reason[FR_COUNT];
 int flush_reason = FR_OTHER;
 std::chrono::steady_clock::time_point pend_since;
+// (eglantine, RX_VK_LOG_TLWAIT=1, diagnostic) The submits that signal the timeline, the last 64 in order: its value, when it
+// went to the queue and from which thread. vk_timeline_wait reads it to say, for the value it waited for, whether its signal
+// was in the queue already when the wait began, how long after it came, and how long the GPU then took
+struct TlSignal { uint64_t value; int64_t at_us; uint32_t tid; };
+TlSignal tl_ring[64];
+uint64_t tl_ring_n = 0;
+std::mutex tl_mu;
+bool tl_log_on() {
+    static const bool on = getenv("RX_VK_LOG_TLWAIT") != nullptr;
+    return on;
+}
+int64_t tl_now_us() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+void tl_note_signal(uint64_t value) {
+    std::lock_guard lk(tl_mu);
+    tl_ring[tl_ring_n++ % 64] = {value, tl_now_us(), GetCurrentThreadId()};
+}
+// (eglantine, 13/11, MEASURED at Zora's Fountain, Link standing, 75 %: the game's main thread waits 6.2 ms a frame there for the
+// frame before's last submit (take_capture's late pages), which is in the queue 3 ms before the wait begins, 600 times of 600
+// (hs1936). It is the GPU's own time: 7.9 ms of wait and 52.8 fps at the native resolution (hs1945). What changed nothing,
+// 58.0-58.4 fps each: the present mode, immediate or fifo for mailbox (hs1937 / hs1938); a thread waiting for every value as
+// soon as its submit was in the queue, in case the driver put queued work off (hs1939, taken out again); smaller segments and
+// chunks, RX_VK_PARALLEL_BATCH=12 / 16 and RX_VK_CHUNK=60 (hs1942-1944).)
 
 struct Recording {
     VkCommandPool pool = VK_NULL_HANDLE;
@@ -224,8 +248,41 @@ void wait_value(uint64_t v) {
 }
 } // namespace
 uint64_t vk_timeline_completed() { return timeline ? completed() : 0; }
-void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back behind the caller's thread goes on without it)
-    if (!timeline || completed() >= v) return;
+std::atomic<uint32_t> present_tid{0};   // (eglantine: the game's thread that presents, set by present())
+bool vk_on_present_thread() { return present_tid.load(std::memory_order_relaxed) == GetCurrentThreadId(); }
+// (eglantine, diagnostic: RX_VK_LOG_CAPWAIT) the thread that began the recording of a timeline value, for the last 256 values:
+// 1 when it is the calling thread, 0 another, -1 not known any more
+std::atomic<uint64_t> value_seen[256];
+std::atomic<uint32_t> value_tid[256];
+// (eglantine, RX_VK_CAPTURE_WAIT_WHO=3 / 4) the newest timeline value a recording was begun for, and what it was at the last
+// present: a value up to that one is work of the frames presented so far
+std::atomic<uint64_t> value_begun{0}, value_at_present{0};
+uint64_t vk_present_value() { return value_at_present.load(std::memory_order_relaxed); }
+int vk_value_is_mine(uint64_t v) {
+    if (value_seen[v & 255].load(std::memory_order_relaxed) != v) return -1;
+    return value_tid[v & 255].load(std::memory_order_relaxed) == GetCurrentThreadId() ? 1 : 0;
+}
+/// (eglantine) As vk_timeline_wait for a caller that holds the pool lock: nothing held back is flushed, `ms` at most; true when
+/// the GPU is past v
+bool vk_timeline_wait_brief(uint64_t v, uint32_t ms) {
+    if (!timeline || completed() >= v) return true;
+    VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+    wi.semaphoreCount = 1;
+    wi.pSemaphores = &timeline;
+    wi.pValues = &v;
+    return vkWaitSemaphores(dev.device, &wi, (uint64_t)ms * 1000000ull) == VK_SUCCESS;
+}
+/// (at most 250 ms: a submission held back behind the caller's thread goes on without it)
+/// (eglantine, 12/11, MEASURED: the "timed out" waits seen at loads (1 to 4 a run: "a capture's wait for write-back N timed out
+/// (done N-4)", then "slow submit: 250 ms: memory sync 250") are of a value whose signal IS in the queue: the GPU is busy for
+/// longer than that with the load's texture decodes (ASTC, and ASTC re-encoded as BC3: ~700 ms of GPU time in the 10 s around a
+/// scene change, RX_VK_PASS_TIMING's "astc" spans, hs1651). Leaving the wait out when the signal was not queued yet never
+/// applied (0 of 6, hs1640 / hs1641): taken out again)
+void vk_timeline_wait(uint64_t v) {
+    if (!timeline) return;
+    const uint64_t done0 = completed();
+    if (done0 >= v) return;
+    const int64_t t0 = tl_log_on() ? tl_now_us() : 0;
     queue_flush_for(FR_VALUE);
     VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
     wi.semaphoreCount = 1;
@@ -234,6 +291,40 @@ void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back
     if (vkWaitSemaphores(dev.device, &wi, 250000000ull) == VK_TIMEOUT) {
         static std::atomic<int> logged{0};
         if (logged++ < 8) logf("vk: a capture's wait for write-back %llu timed out (done %llu)", (unsigned long long)v, (unsigned long long)completed());
+    }
+    if (t0) {   // (RX_VK_LOG_TLWAIT: see tl_ring)
+        const int64_t t1 = tl_now_us();
+        static std::mutex smu;
+        static int64_t n, queued_before, queued_during, unknown, by_presenter, values_behind;
+        static double wait_ms, before_ms, during_ms, gpu_ms;
+        TlSignal s{0, 0, 0};
+        {
+            std::lock_guard lk(tl_mu);   // (the oldest signal kept that reaches v)
+            const uint64_t have = std::min<uint64_t>(tl_ring_n, 64);
+            for (uint64_t k = 0; k < have; k++) {
+                const TlSignal& e = tl_ring[(tl_ring_n - have + k) % 64];
+                if (e.value >= v) { s = e; break; }
+            }
+        }
+        std::lock_guard lk(smu);
+        n++, wait_ms += (t1 - t0) / 1e3, values_behind += (int64_t)(v - done0);
+        if (!s.value) unknown++;
+        else {
+            if (s.at_us <= t0) queued_before++, before_ms += (t0 - s.at_us) / 1e3;
+            else queued_during++, during_ms += (s.at_us - t0) / 1e3;
+            gpu_ms += (t1 - std::max(s.at_us, t0)) / 1e3;
+            by_presenter += s.tid == present_tid.load(std::memory_order_relaxed);
+        }
+        if (n % 600 == 0) {
+            logf("vk: timeline waits (600): %.2f ms each, %.1f values behind; the signal that ends one was in the queue before the "
+                 "wait began %lld times (%.2f ms before, on average), came during it %lld times (%.2f ms after its start), "
+                 "not known %lld; from the presenting thread %lld times; from the later of the two to the wait's end %.2f ms",
+                 wait_ms / 600, values_behind / 600.0, (long long)queued_before, queued_before ? before_ms / queued_before : 0.0,
+                 (long long)queued_during, queued_during ? during_ms / queued_during : 0.0, (long long)unknown, (long long)by_presenter,
+                 (queued_before + queued_during) ? gpu_ms / (queued_before + queued_during) : 0.0);
+            n = queued_before = queued_during = unknown = by_presenter = values_behind = 0;
+            wait_ms = before_ms = during_ms = gpu_ms = 0;
+        }
     }
 }
 namespace {
@@ -256,6 +347,7 @@ void gpu_time_collect(Recording& r) {
     st_gpu_ns += ns;
     st_gpu_max_ns = std::max(st_gpu_max_ns, ns);
 }
+
 void gpu_time_begin(Recording& r) {
     if (!ts_pool) {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
@@ -294,8 +386,12 @@ Recording& begin_recording(uint64_t value) {
     gpu_time_begin(r);
     gprof_begin_recording(r.slot, r.cmd, r.upload);
     r.value = value;
+    value_seen[value & 255].store(value, std::memory_order_relaxed);   // (vk_value_is_mine)
+    value_tid[value & 255].store(GetCurrentThreadId(), std::memory_order_relaxed);
+    if (value > value_begun.load(std::memory_order_relaxed)) value_begun.store(value, std::memory_order_relaxed);
     memory_recording_value(value, completed());
     texture_begin_recording(r.upload, value);
+    texture_prefetch_some();   // (eglantine: a few textures made ahead of their first draw, into this recording's uploads)
     draw_begin_recording(r.slot, r.cmd, value);
     return r;
 }
@@ -348,6 +444,7 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     }
     PROF(PROF_QSUBMIT);
     const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, r.fence);
+    if (signal_value && tl_log_on()) tl_note_signal(signal.value);
     r.submitted = res == VK_SUCCESS;
     static int failures;
     if (res != VK_SUCCESS && failures++ < 8) logf("vk: submit %llu failed (%d)", (unsigned long long)r.value, (int)res);
@@ -449,6 +546,21 @@ struct UbUpdate {
 };
 std::deque<UbUpdate> ub_updates;   // in stream order, oldest first
 std::atomic<uint64_t> ub_list_epoch{1};   // (bumped when that deque gains or loses an update)
+// (eglantine) the pages the pending updates touch, counted in 4096 buckets: a read or an overlay of a range no update touches skips
+// the scan of the whole list (a few hundred entries, at every handle word and uniform buffer of every draw: ~8% of the draw path)
+uint32_t ub_page_n[4096];
+void ub_pages(const UbUpdate& u, int d) {
+    if (u.bytes.empty()) return;
+    for (uint64_t p = u.dst >> 12, e = (u.dst + u.bytes.size() - 1) >> 12; p <= e; p++) ub_page_n[p & 4095] += (uint32_t)d;
+}
+bool ub_maybe(uint64_t addr, uint64_t n) {
+    if (!n) return false;
+    const uint64_t e = (addr + n - 1) >> 12;
+    if (e - (addr >> 12) >= 4096) return true;
+    for (uint64_t p = addr >> 12; p <= e; p++)
+        if (ub_page_n[p & 4095]) return true;
+    return false;
+}
 thread_local uint64_t ub_gen = 0;   // (each recording thread's: its draws' overlays change with what it passed)
 
 // ---- parallel replay (RX_VK_PARALLEL=<threads>): MKW hands over nearly a frame's draws in one command buffer with
@@ -470,6 +582,7 @@ struct ParPoint {
 };
 std::vector<ParPoint> par_points;   // (every 64 draws and dispatches of the dry pass)
 int64_t dry_work = 0;
+int64_t serial_work = 0;           // (draws and dispatches replayed on the replay thread alone, ever: replay_handle's measure)
 size_t ub_first_of_recording = 0;  // (the current recording's first entry)
 uint64_t rec_value_now = 0;
 
@@ -481,6 +594,7 @@ bool deferred_late() {   // (RX_VK_DEFERRED_LATE=1: deferred binds read from the
 void ub_prune(uint64_t done) {
     if (ub_updates.empty() || ub_updates.front().value > done) return;
     while (!ub_updates.empty() && ub_updates.front().value <= done) {
+        ub_pages(ub_updates.front(), -1);
         ub_updates.pop_front();
         if (ub_first_of_recording) ub_first_of_recording--;
     }
@@ -890,13 +1004,25 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 UbUpdate up{rec_value_now, u.dst, std::vector<uint8_t>(a + sizeof u, a + sizeof u + u.size)};
                 ub_updates.push_back(std::move(up));
                 ub_list_epoch.fetch_add(1, std::memory_order_relaxed);
+                ub_pages(ub_updates.back(), +1);
                 ub_gen++;
                 st_ub_updates++;
             }
             break;
         }
         // ---- state ----
-        case NOP_SET_RT: s.rt = payload<nvn_p_set_rt>(a, avail), s.rt_serial++; break;
+        case NOP_SET_RT:
+            s.rt = payload<nvn_p_set_rt>(a, avail), s.rt_serial++;
+            // (eglantine) the parallel replay's dry pass makes the render targets now, on the replay thread: a target first met by a later
+            // segment was made there, its layout change and clear in that segment's uploads, which the GPU runs after the earlier
+            // segments' draws into it: the picture they drew was cleared, a frame darker in places at camera cuts (hs215, 21 blocks at
+            // 52.8 s, the house door). Made here, they are in the recording submitted before every segment
+            if (dry) {
+                for (int i = 0; i < std::min(s.rt.n, 8); i++)
+                    if (s.rt.color[i]) texture_get(s.rt.color[i], false);
+                if (s.rt.depth) texture_get(s.rt.depth, false);
+            }
+            break;
         case NOP_VIEWPORTS: {
             const auto v = payload<nvn_p_viewports>(a, avail);
             for (int i = 0; i < v.n && v.first + i < 16; i++) std::memcpy(s.viewport[v.first + i], v.v[i], 16);
@@ -1128,12 +1254,18 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
             if (s.render_enabled && !dry) {
                 const auto c = payload<nvn_p_clear_color>(a, avail);
                 clear_color_target(cmd, s, c.index, c.rgba, (uint32_t)c.mask);
+            } else if (s.render_enabled) {   // (eglantine: the dry pass marks what a clear writes, as it does a draw's targets)
+                const auto c = payload<nvn_p_clear_color>(a, avail);
+                if ((uint32_t)c.mask & 0xF) dry_mark_cleared(s, c.index);
             }
             break;
         case NOP_CLEAR_DS:
             if (s.render_enabled && !dry) {
                 const auto c = payload<nvn_p_clear_ds>(a, avail);
                 clear_depth_stencil(cmd, s, c.depth, c.depth_mask != 0, (uint32_t)c.stencil, (uint32_t)c.stencil_mask);
+            } else if (s.render_enabled) {
+                const auto c = payload<nvn_p_clear_ds>(a, avail);
+                if (c.depth_mask != 0 || c.stencil_mask != 0) dry_mark_cleared(s, -1);
             }
             break;
         case NOP_DRAW: {
@@ -1209,6 +1341,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 if (s.render_enabled && (compute || !s.raster_discard)) dry_mark_written(s, compute, dry_work == 0);
                 if (++dry_work % 64 == 0) par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});
             } else if (!worker) {
+                serial_work++;
                 maybe_split(cmd);
             }
         }
@@ -1229,6 +1362,15 @@ int64_t part_work = 0;
 // at once, kMaxBatch of them at most: fewer than the slots)
 constexpr int kMaxParts = 32;
 constexpr int kMaxBatch = 6;   // (three recording threads: more segments only took slots and submits)
+/// (eglantine, 11/11) RX_VK_PARALLEL_BATCH=<n>, 2 to 16: a command buffer's segments at most (default kMaxBatch). With 6, a
+/// 2200-draw command buffer is 6 segments of ~370 draws that five threads finish together: the GPU gets the first only when
+/// nearly all are recorded, and its work for the frame starts that late (Hyrule Castle at 75 %, hs1140: the game's main thread
+/// then waits 3.9 ms a frame for the frame before on the GPU, the presenting thread idle meanwhile). More, smaller segments
+/// reach the GPU as the first ones are done
+int par_max_batch() {
+    static const int n = getenv("RX_VK_PARALLEL_BATCH") ? std::clamp(atoi(getenv("RX_VK_PARALLEL_BATCH")), 2, 16) : kMaxBatch;
+    return n;
+}
 
 void maybe_split(VkCommandBuffer& cmd) {
     static const int64_t every = getenv("RX_VK_CHUNK") ? atoll(getenv("RX_VK_CHUNK")) : 120;
@@ -1249,11 +1391,21 @@ void maybe_split(VkCommandBuffer& cmd) {
 }
 
 // ---- parallel replay: the threads and a command buffer's segments ----
-// (RX_VK_PARALLEL=<threads recording a command buffer, the replay thread one of them>; 0, 1: off, the default. Segments
-// recorded out of order left one-frame black scenes in play, 48-93 in a walk through Kakariko against none on the
-// replay thread alone, at about the same frame rate here: 36-40 fps against 38-41)
+// (RX_VK_PARALLEL=<threads recording a command buffer, the replay thread one of them>; 0, 1: off. Segments recorded out
+// of order left one-frame black scenes in play, 48-93 in a walk through Kakariko against none on the replay thread alone:
+// a render target first set in a later segment was made (its transition and clear) in that segment's recording, run
+// after the earlier segments' draws into it; the dry pass now makes the targets of every NOP_SET_RT, in the recording
+// submitted before all segments.)
+// (eglantine) on by default: half the hardware threads less one, 5 at most (5 on a 6-core / 12-thread CPU), off below 8
+// threads. Measured on OoT: the Kokiri Forest's wide views of 3000-3550 draws 49-60 fps against 41-55 on the replay
+// thread alone (hs242 / hs240); the opening's 134 frame-log events identical to the serial replay's (hs25x), none of the
+// one-frame wrong images left on the standard route or the Kokiri walk (hs244, hs246)
 int par_threads() {
-    static const int n = std::clamp(getenv("RX_VK_PARALLEL") ? atoi(getenv("RX_VK_PARALLEL")) : 0, 0, 8);
+    static const int n = [] {
+        if (const char* e = getenv("RX_VK_PARALLEL")) return std::clamp(atoi(e), 0, 8);
+        const int hw = (int)std::thread::hardware_concurrency();
+        return hw >= 8 ? std::min(5, hw / 2 - 1) : 0;
+    }();
     return n;
 }
 struct ParPool {
@@ -1266,7 +1418,14 @@ struct ParPool {
 ParPool par_pool;
 void par_worker_main() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk replay worker");
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    // (eglantine, experiments) RX_VK_PARALLEL_PRIO=<-1 below normal, 0 normal, 1 above normal (default)>: these threads run
+    // in bursts beside the game's own frame threads, which are at normal priority; RX_VK_PARALLEL_CPUS=<hex mask>: the
+    // logical processors they may use
+    static const int prio = getenv("RX_VK_PARALLEL_PRIO") ? atoi(getenv("RX_VK_PARALLEL_PRIO")) : 1;
+    SetThreadPriority(GetCurrentThread(), prio > 0 ? THREAD_PRIORITY_ABOVE_NORMAL : prio < 0 ? THREAD_PRIORITY_BELOW_NORMAL
+                                                                                           : THREAD_PRIORITY_NORMAL);
+    static const uint64_t cpus = getenv("RX_VK_PARALLEL_CPUS") ? strtoull(getenv("RX_VK_PARALLEL_CPUS"), nullptr, 16) : 0;
+    if (cpus) SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)cpus);
     for (;;) {
         std::function<void()> fn;
         {
@@ -1295,6 +1454,11 @@ Recording& begin_segment_recording(uint64_t value) {
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(r.cmd, &bi);
+    // (eglantine, 13/11: the segments were not timed, so the log's "GPU time" left out every command buffer replayed in
+    // parallel, most of a scene's draws since the threshold is 700: 3.9 ms a frame said at Zora's Fountain, where the game's
+    // main thread waits 6.2 ms a frame for the GPU to finish the frame before and a native resolution costs 5 fps (hs1936,
+    // hs1945). Its end is written by the segment's worker, replay_handle)
+    gpu_time_begin(r);
     r.value = value;
     return r;
 }
@@ -1329,6 +1493,41 @@ void record_segment(VkCommandBuffer& cmd, const Segment& g) {
 }
 std::recursive_mutex par_mu;
 
+// (eglantine) a command buffer goes to the threads only when the one at its place in the last frame (the n-th replayed
+// since the frame began: the game builds its passes in the same order frame to frame) had at least RX_VK_PARALLEL_MIN
+// draws and dispatches (default 1500). Below that the dry pass, the threads' locks and the threads themselves (taken
+// from the game's ~5 busy cores) cost more than they save: on the standard route the village showed 0.22 and 0.34
+// repeated frames a second with every buffer in parallel (hs255) and with buffers of 640 and more (hs257), against
+// 0.02-0.06 on the replay thread alone, while the Kokiri Forest's wide views (3000-4400 draws a frame) gained
+struct ParHistory {
+    uint64_t frame = UINT64_MAX;
+    size_t at = 0;
+    std::vector<int64_t> work;   // (by place in the frame: the last frame's draws and dispatches there)
+    // (eglantine) the last frame each place recorded OoT's exposure programs in (replay_saw_exposure): such a buffer stays on
+    // the replay thread for 600 frames after. In segments its sky light sums came out of a frame before now and then, and the
+    // exposure stepped by 7-8% frame to frame (hs356: 2536 steps in 150 s with buffers of 500 draws and more in parallel)
+    std::vector<uint64_t> exposure;
+};
+ParHistory par_hist;
+int64_t par_min_work() {
+    // (eglantine, on the port: 500 made the forest's flyover 60.0 fps instead of 15-36 (hs351 / hs352), but the exposure then
+    // stepped by 7-8% from frame to frame, the whole picture flickering: 2536 steps in 150 s (hs356) against 0 with 1500 (hs347,
+    // scratchpad py/stepdet.py). 1500 until the parallel replay's smaller buffers keep the exposure right)
+    // (eglantine, 10/11 19:30: 1000. With the compute dispatches' buffers captured and the main thread's wait for the frame before
+    // (vk_memory.cpp capture_make) the exposure no longer steps with smaller buffers in segments: the player's camera test 2.2 and
+    // 1.8 steps a thousand frames at 1000 against 2.3 and 1.8 at 1500 (hs83), and the Kokiri village centre, whose buffers are of
+    // 1000-1500 draws, 51.6 fps against 48.9 (hs861 / hs862). 700 and 500 gave no more there: 52.2 and 52.6, hs873 / hs871)
+    // (eglantine, 12/11 20:00: 700. Some views' buffers are of 700-1000 draws and were replayed whole on the submitting thread:
+    // the replay then took 13-17 ms a frame and was what held the frame. Link standing, the player's 75 %, 1000 -> 700:
+    // Hyrule Castle's arrival view (2210 draws) replay 13.3 -> 9.1 ms, 53.7 -> 58.1 fps (its steady slices 56-57 -> 60);
+    // Zora's Fountain (2080 draws) 16.8 -> 13.6 ms, 55.2 -> 57.9; the Market's street (2350 draws) 13.2-14.5 -> 8.6 ms,
+    // 57.0 (7 runs) -> 58.9; Kakariko, the Lost Woods' heavy spot and Lake Hylia the same within the noise (58-60).
+    // 500 gave no more than 700 anywhere (hs1720-hs1744). Where the game's own threads hold the frame (the Market's square
+    // seen from its corner, 3000-3500 draws) nothing changes)
+    static const int64_t v = getenv("RX_VK_PARALLEL_MIN") ? std::max(0, atoi(getenv("RX_VK_PARALLEL_MIN"))) : 700;
+    return v;
+}
+
 /// A command buffer of the submission from h (its start, or where it stopped at a wait): on the replay thread alone
 /// (RX_VK_PARALLEL off, a small one, dumps and profiles), or its dry pass there and its segments on the threads.
 /// may_stop: up to a wait not met, which it returns (null: the command buffer done)
@@ -1336,10 +1535,40 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     const int threads = par_threads();
     NvnState& state = *cur_state;
     suspend_at = nullptr;
-    if (threads < 2 || !rec_cur || dump_on() || gprof_on() || probe_serial()) {
+    const uint64_t frame = texture_frame_no();
+    if (frame != par_hist.frame) {
+        // (eglantine, 12/11, diagnostic, RX_VK_LOG_CBS=1: every 600 frames, the frame before's command buffers in stream order,
+        // by their draws and dispatches; p: big enough for the threads)
+        static const bool log_cbs = getenv("RX_VK_LOG_CBS") != nullptr;
+        if (log_cbs && frame % 600 == 0 && par_hist.at) {
+            char line[900];
+            int n = 0;
+            int64_t all = 0, par = 0;
+            for (size_t i = 0; i < par_hist.at && i < par_hist.work.size(); i++) {
+                const int64_t w = par_hist.work[i];
+                all += w;
+                if (w >= par_min_work()) par += w;
+                if (w >= 20 && n < 860) n += snprintf(line + n, sizeof line - n, " %lld%s", (long long)w, w >= par_min_work() ? "p" : "");
+            }
+            logf("vk: a frame's command buffers (draws + dispatches each, those of 20 and more; p: in segments): %zu buffers, %lld in "
+                 "all, %lld in segments:%s", par_hist.at, (long long)all, (long long)par, line);
+        }
+        par_hist.frame = frame, par_hist.at = 0;
+    }
+    const size_t place = par_hist.at++;
+    if (par_hist.work.size() <= place) par_hist.work.resize(place + 1, 0), par_hist.exposure.resize(place + 1, 0);
+    // (opt-in, RX_VK_PARALLEL_EXPOSURE_SERIAL=1: it did not stop the flashes at 500 either, hs361)
+    static const bool exposure_serial = getenv("RX_VK_PARALLEL_EXPOSURE_SERIAL") != nullptr;
+    const bool exposure = exposure_serial && par_hist.exposure[place] && frame - par_hist.exposure[place] < 600;
+    const bool big = par_hist.work[place] >= par_min_work() && !exposure;
+    if (threads < 2 || !rec_cur || dump_on() || gprof_on() || probe_serial() || !big) {
+        const int64_t w0 = serial_work;
         suspend_ok = may_stop;
+        replay_saw_exposure = false;
         replay(cmd, state, h);
         suspend_ok = false;
+        par_hist.work[place] = serial_work - w0;
+        if (replay_saw_exposure) par_hist.exposure[place] = frame;
         return suspend_at;
     }
     // the dry pass: the state at every 64 draws and dispatches, the render conditions, the uniform updates
@@ -1355,13 +1584,21 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     rmode = Mode::Serial;
     const uint8_t* const stop = suspend_at;   // (the segments end there)
     const int64_t total = dry_work;
+    par_hist.work[place] = total;
     static double dry_ms, seg_ms, segs_n;
     static int64_t timed;
-    dry_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_dry0).count();
+    // (eglantine, 12/11: where a command buffer's time in segments goes: what is done here before the threads have anything,
+    // how long the first takes to start, what they record, the submits, what follows)
+    static double setup_ms, wake_ms, rec_sum_ms, rec_max_ms, last_ms, submit_ms, tail_ms;
+    const auto t_pre0 = std::chrono::steady_clock::now();
+    const auto ms_since = [](std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    dry_ms += std::chrono::duration<double, std::milli>(t_pre0 - t_dry0).count();
     // (segments of ~RX_VK_PARALLEL_SEG draws and dispatches (default 160), taken in order by the threads and submitted
     // as each is done with those before it: the GPU starts on the first while the rest are recorded)
     static const int64_t per = getenv("RX_VK_PARALLEL_SEG") ? std::max(32, atoi(getenv("RX_VK_PARALLEL_SEG"))) : 160;
-    const int nseg = (int)std::clamp<int64_t>(total / per, 1, kMaxBatch);
+    const int nseg = (int)std::clamp<int64_t>(total / per, 1, par_max_batch());
     std::vector<Segment> seg;
     seg.push_back({h, nullptr, &start, ub0, 0});
     for (int k = 1; k < nseg; k++) {
@@ -1403,6 +1640,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         std::atomic<bool> done{false};
         bool uploads = false;
         int inits = 0;   // (texture_segment_end's)
+        std::chrono::steady_clock::time_point t0, t1;   // (when a thread took it, when it was recorded)
     };
     std::vector<std::unique_ptr<Job>> jobs;
     for (size_t k = 0; k < seg.size(); k++) {
@@ -1447,6 +1685,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     }
     texture_segments_begin(inits.data(), inits.size());
     const auto t_seg0 = std::chrono::steady_clock::now();
+    setup_ms += ms_since(t_pre0, t_seg0);
     const int64_t wait0 = par_lock_wait_ns.load(), locks0 = par_locks.load();
     par_active = true;
     std::condition_variable seg_cv;
@@ -1456,6 +1695,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         for (auto& jp : jobs) {
             Job* j = jp.get();
             par_pool.jobs.push_back([j, &seg_cv, &seg_mu] {
+                j->t0 = std::chrono::steady_clock::now();
                 texture_set_segment(j->order);
                 texture_segment_worker(j->index);
                 texture_begin_recording(j->r->upload, j->r->value);
@@ -1466,7 +1706,9 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
                 j->inits = texture_segment_end(j->index);   // (after its last new image)
                 texture_segment_worker(-1);
                 vkEndCommandBuffer(j->r->upload);
+                gpu_time_end(*j->r);   // (eglantine: see begin_segment_recording)
                 vkEndCommandBuffer(j->r->cmd);
+                j->t1 = std::chrono::steady_clock::now();
                 {
                     std::lock_guard l(seg_mu);
                     j->done = true;
@@ -1495,12 +1737,14 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
         si.commandBufferInfoCount = n;
         si.pCommandBufferInfos = cb;
+        const auto ts0 = std::chrono::steady_clock::now();
         std::lock_guard lk(dev.present_mu);
         queue_flush_locked();
         const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, j->r->fence);
         j->r->submitted = res == VK_SUCCESS;
         if (res != VK_SUCCESS) logf("vk: segment submit %llu failed (%d)", (unsigned long long)j->r->value, (int)res);
         if (res == VK_ERROR_DEVICE_LOST) checkpoints_report();
+        submit_ms += ms_since(ts0, std::chrono::steady_clock::now());
     }
     {
         std::unique_lock lk(par_pool.mu);
@@ -1511,15 +1755,20 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
                      "change, and the work after it may use them");
     par_active = false;
     texture_segments_begin(nullptr, 0);
-    seg_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_seg0).count();
+    const auto t_seg1 = std::chrono::steady_clock::now();
+    seg_ms += std::chrono::duration<double, std::milli>(t_seg1 - t_seg0).count();
     segs_n += (double)seg.size();
+    {
+        double first = 1e9, last = 0, sum = 0, longest = 0;
+        for (const auto& jp : jobs) {
+            first = std::min(first, ms_since(t_seg0, jp->t0)), last = std::max(last, ms_since(t_seg0, jp->t1));
+            const double d = ms_since(jp->t0, jp->t1);
+            sum += d, longest = std::max(longest, d);
+        }
+        wake_ms += first, last_ms += last, rec_sum_ms += sum, rec_max_ms += longest;
+    }
     static double wait_ms, locks_n;
     wait_ms += (par_lock_wait_ns.load() - wait0) / 1e6, locks_n += (double)(par_locks.load() - locks0);
-    if (++timed % 240 == 0) {
-        logf("vk: parallel replay, a command buffer: dry pass %.2f ms, segments %.2f ms (%.1f of them), lock taken %.0f "
-             "times, waited for %.2f ms (all threads)", dry_ms / 240, seg_ms / 240, segs_n / 240, locks_n / 240, wait_ms / 240);
-        dry_ms = seg_ms = segs_n = wait_ms = locks_n = 0;
-    }
     // what follows, after them all (the uniform updates are written to guest memory at the submission's end)
     texture_set_segment(++seq);
     Recording& nr = begin_recording(rec_cur_value);
@@ -1527,6 +1776,17 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     rec_cur = &nr;
     cmd = nr.cmd;
     rec_parts += (int)seg.size() + 1;
+    tail_ms += ms_since(t_seg1, std::chrono::steady_clock::now());
+    if (++timed % 240 == 0) {
+        logf("vk: parallel replay, a command buffer: dry pass %.2f ms, segments %.2f ms (%.1f of them), lock taken %.0f "
+             "times, waited for %.2f ms (all threads)", dry_ms / 240, seg_ms / 240, segs_n / 240, locks_n / 240, wait_ms / 240);
+        logf("vk: parallel replay, a command buffer in detail: %.2f ms here before the threads have it, the first segment taken "
+             "after %.2f ms, %.2f ms recorded in all (the longest segment %.2f ms), the last done at %.2f ms, the submits %.2f ms, "
+             "%.2f ms here after", setup_ms / 240, wake_ms / 240, rec_sum_ms / 240, rec_max_ms / 240, last_ms / 240, submit_ms / 240,
+             tail_ms / 240);
+        dry_ms = seg_ms = segs_n = wait_ms = locks_n = 0;
+        setup_ms = wake_ms = rec_sum_ms = rec_max_ms = last_ms = submit_ms = tail_ms = 0;
+    }
     return stop;
 }
 
@@ -1582,6 +1842,7 @@ void bench_frame(int64_t presents) {
     queue_flush();
     for (int i = 0; i < times; i++) {
         vkDeviceWaitIdle(dev.device);
+        for (size_t k = ub_before; k < ub_updates.size(); k++) ub_pages(ub_updates[k], -1);
         ub_updates.resize(ub_before);   // (the last time's uniform updates are written: as if pruned)
         const auto t0 = std::chrono::steady_clock::now();
         for (const auto& h : frame_submits) bench_replay(h);
@@ -1828,6 +2089,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         rec_value_now = tag;
         ub_first_of_recording = ub_updates.size();
         Recording& first = begin_recording(tag);
+        texture_defrag_step();   // (eglantine, RX_VK_DEFRAG: nothing recorded yet)
         memory_begin_submission();
         full_barrier(first.cmd, "barrier (recording start)");
         rec_cur = &first, rec_cur_value = tag, rec_parts = 0, part_work = 0;
@@ -2165,8 +2427,95 @@ void invalidate(uint64_t gpu, uint64_t size) {
     // the CPU reads and sets to 0) this way: it read 0 one frame, then the old sum came back over the CPU's 0 and the next
     // frame added to it (2x): the exposure stepped 0.2 EV up and down several times a second (the white flashes).
     // RX_VK_NO_READBACK_WAIT=1: as before
+    // (eglantine, 10/11 08:00) That wait is opt-in here (it holds the game's thread until the GPU is done with the frame before:
+    // 59.0 -> 47.5 frames a second in the village's centre with the game kept one frame ahead, hs540 / hs541), and without it the
+    // exposure moved in steps while the camera turned: the picture's brightness held for two or three frames, then jumped ~8 %
+    // (9 to 11 frames in a thousand standing 1.5 levels and more off their neighbours, hs51 base; 1.8 with the game one frame ahead).
+    // With the game, the replay and the GPU each a frame apart, the game's read for frame M+1 finds the result of frame M-2: a
+    // steady two frames. The steps are the reads that come too early (nothing new since the read before: 142 of 878 with the
+    // newest write-back still not done, hs570) followed by the ones that catch up. Putting the last result back for those made
+    // it worse (20 a thousand, hs56: a result counted twice). So the read is paced instead (below): when no write-back of the
+    // range has been finished since the game's last read of it and one is on its way, the read waits for that one, 10 ms at
+    // most. It only holds the game's thread when it runs further ahead than the pipeline is deep, where it would wait later
+    // anyway. Ranges of 16 KB at most, once a frame of the game. MEASURED: no effect (7.0 and 10.6 a thousand against 10.2,
+    // hs58; its waits 0.02 ms: the write-backs it waited for were done already). The steps were not the meter read late but a
+    // block the game rewrites in place and a compute pass reads (vk_draw.cpp compute_now). Left off: RX_VK_READBACK_PACE=1
+    {   // (eglantine, diagnostics) RX_VK_LOG_METER=<present>: from that present on, every read of a small GPU result that is not
+        // all zero in its first words (sizes 0x40 to 0x1040), 8000 lines: the game's submissions so far (fence), the GPU's
+        // progress, the newest write-back of the range recorded and whether the GPU is past it, the first 8 words
+        static const int64_t from = getenv("RX_VK_LOG_METER") ? atoll(getenv("RX_VK_LOG_METER")) : -1;
+        static std::atomic<int> n{0};
+        if (from >= 0 && presents_now >= from && size >= 0x40 && size <= 0x1040 && n.load() < 8000) {
+            uint32_t w[8]{};
+            host->gpu_read(gpu, w, sizeof w);
+            if (w[0] | w[1] | w[2] | w[3] | w[4] | w[5] | w[6] | w[7]) {
+                n++;
+                const uint64_t v = memory_writeback_value(host->gpu_guest(gpu), size, nullptr);
+                logf("vk: meter %lld %#llx +%#llx: fence %llu done %llu wb %llu %s | %08x %08x %08x %08x %08x %08x %08x %08x",
+                     (long long)presents_now, (unsigned long long)gpu, (unsigned long long)size, (unsigned long long)fence(),
+                     (unsigned long long)completed(), (unsigned long long)v, v <= completed() ? "landed" : "pending", w[0], w[1], w[2],
+                     w[3], w[4], w[5], w[6], w[7]);
+                if (size >= 0x400) {   // (and the words further in, where the GPU's sums are: +0x20.. +0x100, 4 at each 0x20)
+                    char line[700];
+                    int k = snprintf(line, sizeof line, "vk: meter+ %lld %#llx:", (long long)presents_now, (unsigned long long)gpu);
+                    for (uint64_t off = 0x20; off <= 0x100 && k < (int)sizeof line - 48; off += 0x20) {
+                        uint32_t x[4]{};
+                        host->gpu_read(gpu + off, x, sizeof x);
+                        k += snprintf(line + k, sizeof line - k, " %08x %08x %08x %08x", x[0], x[1], x[2], x[3]);
+                    }
+                    logf("%s", line);
+                }
+            }
+        }
+    }
+    if (size && size <= 0x4000) memory_note_read_range(host->gpu_guest(gpu), size);   // (eglantine: for the compute capture, vk_memory.cpp)
+    if (size && size <= 0x4000 && !memory_readback_wait_on()) {
+        static const bool pace_off = getenv("RX_VK_READBACK_PACE") == nullptr;
+        static const uint64_t pace_ns = (uint64_t)(getenv("RX_VK_READBACK_PACE_MS") ? std::max(0, atoi(getenv("RX_VK_READBACK_PACE_MS"))) : 10) * 1000000ull;
+        bool ever = false;
+        if (!pace_off && pace_ns && (memory_writeback_value(host->gpu_guest(gpu), size, &ever), ever)) {
+            struct Read {
+                uint64_t consumed = 0, fence = 0;
+            };
+            static std::mutex mu;
+            static std::unordered_map<uint64_t, Read> reads;
+            static std::atomic<int64_t> st_reads{0}, st_new{0}, st_waited{0}, st_late{0}, st_ns{0};
+            uint64_t pending = 0;
+            uint64_t landed = memory_readback_landed(host->gpu_guest(gpu), size, completed(), &pending);
+            const uint64_t now = fence();
+            uint64_t consumed, last_fence;
+            {
+                std::lock_guard lk(mu);
+                if (reads.size() > 8192) reads.clear();
+                Read& r = reads[gpu];
+                consumed = r.consumed, last_fence = r.fence;
+                r.fence = now;
+            }
+            st_reads++;
+            // (nothing new since this range's last read, a frame of the game ago or more, and a write-back of it on its way)
+            if (landed <= consumed && pending && now >= last_fence + 3) {
+                const auto w0 = std::chrono::steady_clock::now();
+                int ok = 0;
+                if (wait_recorded(pending, pace_ns, &ok) && ok) landed = std::max(landed, pending), st_waited++;
+                else st_late++;
+                st_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - w0).count();
+            }
+            if (landed > consumed) {
+                st_new++;
+                std::lock_guard lk(mu);
+                reads[gpu].consumed = landed;
+            }
+            if (st_reads % 12000 == 0) {
+                const int64_t w = st_waited.exchange(0), l = st_late.exchange(0);
+                logf("vk: reads of small GPU results: %lld of 12000 found a new one; %lld waited for the one on its way (%.2f ms each), "
+                     "%lld gave up after %llu ms",
+                     (long long)st_new.exchange(0), (long long)w, w + l ? st_ns.exchange(0) / (double)(w + l) / 1e6 : 0.0, (long long)l,
+                     (unsigned long long)(pace_ns / 1000000));
+            }
+        }
+    }
     if (size) {
-        static const bool off = getenv("RX_VK_NO_READBACK_WAIT") != nullptr;
+        static const bool off = !memory_readback_wait_on();   // (eglantine: opt-in, RX_VK_READBACK_WAIT=1; vk_internal.h)
         bool ever = false;
         if (!off && (memory_writeback_value(host->gpu_guest(gpu), size, &ever), ever)) {
             memory_note_readback(host->gpu_guest(gpu), size);   // (PR 430: the CPU may write it back: memory_rb_refresh)
@@ -2581,6 +2930,47 @@ void do_present(const nvn_tex* t, const int crop[4]) {
     status_tick();   // (the status line, and the video-memory warning)
     reflex_present_begins();
     struct ReflexSleep { ~ReflexSleep() { reflex_sleep(); } } reflex_sleep_after;
+    {   // (eglantine, RX_VK_LONG_FRAMES=<ms>: a frame handed over that long after the last one is logged with its work against the
+        // average frame's: what an every-40-frames hitch outdoors is made of. 60 lines)
+        static const double long_ms = getenv("RX_VK_LONG_FRAMES") ? atof(getenv("RX_VK_LONG_FRAMES")) : 0.0;
+        if (long_ms > 0) {
+            static int64_t last_t = 0, last_d = 0, last_x = 0, last_pass = 0, last_sub = 0, last_pipes = 0, n = 0;
+            static double avg_d = 0, avg_x = 0, avg_pass = 0, avg_sub = 0;
+            static int logged = 0;
+            int64_t d = 0, sk = 0, x = 0, pipes = 0, passes = 0, mesh = 0;
+            double pms = 0;
+            draw_stats(&d, &sk, &x, &pipes);
+            draw_stats2(&passes, &mesh, &pms);
+            const int64_t now = prof_now(), sub = prof_ns[PROF_SUBMIT];
+            // (what else the frame did: textures made, uploads, ASTC decodes and bytes, pool imports on the replay, waits for the
+            // background importer, GPU time collected since the last present)
+            static int64_t l_made, l_up, l_astc, l_bytes, l_imp, l_imp_ns, l_bgw, l_bgw_ns, l_gpu;
+            int64_t up = 0, astc = 0, bytes = 0, imp = 0, imp_ns = 0, bgw = 0, bgw_ns = 0;
+            texture_stats(&up, &astc, &bytes);
+            memory_import_stats(&imp, &imp_ns, &bgw, &bgw_ns);
+            const int64_t made = (int64_t)texture_made();
+            if (last_t) {
+                const double ms = (now - last_t) / 1e6, fd = (double)(d - last_d), fx = (double)(x - last_x);
+                const double fp = (double)(passes - last_pass), fs = (sub - last_sub) / 1e6;
+                static const int64_t from = getenv("RX_VK_LONG_FROM") ? atoll(getenv("RX_VK_LONG_FROM")) : 0;   // (presents)
+                if (n > 120 && presents >= from && ms >= long_ms && logged < 60) {
+                    logged++;
+                    logf("vk: long frame %lld: %.1f ms after the last; draws %.0f (average %.0f), dispatches %.0f (%.0f), passes %.0f (%.0f), "
+                         "replay %.2f ms (%.2f), new pipelines %lld; textures made %lld, uploads %lld (%.1f MB, %lld ASTC), imports %lld "
+                         "(%.1f ms), importer waits %lld (%.1f ms), GPU %.1f ms", (long long)presents, ms, fd, avg_d, fx, avg_x, fp, avg_pass, fs,
+                         avg_sub, (long long)(pipes - last_pipes), (long long)(made - l_made), (long long)(up - l_up),
+                         (bytes - l_bytes) / 1048576.0, (long long)(astc - l_astc), (long long)(imp - l_imp), (imp_ns - l_imp_ns) / 1e6,
+                         (long long)(bgw - l_bgw), (bgw_ns - l_bgw_ns) / 1e6, (st_gpu_ns - l_gpu) / 1e6);
+                }
+                const double k = n < 60 ? 1.0 / (double)(n + 1) : 1.0 / 60.0;
+                avg_d += (fd - avg_d) * k, avg_x += (fx - avg_x) * k, avg_pass += (fp - avg_pass) * k, avg_sub += (fs - avg_sub) * k;
+                n++;
+            }
+            last_t = now, last_d = d, last_x = x, last_pass = passes, last_sub = sub, last_pipes = pipes;
+            l_made = made, l_up = up, l_astc = astc, l_bytes = bytes, l_imp = imp, l_imp_ns = imp_ns, l_bgw = bgw, l_bgw_ns = bgw_ns;
+            l_gpu = st_gpu_ns;
+        }
+    }
     {   // (hookshot, RX_VK_PASS_TRACE_AT=<frames>: the passes of the frames around these frame numbers, for finding what a frame is made of)
         static std::atomic<int64_t> seen{0};
         static const int64_t at = getenv("RX_VK_PASS_TRACE_AT") ? atoll(getenv("RX_VK_PASS_TRACE_AT")) : 0;
@@ -2698,11 +3088,25 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 vkCmdCopyImageToBuffer(r.cmd, shot_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shot_bufs[presents & 1], 1, &c);
             }
         }
+        // (eglantine, RX_VK_WB_LAZY) this frame's share of the write-backs that were put off: with this recording's own
+        // (a thirtieth of the pages, ~3 MB), or RX_VK_WB_LAZY_OWN=1: in a recording of its own after it, below
+        const bool wb_flush = memory_wb_pending();
+        if (wb_flush && !memory_wb_flush_own()) memory_wb_flush_queue();
         memory_end_submission(r.cmd);
         full_barrier(r.cmd);
         submit_recording(r);   // (nothing is stopped at a present: drain)
         if (pushed.load() < value) pushed = value;
         done_max = std::max(done_max, value), signaled = std::max(signaled, value);
+        if (wb_flush && memory_wb_flush_own()) {
+            // (after the recording that signals the present's value, as the frame interpolation's below: the game waits for
+            // that value)
+            Recording& w = begin_recording(value + 1);
+            memory_begin_submission();
+            memory_wb_flush_queue();
+            memory_end_submission(w.cmd);
+            full_barrier(w.cmd);
+            submit_recording(w, false);
+        }
         if (fg_after) {
             // (its slot is free again once the next submit's value is reached: that one comes after it)
             Recording& g = begin_recording(value + 1);
@@ -2712,8 +3116,11 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         }
         if (interpolated) framegen_queue(value);
         else menu_note_frame(true);   // (the FPS counter's, as frame generation's thread counts what it shows)
-        {   // (RX_VK_WAIT_GPU=<frames>: the replay no further ahead of the GPU than that)
-            static const int ahead = getenv("RX_VK_WAIT_GPU") ? atoi(getenv("RX_VK_WAIT_GPU")) : 0;
+        {   // (RX_VK_WAIT_GPU=<frames>: the replay no further ahead of the GPU than that; =0 (upstream 768d930, 5d6e6ff): each
+            // present waits for its own frame's GPU work, against one-frame flashes from the CPU rewriting data a pass has yet to
+            // read. Not by default here (eglantine): measured first, it cost up to 10 fps upstream on Windows)
+            static const int ahead = getenv("RX_VK_WAIT_GPU") ? atoi(getenv("RX_VK_WAIT_GPU")) : -1;
+            if (ahead == 0) wait_value(value);
             static uint64_t values[8];
             if (ahead > 0) {
                 const uint64_t old = values[presents % ahead];
@@ -3034,10 +3441,23 @@ void framelog_collect(int slot) {
                 }
                 exposure_log_dump("dark frame");
                 probe_dump_all("dark frame");
-                pass_traces_log(texture_frame_no() - 7, texture_frame_no());
+                snprintf(name, sizeof name, "dark_%d_passes.txt", dark_left);   // (RX_VK_PASS_TRACE=1; a file: pass_traces_write)
+                pass_traces_write(name, texture_frame_no() - 7, texture_frame_no());
             }
         }
         if (l.kind == 0) last_mean = mean;
+        {   // (eglantine, 12/11, diagnostic, RX_VK_PASS_TRACE=1) the passes around an upload over a wide image the GPU drew
+            // (vk_texture.cpp texture_touch): two frames after it, upl_<frame>_passes.txt, eight times a run at most
+            static uint64_t dumped_for;
+            static int left = 8;
+            const uint64_t at = texture_upload_over_drawn_frame();
+            if (at && at != dumped_for && left > 0 && texture_frame_no() >= at + 2) {
+                dumped_for = at, left--;
+                char name[48];
+                snprintf(name, sizeof name, "upl_%llu_passes.txt", (unsigned long long)at);
+                pass_traces_write(name, at - 3, at + 1);
+            }
+        }
     }
     static const bool drop = getenv("RX_VK_FRAMELOG_DROP") != nullptr;
     if (drop) return;
@@ -3052,6 +3472,7 @@ std::atomic<uint32_t> present_kind{0};   // (vk_framegen.cpp: 1 while a made fra
 // for the submit and the present. Held over vkAcquireNextImageKHR and the fence, it stopped the replay's submits for as long as
 // the swapchain had no image free, twice a frame with frame interpolation.
 std::mutex present_image_mu;
+
 void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view) {
     std::lock_guard lk(present_image_mu);
     if (const uint64_t want = dev.swap_resize.exchange(0, std::memory_order_acquire)) {   // (the window was resized: main's resize)
@@ -3537,6 +3958,8 @@ void submit(const uint64_t* handles, int n) {
     submit_q(handles, n, 0);
 }
 void present(const nvn_tex* t, const int crop[4]) {
+    present_tid.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    value_at_present.store(value_begun.load(std::memory_order_relaxed), std::memory_order_relaxed);   // (vk_present_value)
     if (!async_on()) {
         std::lock_guard order(sync_order_mu);
         if (sync_waits_on()) {
@@ -3750,6 +4173,7 @@ void fill_replay_table(MkwVkRenderer& t) {
     t.nvn_invalidate = invalidate;
     t.nvn_pool_created = memory_pool_created;
     t.guest_imported = memory_guest_imported;
+    t.guest_release = memory_guest_release;
     t.nvn_vmap_changing = vmap_changing;
     t.nvn_texture_created = texture_created_of;
 }
@@ -3762,5 +4186,6 @@ std::recursive_mutex& par_mutex() {
 int64_t par_now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+thread_local bool replay_saw_exposure = false;   // (eglantine: vk_internal.h)
 
 } // namespace mkwvk

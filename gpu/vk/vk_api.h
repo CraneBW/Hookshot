@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 9
+#define MKWVK_API_VERSION 10   /* (eglantine 10: region_release_gaps, guest_release) */
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA };
 /* (hookshot) the Controls tab's motion rows (host/pad_sdl.c reads them, vk_replay.cpp's option answers them): Motion
    controls on or off, the horizontal's and the vertical's sensitivity in percent, and each turned around */
@@ -114,6 +114,9 @@ typedef struct MkwVkHost {
     /* (hookshot) the controllers' motion sensors, for the Insert menu's Motion controls row (host/pad_sdl.c): 0 no
        controller, 1 controllers with no gyroscope, 2 one with a gyroscope */
     int (*gyro_status)(void);
+    /* (eglantine) the parts of guest [lo, hi) that the game's address regions do not hold now, decommitted (host/hos_mem.c):
+       asked under the pool lock for ranges no import holds. The bytes given back */
+    uint64_t (*region_release_gaps)(uint64_t lo, uint64_t hi);
 } MkwVkHost;
 
 /* what the back end gives the executable: the rx_* functions (gpu/render/rx_nvn.h, rx_core) */
@@ -162,6 +165,9 @@ typedef struct MkwVkRenderer {
     /* (hookshot, the Insert menu) a setting changed from the game's side, kept in the options file: 7 the mouse's sensitivity
        in percent (the - and = keys, host/nn_hid.c) */
     void (*option_set)(int id, int value);
+    /* (eglantine) the game freed the address region [lo, hi): the parts no import holds are decommitted now (the host's
+       region_release_gaps), the rest when their imports go */
+    void (*guest_release)(uint64_t lo, uint64_t hi);
 } MkwVkRenderer;
 
 /* the DLL's one export: null when Vulkan is not usable (the executable then falls back to WebGPU) */

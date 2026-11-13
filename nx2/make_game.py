@@ -153,7 +153,7 @@ KEEP_BUILDS = 20
 
 
 def times_path(work):
-    """Where the builds' times are kept: beside the object cache, in the builder's own folder (LOCALAPPDATA\\HookshotBuilder
+    """Where the builds' times are kept: beside the object cache, in the builder's own folder (LOCALAPPDATA\\Hookshot
     on Windows, ~/.cache/hookshot-builder on Linux). A builder update keeps it, so the next build still knows what this PC
     took, and the one after that can compare."""
     return os.path.join(work, "build_times.json")
@@ -472,9 +472,9 @@ def bundled_mingw():
             # zip was not unpacked whole. It went on to the Visual Studio route and said "The Windows SDK was not found")
             missing = [n for n in ("clang.exe", "clang++.exe", "ld.lld.exe")
                        if not os.path.isfile(os.path.join(here, "bin", n))]
-            fail("Files of the builder's own compiler are missing (%s in %s). Your antivirus most likely removed them "
-                 "(a false alarm on unsigned programs): restore them from its quarantine or allow the Hookshot Builder folder, "
-                 "then unzip HookshotBuilder.zip again and build. Visual Studio is not needed."
+            fail("Files of Hookshot's own compiler are missing (%s in %s). Your antivirus most likely removed them "
+                 "(a false alarm on unsigned programs): restore them from its quarantine or allow the Hookshot folder, "
+                 "then run Hookshot-Setup.exe again and install. Visual Studio is not needed."
                  % (", ".join(missing) or "bin", os.path.join(here, "bin")))
     return os.environ.get("HOOKSHOT_MINGW", "")
 
@@ -485,8 +485,8 @@ def check_mingw():
     import toolchain
     cc = toolchain.find("clang")   # (HOOKSHOT_MINGW's, else the one toolchain.py finds: the same as the build uses)
     if not os.path.isfile(cc):   # (HOOKSHOT_MINGW set to a folder without the compiler: said here, not as a silent SystemExit)
-        fail("The builder's own compiler was not found at %s. Set HOOKSHOT_MINGW to an llvm-mingw folder, or unpack the "
-             "Hookshot Builder zip again into a folder your antivirus allows." % cc)
+        fail("Hookshot's own compiler was not found at %s. Set HOOKSHOT_MINGW to an llvm-mingw folder, or run "
+             "Hookshot-Setup.exe again from a folder your antivirus allows." % cc)
     with tempfile.TemporaryDirectory() as d:
         src = os.path.join(d, "t.c")
         with open(src, "w") as f:
@@ -705,7 +705,7 @@ def drop_stale_objects(work):
     olds = {stamp_for(mine)}
     if os.path.basename(versions).lower() == "versions" and os.path.isdir(versions):
         for v in os.listdir(versions):
-            olds.add(stamp_for(os.path.normcase(os.path.join(versions, v, "HookshotBuilder", "tools")).lower()))
+            olds.add(stamp_for(os.path.normcase(os.path.join(versions, v, "Hookshot", "tools")).lower()))
     if had and had in olds:
         print("the system headers are the same as the last build's (an earlier version of the builder): its objects are reused", flush=True)
         with open(note, "w") as f:
@@ -883,7 +883,7 @@ def ngx_platform():
 
 
 def fetch_ngx_sdk(a):
-    """--fetch-ngx-sdk (the Hookshot Builder's NVIDIA DLSS tick): NVIDIA's DLSS SDK into HOOKSHOT_NGX_SDK before the build, once
+    """--fetch-ngx-sdk (the Hookshot's NVIDIA DLSS tick): NVIDIA's DLSS SDK into HOOKSHOT_NGX_SDK before the build, once
     NVIDIA's license was accepted (--accept-nvidia-license: the builder asked first). Only what is missing or not the file
     expected is downloaded"""
     sdk = os.environ.get("HOOKSHOT_NGX_SDK", "")
@@ -930,7 +930,7 @@ def parse_args():
     p.add_argument("--out")
     p.add_argument("--work", default=os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
                                                   "hookshot-builder-windows" if CROSS else "hookshot-builder")   # (the objects apart)
-                   if os.name != "nt" else os.path.join(os.environ.get("LOCALAPPDATA", ROOT), "HookshotBuilder"))
+                   if os.name != "nt" else os.path.join(os.environ.get("LOCALAPPDATA", ROOT), "Hookshot"))
     # (HOOKSHOT_JOBS: fewer compilers on a PC short of memory; the AppImage's builds pass no --jobs)
     p.add_argument("--jobs", type=int)
     p.add_argument("--language", default="en-US", help="the game's language: a code from LANGUAGES, written to language.txt")
@@ -984,7 +984,7 @@ def main(a=None):
     if a.update:
         if not os.path.isdir(kept) or not os.path.isdir(romfs):
             fail("This game folder has no copy of the game files to update from: it was built before updates came in. Choose your game files "
-                 "in Hookshot Builder and build into the same folder once; updates after that work by themselves.")
+                 "in Hookshot and build into the same folder once; updates after that work by themselves.")
         check_cache_paths(out, (kept, romfs))
         shutil.copytree(kept, exefs)
         check_modules(exefs)
@@ -1135,6 +1135,11 @@ def main(a=None):
         # (hookshot) a compile or link that failed forgets the lift: the next build translates the game again. A lifted file cut short
         # (an antivirus, a full disk, a stopped run: "g_module_b" for g_module_base, issue 1197) or lifted C another builder left (20
         # undefined game functions at the link, issue 1176) otherwise failed the same way at every try, the key still matching
+        # (eglantine, 13/11: not with HOOKSHOT_KEEP_BUILD_FILES=1, a developer's incremental builds: a compile error in one file of
+        # the Vulkan back end threw away the game's 445 compiled units, 48 minutes to build them again, twice in one night)
+        if os.environ.get("HOOKSHOT_KEEP_BUILD_FILES", "0") not in ("", "0"):
+            print("the build failed: its lifted code and objects are kept (HOOKSHOT_KEEP_BUILD_FILES=1)", flush=True)
+            raise
         key_file = os.path.join(work, "sa", "gen", LIFT_KEY)
         if os.path.exists(key_file):
             os.remove(key_file)
@@ -1157,7 +1162,7 @@ def main(a=None):
     staged = []
     # (Linux) the same launcher, as a script, when this is a packaged builder (the AppImage sets HOOKSHOT_TOOLS). A source
     # checkout leaves hookshot in the folder, as a development build on Windows does when the setup exe is not beside it
-    launcher = os.path.join(os.path.dirname(os.path.abspath(ROOT)), "HookshotBuilder-Setup.exe")
+    launcher = os.path.join(os.path.dirname(os.path.abspath(ROOT)), "Hookshot-Setup.exe")
     if LINUX:
         script = os.path.join(ROOT, "builder", "linux", "hookshot-folder")
         launcher = script if os.environ.get("HOOKSHOT_TOOLS") and os.path.isfile(script) else None
@@ -1172,7 +1177,7 @@ def main(a=None):
             staged.append((src, os.path.join(game_dir, n)))
     staged.append((os.path.join(work, "sa", "image", "image.bin"), os.path.join(out, "image.bin")))
     if launcher:
-        staged.append((launcher, os.path.join(out, BESIDE[0])))
+        staged.append((launcher, os.path.join(out, "Hookshot.exe")))   # (the folder's small launcher; the game is bin\\hookshot.exe)
     for src, dst in staged:
         try:
             if os.path.exists(dst + ".new"):
@@ -1190,7 +1195,7 @@ def main(a=None):
                  "Staged replacements remain beside the installed files; the compiled source remains at %s." % (dst, src))
     if launcher:   # (a folder built before the launcher: its libraries left the folder for bin\; hookshot is the launcher now)
         stale = [] if LINUX else sorted(f for f in os.listdir(out) if f.endswith(".dll") and f.startswith(("av", "sw")))
-        for n in BESIDE[1:] + stale + ["hookshot.map", "hookshot-game.exe"]:
+        for n in BESIDE + stale + ["hookshot.map", "hookshot-game.exe"]:
             try:
                 if os.path.isfile(os.path.join(out, n)):
                     os.remove(os.path.join(out, n))

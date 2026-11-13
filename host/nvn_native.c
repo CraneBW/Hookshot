@@ -963,6 +963,12 @@ static int set_shaders(nvn_prog *o, int n, const uint8_t *sd, int stride) {
         }
     }
     o->serial = new_serial();
+    /* (eglantine) a compute program (one stage, its control section's stage 5): its pipeline made ahead, on the back end's workers */
+    if (n == 1 && o->sd[0].control) {
+        uint16_t st = 0;
+        memcpy(&st, (const uint8_t *)GP(o->sd[0].control) + 0x56, 2);
+        if (st == 5) rx_nvn_program_set(o);
+    }
     return 1;
 }
 NV(nvnProgramSetShaders) { RET(set_shaders((nvn_prog *)P(0), I(1), (const uint8_t *)P(2), 16)); }
@@ -1195,13 +1201,20 @@ NV(nvnCommandBufferInitialize) {
     RET(1);
 }
 static volatile LONG64 seg_bytes, seg_count;   /* (the command buffers' segments, for the recordings' log line) */
+/* (eglantine) A segment's block starts with room for a recording copy's prefix (copy_prefix, below: SEG_PREFIX bytes), its
+   records after it: EndRecording hands a big recording's whole block over as its copy instead of copying it (see there). */
+#define SEG_PREFIX 24
+static uint8_t *seg_block(const nvn_cmd *o) { return o->seg - SEG_PREFIX; }
+static size_t seg_block_size(const nvn_cmd *o) { return (size_t)(o->end - o->seg) + SEG_PREFIX; }
+/* (the block sizes of the segments this thread handed over, by command buffer: its next segment starts that big) */
+static _Thread_local struct { const nvn_cmd *o; size_t cap; } seg_hint[4];
 NV(nvnCommandBufferFinalize) {
     nvn_cmd *o = CB(P(0));
     if (o->seg) {
-        InterlockedAdd64(&seg_bytes, -(LONG64)(o->end - o->seg));
+        InterlockedAdd64(&seg_bytes, -(LONG64)seg_block_size(o));
         InterlockedDecrement64(&seg_count);
     }
-    if (o->seg) pool_put(o->seg, pool_off() ? POOL_MAX + 1 : pool_class((size_t)(o->end - o->seg)));
+    if (o->seg) pool_put(seg_block(o), pool_off() ? POOL_MAX + 1 : pool_class(seg_block_size(o)));
     o->seg = o->cur = o->end = NULL;
     o->magic = 0;
 }
@@ -1217,21 +1230,25 @@ static void put_hdr(uint8_t *p, uint32_t op, uint32_t size) { nvn_op_hdr h = {op
 static void cmd_reserve(nvn_cmd *o, size_t need) {
     if (o->seg && o->cur + need + OP_RESERVE <= o->end) return;
     const size_t used = o->seg ? (size_t)(o->cur - o->seg) : 0;
-    size_t cap = o->seg ? (size_t)(o->end - o->seg) : 0;
-    if (!cap) cap = 64 << 10;
-    while (used + need + OP_RESERVE > cap) cap *= 2;
+    size_t cap = o->seg ? seg_block_size(o) : 0;   /* (the block: the prefix's room and the records, a power of two) */
+    if (!cap) {
+        cap = 64 << 10;
+        for (int i = 0; i < 4; i++)   /* (as big as the one handed over at its last EndRecording: no growing again) */
+            if (seg_hint[i].o == o && seg_hint[i].cap > cap) cap = seg_hint[i].cap;
+    }
+    while (used + need + OP_RESERVE + SEG_PREFIX > cap) cap *= 2;
     unsigned cls;
     uint8_t *b = (uint8_t *)pool_get(cap, &cls);
     if (!b) die("recording buffer (%zu bytes)", cap);
     if (o->seg) {
-        memcpy(b, o->seg, used);
-        InterlockedAdd64(&seg_bytes, -(LONG64)(o->end - o->seg));
-        pool_put(o->seg, pool_off() ? POOL_MAX + 1 : pool_class((size_t)(o->end - o->seg)));
+        memcpy(b + SEG_PREFIX, o->seg, used);
+        InterlockedAdd64(&seg_bytes, -(LONG64)seg_block_size(o));
+        pool_put(seg_block(o), pool_off() ? POOL_MAX + 1 : pool_class(seg_block_size(o)));
     } else {
         InterlockedIncrement64(&seg_count);
     }
     InterlockedAdd64(&seg_bytes, (LONG64)cap);
-    o->seg = b, o->cur = b + used, o->end = b + cap;
+    o->seg = b + SEG_PREFIX, o->cur = o->seg + used, o->end = b + cap;
 }
 static uint8_t *cmd_alloc(nvn_cmd *o, uint32_t size) {
     size = (size + 7) & ~7u;
@@ -1273,6 +1290,7 @@ static SRWLOCK copy_lock = SRWLOCK_INIT;
 static volatile LONG64 copy_bytes;
 #define COPY_MAGIC 0x59504f43444d43ull   /* "CMDCOPY" */
 typedef struct { uint64_t magic, bytes, cls; } copy_prefix;   /* (cls: its pool class) */
+_Static_assert(sizeof(copy_prefix) == SEG_PREFIX, "a segment's block starts with room for a copy's prefix");
 /* released copies wait until the replay passed every submit made before their release (the replay runs behind) */
 typedef struct { copy_prefix *p; uint64_t after; } dead_copy;
 static dead_copy *dead;
@@ -1429,7 +1447,35 @@ NV(nvnCommandBufferEndRecording) {
     put_hdr(p, NOP_END, 8);
     o->hw_used -= 8;
     o->recording = 0;
-    uint8_t *copy = flatten(o->seg, (size_t)(o->cur - o->seg));
+    /* (eglantine) A big recording's segment is its copy: the block is handed over as it is (its prefix filled in) and the
+       command buffer takes a new one of the same size at its next record. OoT's main thread ends the frame's big recordings
+       (~2 MB of records in the Kokiri village, 2850 draws) between the frame's command generation and its submits: copying
+       them was ~0.5 ms of every frame on that thread, 2.5 % of the frame (hs800: 273 of its 359 memcpy samples). Only a
+       recording that fills a quarter of its block: a small one in a block grown for a big one is copied as before, or the
+       ~55000 live copies would each keep a big block. NVN_NO_STEAL=1: every recording copied, as before */
+    static int steal = -1;
+    if (steal < 0) steal = getenv("NVN_NO_STEAL") == NULL;
+    const size_t rec_bytes = (size_t)(o->cur - o->seg), block = seg_block_size(o);
+    uint8_t *copy;
+    if (steal && rec_bytes >= (32u << 10) && rec_bytes >= block / 4) {
+        copy_prefix *pre = (copy_prefix *)(void *)seg_block(o);
+        pre->cls = pool_off() ? POOL_MAX + 1 : pool_class(block);
+        pre->magic = COPY_MAGIC;
+        pre->bytes = sizeof(copy_prefix) + rec_bytes;
+        InterlockedAdd64(&copy_bytes, (LONG64)pre->bytes);
+        copy = o->seg;
+        static _Thread_local unsigned hint_at;
+        int slot = -1;
+        for (int i = 0; i < 4; i++)
+            if (seg_hint[i].o == o) slot = i;
+        if (slot < 0) slot = (int)(hint_at++ & 3);
+        seg_hint[slot].o = o, seg_hint[slot].cap = block;
+        InterlockedAdd64(&seg_bytes, -(LONG64)block);
+        InterlockedDecrement64(&seg_count);
+        o->seg = o->cur = o->end = NULL;
+    } else {
+        copy = flatten(o->seg, rec_bytes);
+    }
     /* the copy is tied to the control memory position the console driver's descriptor would take */
     const uint64_t at = o->ctl + (o->ctl_used < o->ctl_size ? o->ctl_used : 0);
     o->ctl_used += 64;
@@ -2281,6 +2327,24 @@ NV(nvnWindowGetCrop) {
     }
     r->x = o->crop[0], r->y = o->crop[1], r->width = o->crop[2], r->height = o->crop[3];
 }
+/* (eglantine, HOS_FRAMES_AHEAD=<n>, experiment; unset or 0: off) the game at most n frames ahead of the GPU: an acquire waits
+   until the GPU finished what was submitted by the present n presents back. On the console an acquire blocks while every
+   window texture waits for display, which holds its CPU near its GPU; here the acquire's sync is signaled at once and the
+   limiter paces by time alone, so in heavy views the game may run frames ahead of the replay and rewrite data it has yet to
+   read (the heart HUD flicker in the Kokiri village centre, 09/11) */
+static uint64_t ahead_fences[16];
+static uint64_t ahead_n;
+static int frames_ahead(void) {
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("HOS_FRAMES_AHEAD");
+        v = e ? atoi(e) : 0;
+        if (v < 0) v = 0;
+        if (v > 15) v = 15;
+        if (v) hos_log("nvn: the game at most %d frame(s) ahead of the GPU (HOS_FRAMES_AHEAD)", v);
+    }
+    return v;
+}
 /* frames are paced here (the console blocks here when every window texture waits for display), not in the present:
    the game presents with locks held */
 NV(nvnWindowAcquireTexture) {
@@ -2290,6 +2354,12 @@ NV(nvnWindowAcquireTexture) {
     {
         const int away = hos_vcore_away();
         hos_vi_native_acquire(o->active ? o->active : o->ntex);
+        const int fa = frames_ahead();
+        if (fa && ahead_n >= (uint64_t)fa) {
+            const uint64_t f = ahead_fences[(ahead_n - (uint64_t)fa) % 16];
+            /* (100 ms at most: a fence the GPU never reaches (a device lost, a submission held back) must not stop the game) */
+            if (f && !rx_nvn_wait(f, 0)) rx_nvn_wait(f, 100000000ull);
+        }
         if (away) hos_vcore_back();
     }
     /* the acquire sync: this texture is no longer read by the display path (presents copy it in GPU order) */
@@ -2306,6 +2376,7 @@ NV(nvnQueuePresentTexture) {
         rx_nvn_present(o->tex[i], o->crop);
         if (away) hos_vcore_back();
     }
+    if (frames_ahead()) ahead_fences[ahead_n++ % 16] = rx_nvn_fence();   /* (HOS_FRAMES_AHEAD, above) */
     o->presents++;
     extern volatile LONG64 hos_present_count;   /* display.c */
     InterlockedIncrement64(&hos_present_count);

@@ -59,6 +59,7 @@ void clear_stats(int64_t* clears, int64_t* masked);
 /// indirect: the workgroup counts' GPU address (x, y, z unused)
 void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t z, uint64_t indirect);
 void dry_mark_written(NvnState& s, bool compute, bool first);   // (hookshot: the parallel replay's dry pass)
+void dry_mark_cleared(NvnState& s, int index);   // (eglantine: and at its clears; index: the colour target, -1: depth and stencil)
 void draw_stats(int64_t* draws, int64_t* skipped, int64_t* dispatches, int64_t* pipelines);
 void draw_stats2(int64_t* passes, int64_t* mesh, double* pipeline_ms);
 void draw_stats3(int64_t* pending_skips, int64_t* waits, double* wait_ms);
@@ -67,6 +68,9 @@ int64_t draw_desc_reused();
 /// RX_VK_FLASH_RECORD=<key>,...: the last frames' draws of those programs, written to the log for frames around a flash
 void draw_records_log(uint64_t frame_lo, uint64_t frame_hi);
 void pass_traces_log(uint64_t frame_lo, uint64_t frame_hi);   // (RX_VK_PASS_TRACE=1)
+void pass_traces_write(const char* path, uint64_t frame_lo, uint64_t frame_hi);   // (the same, into a file)
+bool pass_trace_on();                    // (RX_VK_PASS_TRACE=1)
+void trace_line(const char* fmt, ...);   // (a line of the frame's pass trace, in stream order; only with pass_trace_on())
 /// Changes with every uniform update the stream makes (vk_replay.cpp): descriptors bound before may be stale
 uint64_t ub_generation();
 /// A background thread (shader translation, pipeline builds) reads guest memory from the captures only, never the stream's
@@ -74,6 +78,9 @@ uint64_t ub_generation();
 void ub_thread_off();
 /// The pipeline cache to disk (force: whatever was built since the last save; else only after a few new ones)
 void pipeline_cache_save(bool force);
+/// (eglantine) After the start's precompile: the cache read from the file is let go (its pipelines are made), a small one takes
+/// its place for what play builds (vk_draw.cpp, pcache_loaded)
+void pipeline_cache_slim();
 
 /// The stream's uniform updates (UPDATE_UB, vk_replay.cpp) that overlap [addr, addr + n) and may not be in guest
 /// memory yet when the GPU reads it: a copy of the range with them applied, at the offset alloc returns in the

@@ -15,6 +15,24 @@
    The runtime commits what it hands out (image, system region, heap, address regions: hos_commit), because host
    APIs given guest buffers (ReadFile into a game buffer) fail on reserved pages without raising an exception. A
    guest or host access to a page nothing committed is committed on first touch, 64 KB at a time, by the handler. */
+/* (eglantine) Windows answers VirtualQuery (and the driver's import of a host pointer, vkAllocateMemory) with the run of
+   pages after the address that share its state and protection, found by walking them: ~2.3 ms a GB. The heap is one
+   committed run of many GB, so each import of a new GPU pool cost ~28-44 ms twice (query, then the driver's own) on the
+   replay thread: the 90-120 ms hitches on the way to Saria (hs168). One page every HOS_COMMIT_MARK_MB (64) of every
+   commit is made read-write-execute: the runs end there (scratchpad vqtest: 8 GB run 18.5 ms, broken every 256 MB
+   0.58 ms) and the game reads and writes those pages as before. A commit over them makes them read-write again, so
+   each commit marks its own range. HOS_COMMIT_MARK_MB=0: off */
+static void commit_marks(uint64_t lo, uint64_t hi) {
+    static uint64_t step = 1;
+    if (step == 1) {
+        const char *e = getenv("HOS_COMMIT_MARK_MB");
+        step = (e ? (uint64_t)atoll(e) : 64) << 20;
+    }
+    if (!step) return;
+    DWORD old;
+    for (uint64_t a = (lo + step - 1) / step * step; a + 4096 <= hi; a += step)
+        VirtualProtect(GP(a), 4096, PAGE_EXECUTE_READWRITE, &old);
+}
 void hos_commit(uint64_t addr, uint64_t size) {
     if (!size) return;
     const uint64_t lo = addr & ~0xFFFFULL, hi = (addr + size + 0xFFFF) & ~0xFFFFULL;
@@ -30,6 +48,8 @@ void hos_commit(uint64_t addr, uint64_t size) {
                 CloseHandle(CreateThread(NULL, 0, hos_out_of_memory_box, NULL, 0, NULL));
             }
         }
+    } else {
+        commit_marks(lo, hi);   /* (eglantine) an RWX page every 64 MB of a commit: VirtualQuery's walks stay short (pool imports 90-120 ms -> 2-7 ms) */
     }
 }
 
@@ -52,10 +72,18 @@ static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
     const uint64_t guest = (uint64_t)(p - A64_MEM);
     if (guest < 0x100000) return EXCEPTION_CONTINUE_SEARCH;   /* (a null pointer: the game's own fault) */
     MEMORY_BASIC_INFORMATION mbi;
-    if (!VirtualQuery(p, &mbi, sizeof mbi) || mbi.State != MEM_RESERVE) return EXCEPTION_CONTINUE_SEARCH;
+    if (!VirtualQuery(p, &mbi, sizeof mbi)) return EXCEPTION_CONTINUE_SEARCH;
+    /* (eglantine, 10/11 08:40) Committed and writable by now: another thread touched the same 64 KB first and its handler
+       committed them between this thread's fault and this query. The access is tried again; it was taken for a crash
+       (hs60_off: a worker's read at guest 0x7f1e31b8a0, the game closed). Rare while only FreeMemoryPages decommitted; freed
+       regions are decommitted too since this night (hos_region_release_gaps), and the game's workers read them in batches */
+    if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+        return EXCEPTION_CONTINUE_EXECUTION;
+    if (mbi.State != MEM_RESERVE) return EXCEPTION_CONTINUE_SEARCH;
     static volatile LONG touched;
-    if (InterlockedIncrement(&touched) <= 16)
-        hos_log("mem: %#llx committed on first touch (nothing handed it out)", (unsigned long long)guest);
+    const LONG nth = InterlockedIncrement(&touched);
+    if (nth <= 16) hos_log("mem: %#llx committed on first touch (nothing handed it out)", (unsigned long long)guest);
+    else if (!(nth & (nth - 1))) hos_log("mem: %ld first touches so far (64 KB committed at each)", (long)nth);   /* (eglantine: at each power of two) */
     return VirtualAlloc(GP(guest & ~0xFFFFULL), 0x10000, MEM_COMMIT, PAGE_READWRITE) ? EXCEPTION_CONTINUE_EXECUTION
                                                                                       : EXCEPTION_CONTINUE_SEARCH;
 }
@@ -575,7 +603,7 @@ static DWORD WINAPI sample_all_thread(void *p) {
             }
             CloseHandle(snap);
             t0 = hos_now_ns();
-            hos_log("prof: all-thread sampling of %d threads into %s", nt, path);
+            hos_log("prof: all-thread sampling of %d threads into %s (t0 %lld ns)", nt, path, (long long)t0);
         }
         Sleep(2);
         const long ms = (long)((hos_now_ns() - t0) / 1000000);
