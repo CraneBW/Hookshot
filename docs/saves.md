@@ -69,14 +69,14 @@ copying again and [ask on Discord](https://discord.gg/rexed), without posting yo
 
 ## For advanced users: the save script
 
-Hookshot has the same transfers on the command line: [`scripts/oot_saves.py`](../scripts/oot_saves.py), which needs only
+Hookshot has the same transfers on the command line: [`scripts/hookshot_saves.py`](../scripts/hookshot_saves.py), which needs only
 Python 3. It also exports to Hookshot, handles custom folders, portable installs and several profiles, and previews a
 copy with `--dry-run`:
 
 ```sh
-python -I scripts/oot_saves.py list              # every save it finds, its slots and when each was saved
-python -I scripts/oot_saves.py import lichii     # Lichii -> Hookshot
-python -I scripts/oot_saves.py export lichii     # Hookshot -> Lichii
+python -I scripts/hookshot_saves.py list              # every save it finds, its slots and when each was saved
+python -I scripts/hookshot_saves.py import lichii     # Lichii -> Hookshot
+python -I scripts/hookshot_saves.py export lichii     # Hookshot -> Lichii
 ```
 
 [Saves: the files, the script and the emulators](saves-script.md) has every command and option, where each emulator

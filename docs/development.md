@@ -852,7 +852,7 @@ See [control.md](control.md) for the fields, sampling, bounds and examples.
 | `gpu/vk/` | the Vulkan back end (`hookshot_vk.dll`, `hookshot_vk.so`), with Eden's shader recompiler and sirit |
 | `gpu/render/`, `gpu/third_party/` | the WebGPU renderer the Windows exe falls back to when it was built with wgpu-native, its op stream (`rx_nvn.h`), suyu's decoders |
 | `builder/` | Hookshot Builder, command-line only (players use the Hookshot Launcher): the Windows `--cli` program (.NET 8), its setup (also a game folder's `hookshot.exe`), and the Linux AppImage's `AppRun`, tools and game folder scripts |
-| `scripts/` | test runs, the profile and log readers, the save copier (`oot_saves.py`), release tooling, `scripts/linux` (dependencies, AppImage) |
+| `scripts/` | test runs, the profile and log readers, the save copier (`hookshot_saves.py`), release tooling, `scripts/linux` (dependencies, AppImage) |
 | `tests/` | the game-free checks, all run by `tests/run_all.py` |
 | `third_party/` | a64-kit (with Hookshot's changes, marked `(hookshot)`, and Hookshot's, `(hookshot)`: its PROVENANCE.md), libopus, zbic (Atmosphere's zstd with ZBIC, for unpacking only), SDL2's licence, Dear ImGui and its Vulkan backend, zstd's decoder, the Libertinus fonts |
 
