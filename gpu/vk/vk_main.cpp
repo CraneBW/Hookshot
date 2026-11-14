@@ -1292,6 +1292,7 @@ void prepare_with_screen() {
         }
         if (update) prep_skip[0].store(true), prep_skip[1].store(true);
         const bool prepared = !update && prepare_run(prep_progress, false);
+        if (!update && !prepared && !prepare_stopped() && state_list_pending()) state_list_run();
         if (!prepared) prep_skip[0].store(true);
         // (a first start, or one after a start that did not finish them: the pipelines the notes predict, into the driver's cache)
         if ((prepared || (!update && predict_pending())) && compile_all() && !prepare_stopped()) {
@@ -1439,6 +1440,7 @@ bool started_up() {
         // (no prediction: its part of the bar goes. On Most after a preparation too: left in, the step to the noted pipelines
         // counted it done at its guess, and the bar jumped by the prediction's share, about half of it)
         if (!predict) bar.skip(1);
+        if (!prepared && state_list_pending()) state_list_run();   // (the builder's step: a list shipped after the last prepare)
         part = 1;
         prepare_moved(1, 0, 0);
         if (predict) predict_run(progress);
@@ -1508,6 +1510,7 @@ bool started_up() {
         };
         const bool update = prepare_is_update();   // (an update: what the notes name now, the rest in play)
         if (!update && (prepare_run(progress, false) || predict_pending()) && compile_all()) predict_run(progress);
+        else if (!update && state_list_pending()) state_list_run();
         if (update) state_list_run();
         precompile_run(progress);
         if (update) prepare_background();

@@ -2071,6 +2071,37 @@ void state_record(const Program& p, const NvnState& s, const Targets& at, VkPrim
     if (!state_file) state_open_locked();
     if (state_file && state_seen.insert(h).second) fwrite(&r, sizeof r, 1, state_file), fflush(state_file);
 }
+/// (HL_SHIPPED_STATES) The shipped list's contents by a hash, and the hash state_list_prepare last went through, in
+/// hookshot_pipeline_states_shipped.done: a list that came after the shaders were prepared (a list shipped later, or a folder
+/// prepared before it had one) was never noted, the prepare being done for that translator and seed, and its pipelines were all
+/// made in play. 0: no list
+uint64_t shipped_list_hash() {
+    uint64_t h = 0xCBF29CE484222325ull;
+    FILE* f = fopen(state_list_path("hookshot_pipeline_states_shipped.bin").c_str(), "rb");
+    if (!f) return 0;
+    uint8_t buf[65536];
+    size_t total = 0;
+    for (size_t got; (got = fread(buf, 1, sizeof buf, f)) > 0; total += got)
+        for (size_t i = 0; i < got; i++) h = (h ^ buf[i]) * 1099511628211ull;
+    fclose(f);
+    return total > 12 ? h : 0;
+}
+uint64_t shipped_list_done() {
+    uint64_t h = 0;
+    if (FILE* f = fopen(state_list_path("hookshot_pipeline_states_shipped.done").c_str(), "rb")) {
+        if (fread(&h, 8, 1, f) != 1) h = 0;
+        fclose(f);
+    }
+    return h;
+}
+bool shipped_list_pending() {
+    static const bool on = !getenv("HL_SHIPPED_STATES") || atoi(getenv("HL_SHIPPED_STATES")) != 0;
+    if (!on || getenv("RX_VK_NO_STATE_LIST")) return false;
+    const uint64_t h = shipped_list_hash();
+    const bool pending = h && h != shipped_list_done();
+    if (pending) logf("hl pipe: the shipped pipeline state list is new since the shaders were prepared: its pipelines are noted now");
+    return pending;
+}
 /// (a compute program's first dispatch of this run: dispatch) the program in the list once, by its key alone, as a kCompute record
 void state_record_compute(uint64_t key) {
     static const bool off = env_on("RX_VK_NO_STATE_LIST");
@@ -2108,6 +2139,9 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool open_s
     // (the shipped list's compute programs are not pipelines to note: precompile_run keeps them ready, computes_plan)
     std::vector<StateRec> recs = state_list_read(state_list_path("hookshot_pipeline_states_shipped.bin"), &shipped_version);
     const size_t shipped = recs.size();
+    if (const uint64_t h = shipped ? shipped_list_hash() : 0) {   // (gone through: state_list_pending is false until it changes)
+        if (FILE* f = fopen(state_list_path("hookshot_pipeline_states_shipped.done").c_str(), "wb")) fwrite(&h, 8, 1, f), fclose(f);
+    }
     // (the player's own: this build's, and an older build's version 1 list, state_open_locked)
     for (const char* own : {"hookshot_pipeline_states.bin", "hookshot_pipeline_states_v1.bin"})
         for (const StateRec& r : state_list_read(state_list_path(own))) recs.push_back(r);
@@ -9600,6 +9634,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     prepared_write(path, prepared_for);
     return true;
 }
+bool state_list_pending() { return shipped_list_pending(); }
 /// (hookshot) An update (prepare_is_update): the seed is prepared in play, behind the game, too late for the precompile; the pipelines
 /// of the state list are made now, before it, so that precompile_run builds them before the game as on a first start
 void state_list_run() {
