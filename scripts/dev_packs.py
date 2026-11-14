@@ -310,10 +310,20 @@ def object_store():
     return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "hookshot-objects")
 
 
+def lift_store():
+    """(nx2/lift_store.py) The translations every base and pack on this PC share, unless HOOKSHOT_LIFT_STORE names another (or is
+    empty or 0: none): a new base or a first pack translates the game only when the translator, the hot list or the game
+    changed. Copies are clones where the file system has them (btrfs, XFS), full copies elsewhere"""
+    if os.name == "nt":
+        return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "Hookshot", "lifts")
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "hookshot-lifts")
+
+
 def run(cmd, cwd, env=None):
     print("+ " + " ".join(cmd), flush=True)
     e = dict(os.environ, **(env or {}))
     e.setdefault("HOOKSHOT_OBJ_STORE", object_store())
+    e.setdefault("HOOKSHOT_LIFT_STORE", lift_store())
     subprocess.run(cmd, cwd=cwd, check=True, env=e)
 
 
