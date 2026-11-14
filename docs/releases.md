@@ -27,7 +27,7 @@ Each version is one Forgejo release, made by `.forgejo/workflows/release.yml`:
 | Hookshot (MagicBeanDev/Hookshot) | The launcher (MagicBeanDev/LongshotLauncher) |
 |---|---|
 | `HookshotBuilder-<v>-windows-x64.zip`: the Windows builder (its setup as `HookshotBuilder.exe`, the builder and Hookshot's sources in `HookshotBuilder\`, `tools.lock`, `VERSION`, and `recomplauncher.json` at the top) | `LongshotLauncher-<v>-windows-x64-setup.exe`: one self-contained program that installs itself (below); `LongshotLauncher-<v>-windows-x64-portable.zip`: the same program as `LongshotLauncher.exe` with its `portable` file |
-| `Hookshot-<v>-x86_64.AppImage`: the Linux builder (the builder, its Python, Hookshot's sources, the Vulkan back end, its `tools.lock` and `recomplauncher.json`); its build tools are not inside | `LongshotLauncher-<v>-x86_64.AppImage` |
+| `Hookshot-<v>-x86_64.AppImage`: the Linux builder (the builder, its Python, Hookshot's sources, its `tools.lock` and `recomplauncher.json`; the player's build compiles the Vulkan back end); its build tools are not inside | `LongshotLauncher-<v>-x86_64.AppImage` |
 | `tools.lock`: the tools the builders download | |
 | `SHA256SUMS`, `SHA256SUMS.sig` | `SHA256SUMS`, `SHA256SUMS.sig` |
 
@@ -142,9 +142,9 @@ tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 HookshotBuilder/tools/
   `third_party` part (`assemble third-party`). Linux: `scripts/linux/deps.sh tools`'s. The lock has no play profile:
   play profiles are committed in `assets/profiles/`.
 - **Linux.** The AppImage carries only the builder: its Python (the tools' download and `make_game.py` run on it,
-  and its packages follow `requirements.txt`, which changes with the version), Hookshot's sources and the prebuilt Vulkan
-  back end. Each `linux-x64` tool's `dest` is where the AppImage had it (`usr/lib/hookshot/emsdk`, `usr/share/hookshot/cpm`,
-  ...). The launcher unpacks them beside the unpacked AppImage, as on Windows. An AppImage started by itself
+  and its packages follow `requirements.txt`, which changes with the version), and Hookshot's sources (the player's build
+  compiles the Vulkan back end from them). Each `linux-x64` tool's `dest` is where the AppImage had it
+  (`usr/lib/hookshot/emsdk`, `usr/share/hookshot/cpm`, ...). The launcher unpacks them beside the unpacked AppImage, as on Windows. An AppImage started by itself
   (`builder/linux/AppRun`) finds them there, or in the launcher's copy of the same version, or in
   `$XDG_DATA_HOME/hookshot/builder/toolchains/<v>/`; what is missing its first `--cli` downloads there, its progress on
   stderr, linking a tool another version there has. Once there, no connection is needed.
