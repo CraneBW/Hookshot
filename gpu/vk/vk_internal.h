@@ -74,6 +74,9 @@ struct Device {
     bool swapchain_colorspace = false;   // (hookshot) VK_EXT_swapchain_colorspace: HDR10 surfaces are listed
     bool hdr = false;                    // (hookshot) the swapchain is HDR10 (ST 2084, Rec. 2020): framegen_hdr writes it
     bool mesh_fallback = false;   // (hookshot) no VK_EXT_mesh_shader: task and mesh programs as compute shaders (vk_shader.cpp)
+    // (hookshot) the float controls the device reports, a bit a width (1: 16 bits, 2: 32, 4: 64): a program declaring a denorm mode the
+    // device lacks is invalid (vkCreateShaderModule's validation error), and an older driver need not ignore it (strip_float_controls)
+    uint32_t denorm_preserve_widths = 0, denorm_flush_widths = 0;
     bool task_mesh_fallback = false;
     bool mesh_capable = false;    // (hookshot) the card has task and mesh shaders, whatever the Mesh shaders mode this run uses
                                   // (mesh_shader): the Quality preset Auto (this PC)'s tier, vk_main.cpp auto_profile
