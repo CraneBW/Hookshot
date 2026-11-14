@@ -752,6 +752,11 @@ void ensure_layout(Program& p) {
 VkPipelineCache pcache = VK_NULL_HANDLE;
 std::string pcache_path;
 std::atomic<int64_t> pcache_built_since_save{0};
+// (Hookshot) RX_VK_PCACHE_MISSES=0: every pipeline made counts toward a save of the cache, as before
+bool pcache_misses_only() {
+    static const bool v = !getenv("RX_VK_PCACHE_MISSES") || atoi(getenv("RX_VK_PCACHE_MISSES")) != 0;
+    return v;
+}
 // (hookshot) The size of the cache's data when it was last read or written. The count above takes in every pipeline made
 // with the cache, the ones it already held too: the precompile's ~13,000 at each start, all found in the cache, made the
 // first check in play (present 300) write the whole cache again, 1.1 GB, at every start, the file the same 1146 MB each
@@ -2837,6 +2842,12 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
     }
     if (cold) ci.flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+    // (Hookshot, RX_VK_PCACHE_MISSES: whether the pipeline cache had it. A hit adds nothing to the cache: counted as built, the
+    // 1.2 GB cache was fetched and written again at every scene load, whose pipelines all come from it)
+    VkPipelineCreationFeedback feedback{};
+    VkPipelineCreationFeedbackCreateInfo feedback_ci{VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO};
+    feedback_ci.pPipelineCreationFeedback = &feedback;
+    if (pcache_misses_only() && part < 0 && !driver_cache_only) feedback_ci.pNext = ci.pNext, ci.pNext = &feedback_ci;
     // (the two shader libraries go into our cache, as whole pipelines do: asked for under the flag, the driver answers from a cache
     // it is handed and not from its own on disk, so a library the warm pass built and let go was cold again at its first draw
     // (measured: 21 of 21). gpl_libs_cached: RX_VK_GPL_NO_CACHE=1 keeps them out, as before. With our cache: through
@@ -2895,7 +2906,10 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         if (logged++ < 10) logf("vk: graphics pipeline for %016llx not made (%d)", (unsigned long long)p.key, (int)r);
         pl = VK_NULL_HANDLE;
     }
-    pcache_built_since_save += !driver_cache_only && !quick_build;
+    if (!driver_cache_only && !quick_build &&
+        !(pcache_misses_only() && (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) &&
+          (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT)))
+        pcache_built_since_save++;
     if (!quick_build) {   // (hookshot: quick builds are counted apart, in quick_pipeline's log line)
         st_pipelines++;
         st_pipeline_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
