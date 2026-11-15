@@ -35,7 +35,8 @@ def actual_coordinator(source):
     wrapper = ast.parse('def run_compile_jobs():\n    return 0\n').body[0]
     wrapper.body = main.body[start:end + 1] + wrapper.body
     module = ast.fix_missing_locations(ast.Module(body=[compile_one, wrapper], type_ignores=[]))
-    scope = dict(os=os, time=time, concurrent=concurrent, GATE=None, no_throttle=lambda handle: None)
+    scope = dict(os=os, time=time, concurrent=concurrent, GATE=None, no_throttle=lambda handle: None,
+                 below_normal=lambda handle: None)   # (Hookshot's compilers' priority: build.py below_normal)
     exec(compile(module, str(source), 'exec'), scope)
     return scope
 
