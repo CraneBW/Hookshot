@@ -849,8 +849,8 @@ def cmd_pr(args):
         if not body_given(args):   # (the template filled in, and When it applies down to the boxes the diff suggests)
             keep = [item for item, _ in desc.suggested_boxes(pr_diff(pr["number"]))]
             filled = desc.keep_applicable(fill_template(filled, title), keep)
-        if filled != body:
-            edit_pr(pr["number"], body=filled)
+        # (maintainers may push fixes to the branch; the create call has no field for it, an edit does)
+        edit_pr(pr["number"], allow_maintainer_edit=True, **({"body": filled} if filled != body else {}))
         print(pr["html_url"])
         if not args.ready:
             print("Opened as work in progress (%s). Fill in the description (pr edit %d --body-file F); once the "
