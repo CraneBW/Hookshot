@@ -112,6 +112,14 @@ int main() {
     CHECK(short_excess(6709 * MB, 6450 * MB) == 259 * MB);
     CHECK(short_excess(7680 * MB, 6450 * MB) == 1230 * MB);            // (7.5 of 7.0 GB: the whole excess)
     CHECK(short_excess(5000 * MB, 6450 * MB) == kShortGive);           // (under the line: refused all the same)
+    // a texture's age as at 60 fps, for the hold's and the reserve's waits: unchanged at 60 fps and over, or with no rate known
+    CHECK(age_at_60(600, 60.0) == 600 && age_at_60(600, 144.0) == 600 && age_at_60(600, 0.0) == 600);
+    CHECK(age_at_60(35, 3.5) == 600);                            // (ten seconds at the UHD Graphics' 3.5 fps)
+    CHECK(age_at_60(300, 30.0) == 600 && age_at_60(900, 30.0) == 1800);
+    CHECK(hold_target(age_at_60(35, 3.5), 60, none, 5000 * MB, 4500 * MB) == 5000 * MB);    // (the hold's line after ten seconds)
+    CHECK(hold_target(age_at_60(105, 3.5), 60, none, 5000 * MB, 4500 * MB) == 4500 * MB);   // (the reserve's after thirty)
+    CHECK(hold_target(age_at_60(34, 3.5), 60, none, 5000 * MB, 4500 * MB) == UINT64_MAX);   // (under ten seconds: stays)
+    CHECK(age_at_60(10, 0.5) == 300);                            // (a load's stall counts as kMinFps, not as 0.5 fps)
     std::printf("PASS: the compaction's rules\n");
     return 0;
 }
