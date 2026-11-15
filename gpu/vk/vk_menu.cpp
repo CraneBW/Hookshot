@@ -872,7 +872,10 @@ constexpr int kVramTextureMb[kVramBudgets] = {0, 2200, 3600, 4800, 6144, 7500, 9
 // PCIe, 30-32 GB of bound ranges every 600 submits in Hyrule Field on an RTX 3060 Laptop (6 GB), the GPU's frame 27 ms. A preset's
 // mirrors are never more than Auto's on the card (mirror_budget.h budget_bytes): Low on a 4 GB card, which preset_caps_memory lets
 // through, keeps 512
-constexpr int kVramMirrorMb[kVramBudgets] = {0, 256, 1536, 1024, 1536, 2048, 2560, 3072};
+// (hookshot) 4.8 GB's mirrors too, the Balanced (8GB) preset's and so every 8 GB card's: 2048 MB, not 1024, what Auto gives an 8
+// GB card (mirror_budget.h auto_bytes: a quarter of the card). At 1024 the mirrors filled within minutes and the GPU read the
+// game's memory over PCIe from then on: an RTX 3060 Ti went from 37.1 to 45.3 fps, 1% lows 16.4 to 20.7, at 2048
+constexpr int kVramMirrorMb[kVramBudgets] = {0, 256, 1536, 2048, 1536, 2048, 2560, 3072};
 int preset_vram_budget(int p) {
     static const int of[] = {0, 1, 2, 3, 5, 7};   // (none: Auto; Minimum 2.2 GB, Low 3.6, Balanced 4.8, High 7.5, Ultra 11)
     return of[std::min(std::max(p, 0), 5)];
