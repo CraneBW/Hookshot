@@ -28,6 +28,14 @@ ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def game_keys(hid):
+    """nn_hid.c's key() with what it calls now: hos_key_down (display.c's, here Windows' state: GetAsyncKeyState) and the
+    keys by their place on the keyboard, pos and kpos (on this system: the US key itself)"""
+    nl = chr(10)
+    return ("int hos_key_down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }" + nl + block(hid, "static int key(") + nl +
+            block(hid, "static int pos(") + nl + block(hid, "static int kpos("))
+
+
 def block(text, marker):
     start = text.index(marker)
     end = text.index("{", start) + 1
@@ -319,7 +327,7 @@ class WalkKeyTests(unittest.TestCase):
         if not compiler:
             self.skipTest("no C compiler")
         hid = read("host", "nn_hid.c")
-        code = [block(hid, "enum { B_A"), block(hid, "static int key("), block(hid, "static int kmap_down("),
+        code = [block(hid, "enum { B_A"), game_keys(hid), block(hid, "static int kmap_down("),
                 between(hid, "static const char *const bind_names[HOS_KEY_N]", "void hos_bind("),
                 between(hid, "static int mouse_vk_slot(", "static int bound_down("), block(hid, "static void stick_max("),
                 block(hid, "static void oc_notes("),

@@ -235,6 +235,22 @@ def linker(*opts):
     return [arg for opt in opts for arg in ("-Xlinker", "-Xlink=" + opt if toolchain.mingw() else opt)]
 
 
+
+def below_normal(handle):
+    """(hookshot) A compiler process at below normal priority, only with HOOKSHOT_LOW_PRIORITY=1: the PC stays more
+    responsive while the game compiles, and the build can take longer. Off by default: on an Intel CPU with efficiency cores,
+    Windows kept the below-normal compilers on those cores with most performance cores idle, and the compile used far more
+    of the CPU once they were set to normal. make_game.py runs at normal priority itself, so the compilers start at normal"""
+    if os.name != "nt" or not handle or os.environ.get("HOOKSHOT_LOW_PRIORITY", "0") in ("", "0"):
+        return
+    import ctypes
+    k = ctypes.WinDLL("kernel32")
+    k.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    try:
+        k.SetPriorityClass(ctypes.c_void_p(int(handle)), 0x4000)   # (BELOW_NORMAL_PRIORITY_CLASS)
+    except (OSError, ValueError, TypeError):
+        pass
+
 def HOT_ORDER():
     p = os.path.join(kit.WORK, "hot_order.txt")
     if not os.path.exists(p) or os.environ.get("RX_NO_ORDER"):
@@ -1116,6 +1132,7 @@ def compile_one(job):
     try:
         with subprocess.Popen([cc] + fl + ["-c", c_src, "-o", obj], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as p:
             no_throttle(getattr(p, "_handle", None))
+            below_normal(getattr(p, "_handle", None))
             if GATE:
                 GATE.started(lease, p)
             out, err = p.communicate()
@@ -1212,6 +1229,14 @@ def main():
     # (hookshot) code_hot.c, the lift's hot functions together (A64_HOT_FUNCS + A64_HOT_CHUNK=1): at RX_HOT_OPT
     # (default O2), so the hot callees inline into their hot callers
     hot_fl = [("-" + os.environ.get("RX_HOT_OPT", "O2")) if f == "-" + OPT else f for f in fl]
+    # (hookshot) the hot code has three functions of about 2 MB of C each (vector float code; 1.4 to 2.7 million instructions once
+    # the guest model's helpers are inlined). For a function with no profile, the machine code's loop-invariant motion hoisted
+    # every invariant instruction out of their function-wide loop; each one was then live through the whole function, and the
+    # liveness tables of the passes after it (Live Variable Analysis, the PHI elimination) took one compiler past 15 GB
+    # (measured, clang 23, one hot piece alone; three of them at once on a 16 GB PC). "all": no hoisting to a block the static
+    # estimate calls hotter either, which is what a profile already did for the functions it knows ("pgo", the default): that
+    # function alone then takes 1.9 GB, and with a matching profile the object is the same byte for byte
+    hot_fl = hot_fl + ["-mllvm", "-disable-hoisting-to-hotter-blocks=all"]
     # (hookshot) RX_PGO=gen: code_hot.c counts its branches (host/pgo_rt.c writes them; -O1 builds much sooner, and the counters are
     # placed before the optimiser, so a profile from it fits the -O2 build). RX_PGO=<merged .prof>: built with that profile
     if PGO == "gen":
@@ -1318,7 +1343,8 @@ def main():
             # (what the code takes for granted, which newer C++ libraries bring in by themselves and older ones do not: issue 48)
             "-include", "algorithm", "-include", "cstdio", "-include", "cstdlib", "-include", "cstring", "-include", "functional",
             "-include", "string", "-include", "vector",
-            "-std=c++20", "-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-DVK_NO_PROTOTYPES", "-DMKWVK_BUILDING",
+            # (hookshot, RX_VK_DEBUGINFO=1: CodeView line tables and a PDB for the back end, for line-level profiles; same code)
+            "-std=c++20", "-O2", "-gcodeview" if os.environ.get("RX_VK_DEBUGINFO") == "1" else "-g0", "-DNDEBUG", "-Wno-everything", "-DVK_NO_PROTOTYPES", "-DMKWVK_BUILDING",
             *(["-DHOOKSHOT_RELEASE"] if os.environ.get("RX_RELEASE") == "1" else []),   # (the shaders precompiled before the game)
             # (Eden's recompiler before suyu's root: suyu has its own shader_recompiler/ headers, and a Shader::Info
             # of the other layout in some objects is what crashed the descriptor walk. MKWVK_INCLUDES changes the

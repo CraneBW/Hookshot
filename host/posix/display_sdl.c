@@ -14,7 +14,7 @@ void hos_input_clear_toggles(void);
 #include "../hos_sdl.h"
 
 /* (the window's app id: the applications menu's entry names it as its StartupWMClass, builder/linux/hookshot_builder.py) */
-#define HOS_APP_ID "io.github.NotRexed.Hookshot"
+#define HOS_APP_ID "io.github.pixl27.ProjectHookshot"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +48,8 @@ int hos_mouse_take(int32_t *dx, int32_t *dy) {
     *dy = InterlockedExchange(&mouse_dy, 0);
     return mouse_captured;
 }
+int hos_mouse_test_on(void) { return 0; }   /* (hookshot: a test's own mouse, HOS_MOUSE_TEST, is display.c's on Windows) */
+int hos_key_down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }   /* (hookshot: this window's own table of keys, win32_posix.c) */
 
 /* (mouse_native.c) motion taken and not used, put back for the next taker (the player camera's) */
 void hos_mouse_give_back(int32_t dx, int32_t dy) {

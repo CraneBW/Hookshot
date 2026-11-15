@@ -815,8 +815,32 @@ uint32_t stage_storage_word(uint64_t base, uint32_t offset) {
 }
 } // namespace
 
+// (hookshot) A draw asks for the same handles twice (its variant's check in program_for, then its descriptors): each thread that
+// replays numbers its draws (handle_memo_next) and keeps the handles its current draw evaluated. Threads that never number theirs
+// (translation jobs) keep nothing.
+namespace {
+thread_local uint64_t handle_epoch = 0;
+struct HandleMemo {
+    uint64_t epoch;
+    const void* st;
+    const void* s;
+    uint32_t program, element, value;
+};
+thread_local HandleMemo handle_memo[32];
+uint32_t stage_handle_eval(const NvnState& s, const Stage& st, uint32_t program, uint32_t element);
+} // namespace
+void handle_memo_next() { handle_epoch++; }
 uint32_t stage_handle(const NvnState& s, const Stage& st, uint32_t program, uint32_t element) {
     if (program >= st.info.handle_programs.size()) return 0;
+    if (!handle_epoch) return stage_handle_eval(s, st, program, element);
+    HandleMemo& m = handle_memo[(((uintptr_t)&st >> 4) * 31 + program * 7 + element) & 31];
+    if (m.epoch == handle_epoch && m.st == &st && m.s == &s && m.program == program && m.element == element) return m.value;
+    const uint32_t v = stage_handle_eval(s, st, program, element);
+    m = {handle_epoch, &st, &s, program, element, v};
+    return v;
+}
+namespace {
+uint32_t stage_handle_eval(const NvnState& s, const Stage& st, uint32_t program, uint32_t element) {
     return Shader::EvaluateHandleProgram(
                st.info.handle_programs[program],
                [&](u32 index, u32 offset) -> u32 { return stage_cbuf_word(s, st, index, offset); },
@@ -824,6 +848,7 @@ uint32_t stage_handle(const NvnState& s, const Stage& st, uint32_t program, uint
                element)
         .value_or(0U);
 }
+} // namespace
 
 void stage_handles(const NvnState& s, const Stage& st, uint32_t program, uint32_t count, uint32_t* out) {
     if (program >= st.info.handle_programs.size()) {
@@ -1359,6 +1384,85 @@ uint64_t translator_stamp() {
 }
 namespace {
 
+// (hookshot) Cached programs read off the replay threads. A program's first draw of a session read its records from
+// hookshot_programs.bin where it was drawn (ReadFile under shader_mu, then its shader modules made): as an area came in and
+// while the camera turned to things not drawn yet, the replay thread and its workers stopped for it and for each other
+// (sampled in the Market, hs2610: 11 ms of each frame over 45 ms, the workers waiting on shader_mu meanwhile; a PC with less
+// than 20 GB of RAM keeps only the compute programs from the start, so every graphics program goes this way once). A draw's
+// pick now hands the read to the background workers, each with its own handle on the file, side by side, and gets a
+// stand-in that is not ready: the draw waits for it as for a translation (where its targets already hold a picture,
+// RX_VK_PIPE_WAIT_MS a frame and then it is left out; elsewhere until it is read, on the waiting thread itself when no worker
+// has it yet) and picks again (vk_draw.cpp). Compute programs are read where they are dispatched, as before.
+// RX_VK_ASYNC_LOAD=0: every read where it is asked for, as before
+thread_local bool load_async_here = false;
+std::mutex stand_ins_mu;
+std::unordered_set<const Program*> stand_ins;
+std::vector<std::unique_ptr<Program>> stand_ins_done;   // (shader_mu: kept, a draw may still hold one)
+std::atomic<int64_t> st_async_loads{0}, st_async_ns{0}, st_async_variants{0};
+bool async_loads_on() {
+    static const bool on = !getenv("RX_VK_ASYNC_LOAD") || atoi(getenv("RX_VK_ASYNC_LOAD")) != 0;
+    return on;
+}
+FILE* own_cache_handle() {
+    static thread_local FILE* in = nullptr;
+    static thread_local bool tried = false;
+    if (!tried) {
+        tried = true;
+        if (!disk_path.empty()) in = fopen(disk_path.c_str(), "rb");
+    }
+    return in;
+}
+/// (shader_mu held) When key's records are still on disk: their read handed to a worker, and variants given the stand-in
+/// (mesh: a mesh program's, so that the mesh picks take it)
+bool program_cache_load_async(uint64_t key, std::vector<std::unique_ptr<Program>>& variants, bool mesh) {
+    if (!load_async_here || !async_loads_on()) return false;
+    disk_init();
+    if (!disk_on) return false;
+    auto recs = std::make_shared<std::vector<DiskRecord>>();
+    {
+        std::lock_guard lk(disk_mu);
+        auto it = disk_records.find(key);
+        if (it == disk_records.end()) return false;
+        *recs = std::move(it->second);
+        disk_records.erase(it);
+    }
+    auto stand_in = std::make_unique<Program>();
+    stand_in->key = key;
+    if (mesh) stand_in->mesh = dev.mesh_shader, stand_in->fallback = !dev.mesh_shader;
+    Program* raw = stand_in.get();
+    variants.push_back(std::move(stand_in));
+    {
+        std::lock_guard lk(stand_ins_mu);
+        stand_ins.insert(raw);
+    }
+    jobs_push(
+        [key, recs, raw] {
+            const auto t0 = std::chrono::steady_clock::now();
+            std::vector<std::unique_ptr<Program>> made;
+            if (FILE* in = own_cache_handle()) program_cache_read(in, nullptr, key, *recs, made);
+            else program_cache_read(disk_in, &disk_mu, key, *recs, made);
+            st_async_variants += (int64_t)made.size();
+            {
+                std::lock_guard lk(shader_mu);
+                auto& vs = programs[key];
+                auto at = std::find_if(vs.begin(), vs.end(), [raw](const std::unique_ptr<Program>& p) { return p.get() == raw; });
+                size_t pos = vs.size();
+                if (at != vs.end()) {   // (what was read takes the stand-in's place, in the order the file has it)
+                    pos = (size_t)(at - vs.begin());
+                    stand_ins_done.push_back(std::move(*at));
+                    vs.erase(at);
+                }
+                for (auto& p : made) vs.insert(vs.begin() + (ptrdiff_t)pos++, std::move(p));
+            }
+            raw->failed = true;   // (a stand-in: picked again once ready)
+            raw->ready.store(true, std::memory_order_release);
+            st_async_loads++;
+            st_async_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+        },
+        true, &raw->ready);
+    return true;
+}
+
 void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* fsc, const Code* csc,
                     const uint8_t color_types[8]) {
     const auto t0 = std::chrono::steady_clock::now();
@@ -1417,7 +1521,7 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
                      t->program.workgroup_size[0], t->program.workgroup_size[1], t->program.workgroup_size[2],
                      t->program.shared_memory_size, t->program.local_memory_size);
             // (hookshot) The movie upscaler's dozen networks, on a card that cannot run them as the console does: their software matrix multiplies
-            // took minutes each for AMD's compiler (the black screen with sound, Hookshot issue 26: JaredEzz's analysis) and the movies ran at 10 fps
+            // took minutes each for AMD's compiler (the black screen with sound, upstream issue 26: JaredEzz's analysis) and the movies ran at 10 fps
             // (issues 38, 43). Left out, the last pass becomes a linear upscale of the movie (upscale_stub in vk_draw.cpp): the same picture at 60
             // fps, a little softer. The gameplay TAAU network stays. RX_VK_NETWORK_KEEP=<key prefixes>, "all": every one runs
             if (t->program.info.uses_cooperative_matrix) {
@@ -1596,7 +1700,7 @@ std::array<u32, 3> mesh_registers_of(const Code* task, const Code& mesh) {
     // (the control section's topology in GL's numbers: 3 triangles; 1 points, not lines. OoT's four mesh programs with a 1 (the grass
     // drawn into the 2400 x 2400 shadow map around Link) write one index byte per primitive, the primitive count = their vertex
     // count, and a point size. Read as lines, each joined vertex 2i to 2i + 1 of its meshlet: a mesh of long thin dark stripes on
-    // the ground, the water and Link around him, on AMD; Hookshot issue 302)
+    // the ground, the water and Link around him, on AMD; upstream issue 302)
     const uint32_t topology = mesh.topology == 3 ? 4 : mesh.topology == 1 ? 0 : mesh.topology;
     const uint32_t lines = task ? (task->payload_bytes + 127) / 128 : 0;
     // (the larger of the two for both: the control section's pair is not always vertices and primitives in that order. The door's
@@ -1732,6 +1836,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         if (fsc) {
             Env fenv{s, *fsc, Shader::Stage::Fragment};
             auto fs = translate(fenv, true);
+            dump_ir(p, "fragment", fs->program, fsc->key);   // (hookshot: a mesh program's fragment stage too)
             questions += fenv.texture_questions;
             Shader::RuntimeInfo frt{};
             // (what the mesh program stores, and its per-primitive generics: Eden's MakeRuntimeInfo)
@@ -1824,7 +1929,7 @@ const Program* mesh_program_locked(const NvnState& s, const uint8_t color_types[
     const bool fallback = dev.uses_mesh_fallback(task != nullptr);
     const uint64_t key = mesh_key(task, *mesh, fsc, prim, color_types);
     auto& variants = programs[key];
-    program_cache_load(key, variants);
+    if (!program_cache_load_async(key, variants, true)) program_cache_load(key, variants);
     const uint64_t codes[4] = {mesh->key, fsc ? fsc->key : 0, task ? task->key : 0, prim ? prim->key : 0};
     for (auto& p : variants)
         if (!p->codes[0]) std::memcpy(p->codes, codes, sizeof codes);
@@ -1894,10 +1999,19 @@ uint64_t pick_inputs(const NvnState& s, const uint8_t color_types[8]) {
 void answer_handles(const NvnState& s, const Program& p, std::vector<uint32_t>& out) {
     out.clear();
     for (const Program::Answer& a : p.answers) {
-        const uint32_t id = answer_handle(s, p, a) & 0xFFFFF;
-        out.push_back(id);
-        out.push_back(texture_slot_version((int)id));
+        const uint32_t h = answer_handle(s, p, a);   // (hookshot: the whole handle, so still_valid_handles needs no second read)
+        out.push_back(h);
+        out.push_back(texture_slot_version((int)(h & 0xFFFFF)));
     }
+}
+/// (hookshot) still_valid from the handles answer_handles just read: the draws of a program with other textures (most of a
+/// frame's: each material its own) read every handle twice
+bool still_valid_handles(const Program& p, const std::vector<uint32_t>& hs) {
+    for (size_t i = 0; i < p.answers.size() && 2 * i < hs.size(); i++) {
+        const uint32_t h = hs[2 * i];
+        if (h && answer_of(h, p.answers[i].image) != p.answers[i].type) return false;
+    }
+    return true;
 }
 } // namespace
 
@@ -2011,8 +2125,11 @@ const Program* program_for(const NvnState& s, ProgramKind kind, const uint8_t co
     const bool mesh = kind == ProgramKind::Mesh;
     static int64_t st_hit, st_none, st_differ, st_calls, st_by_tex;   // (logged now and then: how the cache does)
     if (++st_calls % 200000 == 0)
-        logf("vk: program picks: %lld kept (%lld by the last picks' textures, a uniform buffer bound since), %lld new, %lld with other textures (of %lld)",
-             (long long)st_hit, (long long)st_by_tex, (long long)st_none, (long long)st_differ, (long long)st_calls);
+        logf("vk: program picks: %lld kept (%lld by the last picks' textures, a uniform buffer bound since), %lld new, %lld with other textures (of %lld); "
+             "cached programs read by the workers: %lld (%lld variants, %.2f ms each)",
+             (long long)st_hit, (long long)st_by_tex, (long long)st_none, (long long)st_differ, (long long)st_calls,
+             (long long)st_async_loads.load(), (long long)st_async_variants.load(),
+             st_async_loads.load() ? st_async_ns.load() / 1e6 / (double)st_async_loads.load() : 0.0);
     const uint64_t stages = prog_stage_sig(s.prog);
     const uint64_t bind = s.bind_gen, reg = registrations_generation(), ub = ub_generation();
     // (hookshot) the pair of the last picks stood only while nothing at all was bound anew, and OoT binds a uniform buffer for nearly every
@@ -2061,7 +2178,7 @@ const Program* program_for(const NvnState& s, ProgramKind kind, const uint8_t co
         answer_handles(s, *pk.p, now);
         if (now == pk.handles) return st_hit++, keep(pk.p);
         st_differ++;
-        if (still_valid(s, *pk.p)) {   // (other textures of the same types: the same variant)
+        if (still_valid_handles(*pk.p, now)) {   // (other textures of the same types: the same variant)
             pk.handles.swap(now);
             return keep(pk.p);
         }
@@ -2096,7 +2213,7 @@ const Program* program_pick(const NvnState& s, ProgramKind kind, const uint8_t c
     const bool tonemap = !compute && scene_tonemap_for(stage_code[1]);
     const uint64_t key = compute ? stage_code[5]->key : graphics_key(*stage_code[0], stage_code[1], s.vattr, color_types, tonemap);
     auto& variants = programs[key];
-    program_cache_load(key, variants);
+    if (compute || !program_cache_load_async(key, variants, false)) program_cache_load(key, variants);
     const uint64_t codes[4] = {stage_code[compute ? 5 : 0]->key, !compute && stage_code[1] ? stage_code[1]->key : 0, 0, 0};
     for (auto& p : variants)
         if (!p->codes[0]) std::memcpy(p->codes, codes, sizeof codes);
@@ -2140,6 +2257,11 @@ const Program* program_pick(const NvnState& s, ProgramKind kind, const uint8_t c
 
 void program_wait(const Program* p) {
     if (p && !p->ready.load(std::memory_order_acquire)) jobs_wait(p->ready);
+}
+void program_load_async_here(bool on) { load_async_here = on; }
+bool program_is_stand_in(const Program* p) {
+    std::lock_guard lk(stand_ins_mu);
+    return stand_ins.count(p) != 0;
 }
 
 /// (hookshot) Whether the environment variable var lists hex (key prefixes, comma-separated)

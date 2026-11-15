@@ -1684,4 +1684,22 @@ int display_refresh_mhz() {
     cached.store(mhz, std::memory_order_relaxed);
     return mhz;
 }
+
+// (hookshot) The device is lost: nothing is drawn again in this run, while the game itself goes on (its sound,
+// the frame counter), and players took it for a load that never ends: "black screen after the intro, waited a long time".
+// Said once, in the log in plain words and in a box on its own thread (the replay goes on to write its report); the game is
+// left running so the log keeps what follows
+void device_lost_notice() {
+    logf("vk: THE GRAPHICS CARD STOPPED (device lost): the picture stays black until the game is started again. "
+         "Please send hookshot_log.txt with a report");
+#ifdef _WIN32
+    if (dev.offscreen || env_on("HOS_HEADLESS")) return;   // (no window: shader preparation, tests)
+    std::thread([name = std::string(dev.props.deviceName)] {
+        const std::string text = "The graphics card (" + name + ") stopped responding to Hookshot (Vulkan: device lost), so the "
+            "picture will stay black. The game cannot recover from this: close it and start it again.\n\nIf it happens again at "
+            "the same place, please open an issue at git.notrexed.dev/Hookshot/Hookshot and attach hookshot_log.txt from the game folder.";
+        MessageBoxA(nullptr, text.c_str(), "Hookshot: graphics card stopped", MB_OK | MB_ICONERROR | MB_TOPMOST);
+    }).detach();
+#endif
+}
 } // namespace mkwvk

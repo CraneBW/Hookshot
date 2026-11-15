@@ -3,6 +3,7 @@
    Vulkan device leaves the wgr_* stand-ins in place (host/rx_nowgpu.c, host/posix/linux_stubs.c: once the WebGPU
    renderer's functions, gpu/render, which is built no more), and nothing is drawn (logged). */
 #include "hos.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
@@ -11,6 +12,9 @@
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/dlss_math.h"
 #include "control.h"
+#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/hookshot_env.h"
+#endif
 
 /* the stand-ins when there is no Vulkan back end (host/rx_nowgpu.c, host/posix/linux_stubs.c) */
 int wgr_start(void *hwnd);
@@ -217,6 +221,7 @@ static float host_wide_menus(uint32_t keep_mask) {   /* (MkwVkHost.wide_menus) *
 }
 float hos_wide_cover(void);   /* hos_main.c */
 int hos_mouse_pointer(MkwVkPointer *out);   /* display.c, posix/display_sdl.c */
+int hos_key_down(int vk);                   /* display.c, posix/display_sdl.c */
 int hos_sdl_gyro_status(void);   /* pad_sdl.c */
 extern const char *hos_romfs_dir;   /* nn_fs.c, set by hos_main.c */
 static const char *host_romfs_dir(void) { return hos_romfs_dir; }
@@ -227,7 +232,13 @@ static unsigned char menu_key_press[256];
 void hos_vk_note_key_press(unsigned key) {
     if (key < sizeof menu_key_press) __atomic_store_n(&menu_key_press[key], 1, __ATOMIC_RELAXED);
 }
+/* (hookshot, issue 3) With MKWVK_KEY_HELD added to the key code, the same call answers another question: whether that key is
+   down now (hos_key_down: Windows' state of the keyboard or, on a PC where it says nothing, the window's own key messages).
+   The Insert menu asks it for the key a control is given. A question of its own in the host's table would change vk_api.h,
+   which is part of the program cache's stamp: every player's 7 GB of prepared shaders made again for one more function. */
+#define MKWVK_KEY_HELD 0x10000
 int hos_vk_take_key_press(int key) {
+    if (key & MKWVK_KEY_HELD) return hos_key_down(key & 0xFF);
     return (unsigned)key < sizeof menu_key_press &&
            __atomic_exchange_n(&menu_key_press[key], 0, __ATOMIC_RELAXED);
 }
@@ -291,6 +302,9 @@ static int host_take_text(int focus, uint32_t *out, int max) {
     return n;
 }
 
+
+/* (hookshot) the game's freed address space inside [lo, hi), decommitted (hos_mem.c): the back end's ranges no import holds */
+uint64_t hos_region_release_gaps(uint64_t lo, uint64_t hi);
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -301,6 +315,7 @@ static const MkwVkHost vk_host = {
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
     hos_wide_cover,
     host_take_text,
+    hos_region_release_gaps,
     hos_options_file,
 };
 
@@ -368,6 +383,7 @@ static void flush_early(void) {
 }
 
 /* dll: hookshot_vk.dll (hookshot_vk.so on Linux), the Vulkan back end: one export */
+static int preparing_shaders;   /* (hookshot) rx_prepare_shaders: no window, no box when the renderer is missing */
 static const MkwVkRenderer *load_vulkan(const char *dll) {
     char path[MAX_PATH];
     const DWORD n = GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -377,7 +393,21 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     HMODULE m = LoadLibraryA(path);
     if (!m) {
 #ifdef _WIN32
-        hos_log("rx: %s did not load (%lu): nothing is drawn", path, GetLastError());
+        const DWORD err = GetLastError();
+        /* (hookshot) Two of a player's logs: hookshot_vk.dll "did not load (126)" and no SDL either, the game started
+           from a folder without them (the libraries are in bin\ since the launcher), and a window that stayed black for good
+           with nothing on screen to say why. Said in plain words, and in a box (not while shaders are prepared) */
+        hos_log("rx: the renderer could not be loaded (%s): nothing will be drawn. Start the game from Hookshot (the launcher), "
+                "or install the game again there", err == ERROR_MOD_NOT_FOUND ? "the file or a library it needs is missing"
+                                                 : err == ERROR_BAD_EXE_FORMAT ? "the file is damaged" : "Windows refused it");
+        if (!preparing_shaders && !env_on("HOS_HEADLESS") && strcmp(dll, "hookshot_vk.dll") == 0) {
+            char text[MAX_PATH + 512];
+            snprintf(text, sizeof text,
+                     "Hookshot's renderer could not be loaded:\n\n%s\n(Windows error %lu)\n\nThe window would stay black. Start the "
+                     "game from Hookshot (the launcher), not from a copy of hookshot.exe elsewhere; if it still happens, use "
+                     "Update in Hookshot, or install the game again from it.", path, err);
+            MessageBoxA(NULL, text, "Hookshot", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+        }
 #else   /* (why, as dlerror() said: a missing file, a glibc too old, a wrong ELF class. The line names the file
            LoadLibraryA opened, hookshot_vk.so, and drops dlerror()'s leading "<that file>: ", so the path, home folder
            included, is in it once. wgr_start draws nothing) */
@@ -426,6 +456,7 @@ int rx_start(void *hwnd) {
 /* (hookshot) hookshot --prepare-shaders: the Vulkan back end started with no window and no game, which prepares
    every shader in its start (gpu/vk/vk_main.cpp started_up) and is then let go. 0 when there is no usable Vulkan */
 int rx_prepare_shaders(void) {
+    preparing_shaders = 1;
     const MkwVkRenderer *r = load_vulkan("hookshot_vk.dll");
     return r && r->start(NULL);
 }
@@ -593,6 +624,11 @@ int rx_guest_imported(uint64_t lo, uint64_t hi) {
     const int r = vk && vk->guest_imported ? vk->guest_imported(lo, hi) : 0;
     if (away) hos_vcore_back();
     return r;
+}
+/* (hookshot, hos_mem.c: the game freed the address region [lo, hi)) the back end takes the range and, at its next
+   submission, has the host decommit what no import holds of it (a short list lock: no wait on the replay) */
+void rx_guest_release(uint64_t lo, uint64_t hi) {
+    if (vk && vk->guest_release) vk->guest_release(lo, hi);
 }
 /* (nvn_native.c: the CPU set an event's value) in order with the submits, for the GPU's waits on it */
 int rx_option(int id, int otherwise) { return vk && vk->option ? vk->option(id) : otherwise; }

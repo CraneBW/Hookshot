@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 24
+#define MKWVK_API_VERSION 25
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (hookshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -230,9 +230,12 @@ typedef struct MkwVkHost {
        max, in order (characters and HOS_TEXT_KEY editing keys, repeats included; Ctrl+V and Shift+Insert paste): the count.
        host/display.c (WM_CHAR, WM_KEYDOWN) and host/posix/display_sdl.c (SDL's text input and key events) put them in */
     int (*take_text)(int focus, uint32_t *out, int max);
-    /* (version 24, hookshot: 23 is the host's take_text) the player's settings file, hookshot_options.ini in the user folder (host/options_path.c): the
-       Insert menu's (gpu/vk/vk_menu.cpp ini_path) and the switches its rows read before it loads. "" when none could be chosen:
-       every row at its default, and nothing saved */
+    /* (version 24, hookshot) the parts of guest [lo, hi) that the game's address regions do not hold now, decommitted
+       (host/hos_mem.c): asked under the pool lock for ranges no import holds. The bytes given back */
+    uint64_t (*region_release_gaps)(uint64_t lo, uint64_t hi);
+    /* (version 25, hookshot: 24 is the host's region_release_gaps) the player's settings file, hookshot_options.ini in the user
+       folder (host/options_path.c): the Insert menu's (gpu/vk/vk_menu.cpp ini_path) and the switches its rows read before it
+       loads. "" when none could be chosen: every row at its default, and nothing saved */
     const char *(*options_path)(void);
 } MkwVkHost;
 
@@ -309,6 +312,9 @@ typedef struct MkwVkRenderer {
        game's thread, before any draw uses it: what the back end kept ready for it can be loaded now (gpu/vk/vk_programs.cpp).
        Its stages' code and control sections are in the game's memory at this call */
     void (*nvn_program_created)(const nvn_prog *p);
+    /* (version 24, hookshot) the game freed the address region [lo, hi): the parts no import holds are decommitted now (the
+       host's region_release_gaps), the rest when their imports go */
+    void (*guest_release)(uint64_t lo, uint64_t hi);
 } MkwVkRenderer;
 
 /* the DLL's one export: null when Vulkan is not usable (the executable then draws nothing) */

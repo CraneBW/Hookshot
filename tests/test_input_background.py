@@ -34,6 +34,14 @@ CASES = ("foreground", "script-background", "headless", "noactivate", "live-back
          "frame-hold", "live-frame", "reuse-frame", "wall", "zero", "empty", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle")
 
 
+def game_keys(hid):
+    """nn_hid.c's key() with what it calls now: hos_key_down (display.c's, here Windows' state: GetAsyncKeyState) and the
+    keys by their place on the keyboard, pos and kpos (on this system: the US key itself)"""
+    nl = chr(10)
+    return ("int hos_key_down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }" + nl + block(hid, "static int key(") + nl +
+            block(hid, "static int pos(") + nl + block(hid, "static int kpos("))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cc", default="gcc")
@@ -91,7 +99,7 @@ static void host_stick_read(int32_t stick[4]) { (void)stick; }
 static void host_drag_read(int32_t stick[4]) { (void)stick; }
 static void player_used(void) {}
 """
-    actual = "\n".join(("static HoldToggle toggles;", cheat_state, cheat_spies, host_spies, block(hid, "static int key("), block(hid, "static int kmap_down("),
+    actual = "\n".join(("static HoldToggle toggles;", cheat_state, cheat_spies, host_spies, game_keys(hid), block(hid, "static int kmap_down("),
         block(hid, "static int game_in_front("), hid[start:end], block(hid, "static void stick_max("),
         block(hid, "static int pads_in_background("), block(hid, "static int pads_merge("),
         block(hid, "static int pads_behind("),

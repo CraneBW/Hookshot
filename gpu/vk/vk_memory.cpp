@@ -4284,7 +4284,8 @@ std::deque<DeadMirror> dead_mirrors;
 // Forest ~1.3 GB of imports, 15-45 ms a submission (3-4 fps on an RX 7800 XT with 11 ms of GPU time; issues 312, 413). Its
 // table entries went at its retirement, and its mirror goes before (mstate), so once the GPU is past retired_value nothing
 // reaches it. The node stays (pointers to it are kept elsewhere); only its buffer and memory go. RX_VK_KEEP_RETIRED=1: kept
-struct DeadImport { VkBuffer buffer; VkDeviceMemory memory; uint64_t value; uint64_t bytes; std::vector<VkDeviceMemory> pieces; };
+struct DeadImport { VkBuffer buffer; VkDeviceMemory memory; uint64_t value; uint64_t bytes; std::vector<VkDeviceMemory> pieces;
+                    uint64_t lo = 0; };   // (lo: the guest address it imports, release_uncovered)
 std::deque<DeadImport> dead_imports;
 uint64_t st_retired_imports_freed = 0, st_retired_import_bytes_freed = 0;
 uint64_t dead_import_bytes = 0;   // (queued in dead_imports: still in the heap's use until the GPU is past them)
@@ -4368,7 +4369,7 @@ void retired_imports_give_back() {   // (pools_mu held)
         if ((p.mstate == Pool::MIRROR_NONE || p.mstate == Pool::MIRROR_REFUSED) && !p.inherit_pending &&
             p.retired_value <= mem_completed &&
             p.last_value <= mem_completed && retired_give_back::due(mode, idle, idle_ms, floor_ms, want > 0)) {
-            dead_imports.push_back({p.buffer, p.memory, std::max(mem_rec_value, p.last_value), p.hi - p.lo, std::move(p.pieces)});
+            dead_imports.push_back({p.buffer, p.memory, std::max(mem_rec_value, p.last_value), p.hi - p.lo, std::move(p.pieces), p.lo});
             dead_import_bytes += p.hi - p.lo;
             p.pieces.clear();
             p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE, p.address = 0;
@@ -4486,6 +4487,67 @@ int64_t st_imports_evicted = 0;
 uint64_t st_import_bytes_evicted = 0;
 constexpr uint64_t kImportIdle = 600;
 
+// (hookshot, after ProjectReLink) The game frees an address region without unmapping its pages first, and a freed region's pages
+// were only discarded: the regions' commit stood at their whole span (8 GB for the ~2.9 GB mapped at a time). What no import of
+// the GPU holds of a freed region is decommitted now (the host's region_release_gaps): the game's thread only queues the range
+// (memory_guest_release), and the next submission, which holds pools_mu, gives back the parts no import, retired import, dead
+// import or evicted pool stands over; an import let go later gives back its own range then. RX_VK_KEEP_FREED=1: kept, as before
+int64_t st_released_calls = 0;
+uint64_t st_released_bytes = 0;
+void release_uncovered(uint64_t lo, uint64_t hi) {   // (pools_mu held)
+#ifdef _WIN32
+    static const bool off = env_on("RX_VK_KEEP_FREED");
+    if (off || !host->region_release_gaps || hi <= lo) return;
+    std::vector<std::pair<uint64_t, uint64_t>> held;
+    auto note = [&](uint64_t a, uint64_t b) {
+        if (a < hi && b > lo) held.push_back({std::max(a, lo), std::min(b, hi)});
+    };
+    for (auto it = imported.lower_bound(hi); it != imported.begin();) {   // (the pools starting below hi, the last ones first)
+        --it;
+        if (it->second.hi + (1ull << 30) < lo) break;   // (imports are at most 1 GB: none further down reaches lo)
+        note(it->second.lo, it->second.hi);
+    }
+    for (const auto& nh : retired_pools)
+        if (nh.mapped().memory) note(nh.mapped().lo, nh.mapped().hi);
+    for (const DeadImport& d : dead_imports) {
+        if (!d.lo) return;   // (one whose place is not known: nothing given back this time)
+        note(d.lo, d.lo + d.bytes);
+    }
+    for (const auto& nh : evicted_pools) note(nh.mapped().lo, nh.mapped().hi);
+    std::sort(held.begin(), held.end());
+    uint64_t at = lo, freed = 0;
+    for (const auto& [a, b] : held) {
+        if (a > at) freed += host->region_release_gaps(at, a);
+        at = std::max(at, b);
+    }
+    if (hi > at) freed += host->region_release_gaps(at, hi);
+    st_released_calls++, st_released_bytes += freed;
+    static uint64_t logged_at;
+    if (st_released_bytes >> 30 != logged_at) {   // (said at every GB)
+        logged_at = st_released_bytes >> 30;
+        logf("vk: the game's freed memory given back to Windows: %llu MB in all, over %lld freed regions and imports",
+             (unsigned long long)(st_released_bytes >> 20), (long long)st_released_calls);
+    }
+#else
+    (void)lo, (void)hi;
+#endif
+}
+// (the game's thread only leaves the range: the replay holds pools_mu for much of a submission, and the game frees regions
+// by the thousand while it loads. Taken up at the next submission; a range handed out again meanwhile is no gap by then)
+std::mutex released_mu;
+std::vector<std::pair<uint64_t, uint64_t>> released_queue;
+void released_drain() {   // (pools_mu held)
+    static std::vector<std::pair<uint64_t, uint64_t>> take;
+    {
+        std::lock_guard lk(released_mu);
+        if (released_queue.empty()) return;
+        const size_t n = std::min<size_t>(released_queue.size(), 512);   // (512 a submission at most)
+        take.assign(released_queue.begin(), released_queue.begin() + n);
+        released_queue.erase(released_queue.begin(), released_queue.begin() + n);
+    }
+    for (const auto& [lo, hi] : take) release_uncovered(lo, hi);
+}
+
 void imports_give_back() {   // (pools_mu held)
     while (!evicted_pools.empty() && evicted_pools.front().mapped().retired_value <= mem_completed) {
         Pool& p = evicted_pools.front().mapped();
@@ -4493,7 +4555,9 @@ void imports_give_back() {   // (pools_mu held)
         destroy_import_buffer(p.buffer);
         vkFreeMemory(dev.device, p.memory, nullptr);
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
+        const uint64_t lo = p.lo, hi = p.hi;
         evicted_pools.pop_front();
+        release_uncovered(lo, hi);   // (what the game freed under it goes back to Windows)
     }
     // (hookshot) Default by OS and vendor: on off Windows, and on Windows NVIDIA (below); off on Windows AMD and Intel (device
     // losses on Intel Arc and AMD right after imports went back, issues 17, 309 and 571): RX_VK_IMPORT_HIGH=85 turns it on
@@ -4751,6 +4815,7 @@ void memory_begin_submission() {
     mirror_synced.clear();
     writebacks.clear();
     imports_give_back();
+    released_drain();   // (hookshot: the game's freed regions, given back where no import stands)
     if (tex_capture_on()) publish_tex_spans(texture_frame_no());
     if (!mirror_on()) return;
     mirrors_trim();
@@ -6132,5 +6197,13 @@ void msync_pass_report() {
 void memory_stats(int64_t* mirrors, uint64_t* mirror_mb, int64_t* sync_bytes, int64_t* sync_copies, int64_t* wb_bytes) {
     *mirrors = st_mirrors, *mirror_mb = mirror_bytes >> 20, *sync_bytes = st_sync_bytes, *sync_copies = st_sync_copies;
     *wb_bytes = st_wb_bytes;
+}
+// (hookshot, after ProjectReLink) the game freed the address region [lo, hi): queued for the next submission (released_drain)
+void memory_guest_release(uint64_t lo, uint64_t hi) {
+    if (hi <= lo) return;
+    std::lock_guard lk(released_mu);
+    if (!released_queue.empty() && released_queue.back().second == lo) released_queue.back().second = hi;   // (the next one up)
+    else if (!released_queue.empty() && released_queue.back().first == hi) released_queue.back().first = lo;   // (or down)
+    else if (released_queue.size() < (1u << 16)) released_queue.push_back({lo, hi});
 }
 } // namespace mkwvk
