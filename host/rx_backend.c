@@ -3,6 +3,7 @@
    (hookshot_vk.so) beside the executable. Decided at rx_start, before any other rx_* call; a DLL that is missing or finds no usable Vulkan
    device leaves the WebGPU renderer in place (logged). */
 #include "hos.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
@@ -372,6 +373,7 @@ static void flush_early(void) {
 }
 
 /* dll: hookshot_vk.dll (hookshot_vk.so on Linux), the Vulkan back end: one export */
+static int preparing_shaders;   /* (hookshot) rx_prepare_shaders: no window, no box when the renderer is missing */
 static const MkwVkRenderer *load_vulkan(const char *dll) {
     char path[MAX_PATH];
     const DWORD n = GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -381,7 +383,22 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     HMODULE m = LoadLibraryA(path);
     if (!m) {
 #ifdef _WIN32
-        hos_log("rx: RX_BACKEND=vulkan, but %s did not load (%lu): WebGPU", path, GetLastError());
+        const DWORD err = GetLastError();
+        hos_log("rx: RX_BACKEND=vulkan, but %s did not load (%lu): WebGPU", path, err);
+        /* (hookshot) Two of a player's logs: hookshot_vk.dll "did not load (126)" and no SDL either, the game started
+           from a folder without them (the libraries are in bin\ since the launcher), and a window that stayed black for good
+           with nothing on screen to say why. Said in plain words, and in a box (not while shaders are prepared) */
+        hos_log("rx: the renderer could not be loaded (%s): nothing will be drawn. Start the game from Hookshot (the launcher), "
+                "or install the game again there", err == ERROR_MOD_NOT_FOUND ? "the file or a library it needs is missing"
+                                                 : err == ERROR_BAD_EXE_FORMAT ? "the file is damaged" : "Windows refused it");
+        if (!preparing_shaders && !getenv("HOS_HEADLESS") && strcmp(dll, "hookshot_vk.dll") == 0) {
+            char text[MAX_PATH + 512];
+            snprintf(text, sizeof text,
+                     "Hookshot's renderer could not be loaded:\n\n%s\n(Windows error %lu)\n\nThe window would stay black. Start the "
+                     "game from Hookshot (the launcher), not from a copy of hookshot.exe elsewhere; if it still happens, use "
+                     "Update in Hookshot, or install the game again from it.", path, err);
+            MessageBoxA(NULL, text, "Hookshot", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+        }
 #else   /* (why, as dlerror() said: a missing file, a glibc too old, a wrong ELF class. The line names the file
            LoadLibraryA opened, hookshot_vk.so, and drops dlerror()'s leading "<that file>: ", so the path, home folder
            included, is in it once. Linux has no WebGPU: wgr_start draws nothing) */
@@ -432,6 +449,7 @@ int rx_start(void *hwnd) {
 /* (hookshot) hookshot --prepare-shaders: the Vulkan back end started with no window and no game, which prepares
    every shader in its start (gpu/vk/vk_main.cpp started_up) and is then let go. 0 when there is no usable Vulkan */
 int rx_prepare_shaders(void) {
+    preparing_shaders = 1;
     const MkwVkRenderer *r = load_vulkan("hookshot_vk.dll");
     return r && r->start(NULL);
 }
