@@ -61,6 +61,10 @@ public partial class MainWindow : Window
         TrackBox.ItemsSource = TrackNames;
         TrackBox.SelectedIndex = Array.IndexOf(TrackIds, Track);
         TrackBox.SelectionChanged += TrackChanged;
+        pinned = BuilderSettings.Load(SettingsPath)?.Version;
+        FillVersions(null);
+        VersionBox.DropDownOpened += VersionsOpened;
+        VersionBox.SelectionChanged += VersionChanged;
         clock.Tick += (_, _) => Tick();
         Drop += Dropped;
         SourceInitialized += (_, _) =>
@@ -124,7 +128,7 @@ public partial class MainWindow : Window
         ShowMain();
         if (Environment.GetEnvironmentVariable("HOOKSHOT_UI_PREVIEW") is { Length: > 0 } preview) { Preview(preview); return; }
         CheckAll();
-        latestTag = Environment.GetEnvironmentVariable("HOOKSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(Track);
+        latestTag = await NewestTag();
         RefreshMode();
     }
 
@@ -150,7 +154,7 @@ public partial class MainWindow : Window
             OutPath.Text = folder;
             FillDumps();
             CheckAll();
-            latestTag ??= Environment.GetEnvironmentVariable("HOOKSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(Track);
+            latestTag ??= await NewestTag();
         }
         Refresh();
     }
@@ -183,7 +187,7 @@ public partial class MainWindow : Window
         var game = OutPath.Text.Length > 2 ? GameVersion(OutPath.Text) : null;
         var builder = Tools.Find()?.Version;
         // (the newest release known: GitHub's, else this builder's own. v2.0.0 took a GitHub that did not answer for "up to date")
-        updateTarget = Updater.Target(latestTag, builder, Track);
+        updateTarget = pinned ?? Updater.Target(latestTag, builder, Track);
         if (game != null && updateTarget != null && game != updateTarget && !sourcePicked) mode = Mode.UpdateGame;
         else if (game != null && !sourcePicked) mode = Mode.UpToDate;
         else if (latestTag != null && builder != null && builder != updateTarget) mode = Mode.UpdateBuilder;
@@ -203,20 +207,23 @@ public partial class MainWindow : Window
                 break;
             case Mode.UpdateGame:
                 FilesTitle.Text = "Update available";
-                FilesSub.Text = $"Hookshot {updateTarget} is available. Your game is {game}: Update builds it again from the game files kept in " +
-                                "its folder, compiling only what changed.";
+                FilesSub.Text = (pinned != null ? $"You chose Hookshot {pinned} in the Version menu." : $"Hookshot {updateTarget} is available.") +
+                                $" Your game is {game}: Update builds it again from the game files kept in its folder, compiling only what changed.";
                 BuildButton.Content = "Update";
                 break;
             case Mode.UpToDate:
                 FilesTitle.Text = "Your game is up to date";
                 FilesSub.Text = latestTag == null
                     ? $"Your game is {game}, as this builder. git.notrexed.dev did not answer, so newer versions could not be checked."
+                    : pinned != null ? $"{game} is the version chosen in the Version menu. Pick game files below only to build it again from scratch."
                     : $"{game} is the latest version. Pick game files below only to build it again from scratch.";
                 BuildButton.Content = "Play";
                 break;
             case Mode.UpdateBuilder:
                 FilesTitle.Text = "Build your game";
-                FilesSub.Text = $"Hookshot Builder {updateTarget} is available (this one is {builder}): update it first, then build.";
+                FilesSub.Text = pinned != null
+                    ? $"You chose Hookshot {pinned} in the Version menu (this builder is {builder}): install it first, then build."
+                    : $"Hookshot Builder {updateTarget} is available (this one is {builder}): update it first, then build.";
                 BuildButton.Content = "Update builder";
                 break;
             default:
@@ -248,8 +255,8 @@ public partial class MainWindow : Window
         LaunchVersion.Text = (game != null ? $"Hookshot {game}" : "Hookshot") + " · " + folder;
         LaunchPlay.IsEnabled = File.Exists(GameExe(folder));
         ShowPage(LaunchPage);
-        latestTag = Environment.GetEnvironmentVariable("HOOKSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(Track);
-        updateTarget = Updater.Target(latestTag, Tools.Find()?.Version, Track);   // (GitHub's newest, else this builder's own)
+        latestTag = await NewestTag();
+        updateTarget = pinned ?? Updater.Target(latestTag, Tools.Find()?.Version, Track);   // (the chosen version, the server's newest, else this builder's own)
         if (updateTarget == null) LaunchStatus.Text = "Could not check for updates (git.notrexed.dev did not answer)";
         else if (game != null && game != updateTarget && GameVersion(folder) != null)
         {
@@ -308,17 +315,71 @@ public partial class MainWindow : Window
             return saved != null && TrackIds.Contains(saved) ? saved : Updater.TrackOf(Tools.Find()?.Version);
         }
     }
-    /// (a track other than these tools' own: its newest is installed, even an older version)
-    bool Switching => Track != Updater.TrackOf(Tools.Find()?.Version);
+    /// (a track other than these tools' own: its newest is installed, even an older version; or a version chosen in the Version
+    /// menu: that one, older or newer)
+    bool Switching => pinned != null || Track != Updater.TrackOf(Tools.Find()?.Version);
+
+    /// The version to update to as far as the server says: the one chosen in the Version menu, else the track's newest (null: the
+    /// server did not answer)
+    async Task<string?> NewestTag() =>
+        pinned ?? (Environment.GetEnvironmentVariable("HOOKSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake)
+                   : await Updater.LatestTag(Track));
+
+    // ---- the Version menu (ReleaseList.cs): "Newest" (the track's newest, as before) or any release on git.notrexed.dev, older ones
+    // too, read from the server page by page when the menu is first opened. The choice is saved (builder-settings.json Version):
+    // the builder installs that release and builds the game with it, and offers no other until Newest or another is chosen ----
+    string? pinned;
+    List<ReleaseList.Entry>? releases;
+    bool versionsFilling, versionsAsked;
+
+    void FillVersions(string? note)
+    {
+        versionsFilling = true;
+        VersionBox.Items.Clear();
+        VersionBox.Items.Add(new ComboBoxItem { Content = "Newest on the update track", Tag = null });
+        if (note != null) VersionBox.Items.Add(new ComboBoxItem { Content = note, IsEnabled = false });
+        if (pinned != null && releases?.Any(r => r.Tag == pinned) != true)
+            VersionBox.Items.Add(new ComboBoxItem { Content = pinned, Tag = pinned });   // (the saved one, before the list is read)
+        foreach (var r in releases ?? new List<ReleaseList.Entry>())
+            VersionBox.Items.Add(new ComboBoxItem { Content = r.Label, Tag = r.Tag, IsEnabled = r.Installable || r.Tag == pinned,
+                                                    ToolTip = r.Installable ? null : "The builder can't install this release: its setup or setup list is missing, or it is older than v2.0.6" });
+        VersionBox.SelectedItem = VersionBox.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string?)i.Tag == pinned) ?? VersionBox.Items[0];
+        versionsFilling = false;
+    }
+
+    async void VersionsOpened(object? sender, EventArgs e)
+    {
+        if (versionsAsked) return;
+        versionsAsked = true;
+        FillVersions("Reading the releases from git.notrexed.dev…");
+        releases = await ReleaseList.Fetch();
+        if (releases == null) versionsAsked = false;   // (asked again at the next opening)
+        FillVersions(releases == null ? "git.notrexed.dev did not answer: open the menu again to retry" : null);
+    }
+
+    async void VersionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (versionsFilling || VersionBox.SelectedItem is not ComboBoxItem { IsEnabled: true } item) return;
+        var tag = item.Tag as string;
+        if (tag == pinned) return;
+        pinned = tag;
+        SaveSettings();
+        latestTag = null;
+        RefreshMode();
+        latestTag = await NewestTag();
+        RefreshMode();
+    }
 
     async void TrackChanged(object sender, SelectionChangedEventArgs e)
     {
         if (TrackBox.SelectedIndex < 0 || TrackIds[TrackBox.SelectedIndex] == Track) return;
         chosenTrack = TrackIds[TrackBox.SelectedIndex];
+        pinned = null;   // (a track chosen: its newest, not a version chosen before)
+        FillVersions(null);
         SaveSettings();
         latestTag = null;
         RefreshMode();
-        latestTag = await Updater.LatestTag(Track);
+        latestTag = await NewestTag();
         RefreshMode();
     }
 
@@ -479,7 +540,7 @@ public partial class MainWindow : Window
                                           FsrLicense = fsrLicense,
                                           PrepareLater = PrepareTick.IsChecked != true,
                                           MemoryGb = MemoryBox.SelectedItem is int gb ? gb : null,
-                                          Track = chosenTrack ?? BuilderSettings.Load(SettingsPath)?.Track };
+                                          Track = chosenTrack ?? BuilderSettings.Load(SettingsPath)?.Track, Version = pinned };
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsPath)!);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(s));
         }

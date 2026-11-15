@@ -165,6 +165,7 @@ def left_text(seconds):
 
 
 TRACK_NAMES = {"release": "Release", "rc": "Release candidate", "nightly": "Nightly"}
+NEWEST = "Newest on the update track"   # (the Version menu's first choice)
 
 
 def load_config():
@@ -556,6 +557,10 @@ class Builder(tk.Tk):
         # (the update track: the one chosen in the Track menu, saved; by default these tools' own)
         own = linux_update.track_of(self.tools)
         self.track = tk.StringVar(value=TRACK_NAMES[self.cfg.get("track") if self.cfg.get("track") in linux_update.TRACKS else own])
+        # (the Version menu: the track's newest, or a release chosen there, saved; its list read when it is first opened)
+        self.pinned = self.cfg.get("version") or None
+        self.version = tk.StringVar(value=self.pinned or NEWEST)
+        self.version_tags, self.versions_asked = {}, False
         self.status = tk.StringVar()
         self.kind = tk.StringVar(value=self.cfg.get("kind", "nup"))
         self.nup = tk.StringVar(value=self.cfg.get("nup", ""))
@@ -952,6 +957,12 @@ class Builder(tk.Tk):
                              cursor="hand2")
         track.grid(row=1, column=0, sticky="we")
         track.bind("<<ComboboxSelected>>", self.on_track_changed)
+        # (the Version menu: Newest, the track's newest as before, or any release on git.notrexed.dev, older ones too)
+        self.section(tracks, "Version", 2, top=12)
+        self.version_box = ttk.Combobox(tracks, textvariable=self.version, values=[NEWEST] + ([self.pinned] if self.pinned else []),
+                                        state="readonly", font="HsNote", cursor="hand2", postcommand=self.load_versions)
+        self.version_box.grid(row=3, column=0, sticky="we")
+        self.version_box.bind("<<ComboboxSelected>>", self.on_version_changed)
         ttk.Checkbutton(options, text="Prepare shaders now", variable=self.prepare, cursor="hand2").pack(anchor="w")
         ttk.Label(options, text="A few minutes at the end of the build. Unticked, the game prepares them at its first start, "
                   "behind a black window.", style="Small.TLabel", wraplength=px(540)).pack(anchor="w", padx=(px(26), 0), pady=(px(2), 0))
@@ -1208,6 +1219,10 @@ class Builder(tk.Tk):
         threading.Thread(target=run, daemon=True).start()
 
     def lookup_latest(self):
+        if self.pinned:   # (a version chosen in the Version menu: that one)
+            self.lines.put(("latest", self.pinned))
+            return
+
         def run():
             forced = os.environ.get("HOOKSHOT_LATEST_TAG")
             tag = None if forced == "none" else (forced or linux_update.latest_tag(track=track))
@@ -1320,11 +1335,61 @@ class Builder(tk.Tk):
         return next((k for k, v in TRACK_NAMES.items() if v == self.track.get()), "release")
 
     def switching(self):
-        """(a Track other than these tools' own: its newest is installed, even an older version)"""
-        return self.track_id() != linux_update.track_of(self.tools)
+        """(a Track other than these tools' own: its newest is installed, even an older version; or a version chosen in the
+        Version menu: that one, older or newer)"""
+        return bool(getattr(self, "pinned", None)) or self.track_id() != linux_update.track_of(self.tools)
+
+    def load_versions(self):
+        """The Version menu opened: every release, read once in the background (again after a failure)"""
+        if self.versions_asked:
+            return
+        self.versions_asked = True
+        self.version_box.configure(values=[NEWEST, "Reading the releases from git.notrexed.dev…"])
+
+        def run():
+            self.lines.put(("versions", linux_update.all_releases()))
+        threading.Thread(target=run, daemon=True).start()
+
+    def fill_versions(self, releases):
+        if releases is None:
+            self.versions_asked = False
+            values = [NEWEST, "git.notrexed.dev did not answer: open the menu again to retry"]
+            self.version_tags = {}
+        else:
+            self.version_tags = {linux_update.release_label(r): r for r in releases}
+            values = [NEWEST] + list(self.version_tags)
+        if self.pinned and not any(r["tag"] == self.pinned for r in self.version_tags.values()):
+            values.insert(1, self.pinned)
+        try:
+            self.version_box.configure(values=values)
+            shown = next((k for k, r in self.version_tags.items() if r["tag"] == self.pinned), self.pinned or NEWEST)
+            self.version.set(shown)
+        except tk.TclError:
+            pass
+
+    def on_version_changed(self, _event=None):
+        label = self.version.get()
+        r = self.version_tags.get(label)
+        tag = None if label == NEWEST else r["tag"] if r else (label if label == self.pinned else "")
+        if tag == "" or (r and not r["installable"]):
+            if r and not r["installable"]:
+                messagebox.showinfo("Hookshot", "%s has no Linux list (%s) to install from." % (r["tag"], linux_update.LIST_NAME))
+            self.version.set(next((k for k, v in self.version_tags.items() if v["tag"] == self.pinned), self.pinned or NEWEST))
+            return
+        if tag == self.pinned:
+            return
+        self.pinned = tag
+        self.cfg["version"] = tag
+        save_config(self.cfg)
+        self.latest = None
+        self.apply_mode()
+        self.lookup_latest()
 
     def on_track_changed(self, _event=None):
         self.cfg["track"] = self.track_id()
+        self.pinned = self.cfg["version"] = None   # (a track chosen: its newest, not a version chosen before)
+        if hasattr(self, "version"):
+            self.version.set(NEWEST)
         save_config(self.cfg)
         self.latest = None
         self.apply_mode()
@@ -1548,6 +1613,9 @@ class Builder(tk.Tk):
                 kind, v = self.lines.get_nowait()
                 if kind == "check":
                     self.check_text.set(v)
+                elif kind == "versions":
+                    if hasattr(self, "version_box"):
+                        self.fill_versions(v)
                 elif kind == "latest":
                     self.latest = v or None
                     self.apply_mode()
