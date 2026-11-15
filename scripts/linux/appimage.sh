@@ -34,8 +34,9 @@ E=third_party/a64-kit/lift
 "$PY" -I -c "import sys; sys.path.insert(0, 'nx2'); import zbic; zbic.lib()"
 
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/share/hookshot"
+mkdir -p "$APPDIR/usr/share/hookshot" "$APPDIR/usr/lib/hookshot"
 T=$APPDIR/usr/share/hookshot
+L=$APPDIR/usr/lib/hookshot   # (what the image builds with: emsdk's clang, FFmpeg, SDL2, the sysroot; AppRun points there)
 
 # ---- the tools (the sources the player's build compiles, and the scripts) ----
 cp -a nx2 host scripts LICENSE readme.md assets "$T/"

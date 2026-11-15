@@ -105,6 +105,16 @@ class TheChecksAreWired(unittest.TestCase):
         self.assertIn("sed '/^PY=/,$d'", script)
         self.assertIn("--dry-run", script)
 
+    def test_the_image_folders_are_set_before_use(self):
+        # (2026-11-14: a merge took out `L=` with the prebuilt renderer while the build tools still go into $L, and the AppImage
+        # build stopped at "L: unbound variable" under set -u; the tools-copy run above stops before $L is used)
+        script = (ROOT / "scripts/linux/appimage.sh").read_text(encoding="utf-8")
+        for var in ("T", "L"):
+            set_at = script.find("\n%s=$APPDIR/" % var)
+            used_at = script.find('"$%s/' % var)
+            self.assertGreaterEqual(set_at, 0, var + " is never set")
+            self.assertLess(set_at, used_at, var + " is used before it is set")
+
     def test_no_prebuilt_renderer(self):
         # (2026-11-14: every build compiles the Vulkan back end, as with DLSS and FSR 4: one way to build it. Nothing sets or
         # reads HOOKSHOT_VK_PREBUILT, and appimage.sh builds no renderer and copies none into the image)
