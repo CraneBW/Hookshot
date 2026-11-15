@@ -139,6 +139,208 @@ def no_throttle(handle=None):
     except (OSError, ValueError, TypeError):
         pass
 
+# (the dev-loop proposal's A4) a link whose inputs are the last one's is not run again. What decides it, kept beside the output as
+# <output>.linkkey (JSON) after each link that succeeded:
+#   - the key: the command, the compiler, the system headers' stamp, each object's key (its .o.sha1 stamp; its size and time
+#     without one), and the contents of the other files the command names (resources, the symbol order);
+#   - every file the linker itself read, as it says (link_trace): the libraries it found by search path (-l, -static-libstdc++,
+#     the C runtime's archives and start files) as well as the ones named, by size and time; and the linker program;
+#   - the outputs: the binary and every map the command asks for, by size, time and file id, so a file written over one, or a
+#     map deleted, links again.
+# A link with no such record (it failed, the linker's list could not be read, or a toolchain this does not know) always runs.
+# Delete <output>.linkkey to link again by hand. 3 s for the exe and less for the DLL on Windows, every build
+LINK_RECORD = 1
+
+
+def link_inputs(cmd, output):
+    """The files a link reads: the objects of its @response files, and the other existing files it names (not its outputs)"""
+    objs, others = [], []
+    for arg in cmd:
+        if arg.startswith("@") and os.path.isfile(arg[1:]):
+            with open(arg[1:], encoding="utf-8") as f:
+                objs += [line.strip().strip('"') for line in f if line.strip()]
+            others.append(arg[1:])
+            continue
+        # (a file inside an option: -Xlink=/order:@<file>, --symbol-ordering-file=<file>; a whole argument too)
+        m = re.match(r"^(?:-Xlink=)?(?:/\w+:@?|-Wl,|--[\w-]+=)(.+)$", arg)
+        for path in (arg, m.group(1) if m else None):
+            if path and os.path.isfile(path) and os.path.abspath(path) != os.path.abspath(output) and not path.endswith(".map"):
+                others.append(path)
+                break
+    return objs, others
+
+
+def link_maps(cmd):
+    """The maps the command asks the linker to write: -Map=<file> (lld, GNU ld), /map:<file> (lld-link, and lld's MinGW driver
+    through -Xlink=)"""
+    maps = []
+    for arg in cmd:
+        m = re.search(r"(?:^|[,=])(?:--?Map=|/map:)(.+)$", arg, re.I)
+        if m:
+            maps.append(m.group(1))
+    return maps
+
+
+def link_key(cmd, output):
+    h = hashlib.sha1("\0".join(cmd).encode(), usedforsecurity=False)
+    # (the compiler: a new one compiles every object again to the same keys, and the link must follow it)
+    cc = shutil.which(cmd[0]) or cmd[0]
+    st = os.stat(cc)
+    h.update(("%s %d %d\n" % (cc, st.st_size, st.st_mtime_ns)).encode())
+    with contextlib.suppress(OSError), open(os.path.join(kit.WORK, "system_headers.txt"), "rb") as f:
+        h.update(f.read())
+    objs, others = link_inputs(cmd, output)
+    for obj in objs:
+        stamp = obj + ".sha1"
+        try:
+            with open(stamp) as f:
+                h.update(("%s %s\n" % (obj, f.read())).encode())
+        except OSError:
+            st = os.stat(obj)
+            h.update(("%s %d %d\n" % (obj, st.st_size, st.st_mtime_ns)).encode())
+    for path in others:
+        with open(path, "rb") as f:
+            h.update(path.encode() + b"\0" + hashlib.sha1(f.read(), usedforsecurity=False).digest())
+    return h.hexdigest()
+
+
+_LINK_TARGETS = {}
+
+
+def link_trace(cmd):
+    """What makes the linker list every file it reads, for the compiler's target (-dumpmachine with the command's --target):
+    lld and GNU ld on Linux print each with --trace; lld's MinGW driver and lld-link say "Reading <file>" when verbose. None for
+    a target this does not know: that link keeps no record and always runs"""
+    probe = [cmd[0]] + [a for a in cmd if a.startswith("--target=")] + ["-dumpmachine"]
+    key = tuple(probe)
+    if key not in _LINK_TARGETS:
+        try:
+            r = subprocess.run(probe, capture_output=True, text=True)
+            _LINK_TARGETS[key] = r.stdout.strip().lower() if r.returncode == 0 else ""
+        except OSError:
+            _LINK_TARGETS[key] = ""
+    t = _LINK_TARGETS[key]
+    if "msvc" in t:
+        return ["-Xlinker", "/verbose"]
+    if "mingw" in t or "windows" in t:
+        return ["-Wl,--verbose"]
+    if "linux" in t:
+        return ["-Wl,--trace"]
+    return None
+
+
+# (lld's verbose lines: the files it reads, the archive members it takes, an object's directives, the command its MinGW driver
+# made; none is an error or a warning)
+_VERBOSE = re.compile(r"^(?:ld\.lld|lld-link|lld)(?:\.exe)?: (?:Reading|Loaded|Directives:) |^lld-link(?:\.exe)? -lldmingw ")
+
+
+def traced_files(text):
+    """The files a link's own list names (link_trace), and the rest of its output without that list. An archive's member
+    (lib.a(member.o)) counts as its archive; a line that names no file that exists is output, not the list"""
+    files, rest = [], []
+    for line in text.splitlines():
+        s = line.strip()
+        m = re.match(r"^(?:ld\.lld|lld-link|lld)(?:\.exe)?: Reading (.+)$", s)
+        name = m.group(1) if m else s
+        gnu = re.match(r"^-l\S+\s+\((.+)\)$", name)   # (GNU ld's -t: a library by its -l name, then the file it found)
+        name = gnu.group(1) if gnu else name
+        member = re.match(r"^(.+)\(([^()]+)\)$", name)
+        if member and os.path.isfile(member.group(1)):
+            name = member.group(1)
+        if name and os.path.isfile(name):
+            files.append(os.path.abspath(name))
+        elif not _VERBOSE.match(s):
+            rest.append(line)
+    return files, "\n".join(rest) + ("\n" if rest else "")
+
+
+def link_program(cmd):
+    """The linker the compiler runs for this command (the first word of -###'s last command), or None"""
+    try:
+        r = subprocess.run(cmd + ["-###"], capture_output=True, text=True)
+    except OSError:
+        return None
+    for line in reversed((r.stderr or "").splitlines()):
+        m = re.match(r'^\s*"([^"]+)"', line)
+        if m:   # (Windows: clang names ld.lld without its .exe)
+            return next((p for p in (m.group(1), m.group(1) + ".exe", shutil.which(m.group(1))) if p and os.path.isfile(p)), None)
+    return None
+
+
+def file_stats(paths, ident=False):
+    """[path, size, mtime_ns(, file id)] for each, or None when one is gone"""
+    out = []
+    for p in paths:
+        try:
+            st = os.stat(p)
+        except OSError:
+            return None
+        out.append([p, st.st_size, st.st_mtime_ns] + ([st.st_ino] if ident else []))
+    return out
+
+
+def run_link(cmd, output):
+    """subprocess.run(cmd) for a link, or nothing when everything it read and wrote is as the last successful one left it"""
+    keyfile = output + ".linkkey"
+    outputs = [output] + link_maps(cmd)
+    try:
+        key = link_key(cmd, output)
+    except OSError:   # (an input gone: the linker says which)
+        key = None
+    try:
+        with open(keyfile, encoding="utf-8") as f:
+            old = json.load(f)
+    except (OSError, ValueError):
+        old = None
+    program = link_program(cmd)
+    if (key and program and isinstance(old, dict) and old.get("record") == LINK_RECORD and old.get("key") == key
+            and old.get("linker") == file_stats([program]) and old.get("outputs") == file_stats(outputs, ident=True)
+            and old.get("inputs") and old.get("inputs") == file_stats([i[0] for i in old["inputs"]])):
+        print("  (%s: what it reads and writes is as the last link left it, not linked again)" % os.path.basename(output), flush=True)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    with contextlib.suppress(OSError):
+        os.remove(keyfile)
+    trace = link_trace(cmd)
+    r = subprocess.run(cmd + (trace or []), capture_output=True, text=True)
+    if trace is not None:
+        out_files, r.stdout = traced_files(r.stdout or "")
+        err_files, r.stderr = traced_files(r.stderr or "")
+        objs = {os.path.abspath(o) for o in link_inputs(cmd, output)[0]}   # (the objects: their stamps are in the key)
+        read = sorted({f for f in out_files + err_files if f not in objs and f not in map(os.path.abspath, outputs)})
+    else:
+        read = []
+    record = {"record": LINK_RECORD, "key": key, "linker": file_stats([program]) if program else None,
+              "outputs": file_stats(outputs, ident=True), "inputs": file_stats(read)}
+    if r.returncode == 0 and key and program and read and record["outputs"] and record["inputs"] and record["linker"]:
+        with open(keyfile, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=0)
+    return r
+
+
+COMPDB = "compile_commands.json"
+
+
+def write_compdb(out, jobs, lifted=None):
+    """(the dev-loop proposal's A8) <build>/compile_commands.json, for clangd and clang-tidy: every compile this build runs, with
+    compile_one's compiler and flags. It names the source itself: since #385 compile_one compiles a giant lifted function's
+    file from a temporary copy (split_giants.compile_copy), which is gone by the time an editor reads this. The lifted C
+    (lifted: the gen/ folder, about 1.4 GB) is left out, or clangd's background index would read all of it; the host's commands
+    still name gen/ and rt64/ for their headers. Point clangd at the file (--compile-commands-dir, or a link to it at the
+    checkout's top, which .gitignore leaves out). A failure to write it is no failed build"""
+    top = os.path.normcase(os.path.abspath(lifted)) + os.sep if lifted else None
+    entries = [{"directory": os.getcwd(), "file": src, "output": obj, "arguments": [cc] + list(fl) + ["-c", src, "-o", obj]}
+               for cc, src, obj, fl, deps in jobs
+               if not (top and os.path.normcase(os.path.abspath(src)).startswith(top))]
+    tmp = os.path.join(out, COMPDB + ".new")
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(entries, f, indent=0)
+        os.replace(tmp, os.path.join(out, COMPDB))
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+
+
 def linker(*opts):
     """Linker options, each as an argument of its own after -Xlinker. The ones that name a file (the map, the link order) are in
     the build files folder, which the player chooses (make_game.py --work), and the compiler splits -Wl, (and so
@@ -1521,6 +1723,7 @@ def main():
     global GATE
     GATE = None if os.environ.get("HOOKSHOT_MEM_GATE") == "0" else MemoryGate()
     eta_jobs = GATE.expected(a.jobs) if GATE else a.jobs   # (the countdown with the compilers the memory holds, not --jobs)
+    write_compdb(out, jobs, gen)
     counted, expected, pending = os.environ.get("HOOKSHOT_TIMES"), {}, []
     if OBJ_STORE:   # (the objects this build needs that another work folder built: in the folder's cache before the plan counts them)
         object_store.share(OBJ_CACHE, OBJ_STORE)   # (the folder's own first, those of a build that stopped before it shared them too)
@@ -1603,11 +1806,10 @@ def main():
         exe = os.path.join(out, EXE)   # (+ hookshot.map: crash offsets -> f_<guest address>)
         t = time.time()
         # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name)
-        r = subprocess.run([cc] + target() + ["-fuse-ld=lld", "-o", exe] + linker("-Map=" + exe + ".map") +
-                           ["-Wl,--gc-sections", "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
-                           (["-fprofile-instr-generate"] if PGO == "gen" else []) +
-                           (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS,
-                           capture_output=True, text=True)
+        r = run_link([cc] + target() + ["-fuse-ld=lld", "-o", exe] + linker("-Map=" + exe + ".map") +
+                     ["-Wl,--gc-sections", "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
+                     (["-fprofile-instr-generate"] if PGO == "gen" else []) +
+                     (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS, exe)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
             print("link FAILED (%.0fs), %d undefined symbols" % (time.time() - t, len(undefined)))
@@ -1625,7 +1827,7 @@ def main():
     elif a.standalone and not vk_only:
         exe = os.path.join(out, "hookshot.exe")   # (+ hookshot.map: crash offsets -> f_<guest address>)
         t = time.time()
-        r = subprocess.run([cc] + toolchain.native_target() + toolchain.native_link() +
+        r = run_link([cc] + toolchain.native_target() + toolchain.native_link() +
                            ["-o", exe] + linker("/map:" + exe[:-4] + ".map") + [toolchain.link_opt("/stack:8388608"), "@" + rsp] + HOT_ORDER() + HOST_LIBS +
                            ([toolchain.link_opt("/nodefaultlib:clang_rt.profile.lib")] if PGO == "gen" else []) +
                            exe_resources() +   # (the exe's icon and name: nx2/game_title.py, nx2/make_icon.py)
@@ -1635,7 +1837,7 @@ def main():
                             ["-lbcrypt", "-lmfplat", "-lmfuuid", "-lstrmiids", "-lole32"] if FFMPEG else []) +
                            ([os.path.join(dav1d_windows(), "lib", "libdav1d.a")] if dav1d_windows() else []) +
                            (["-lc++", "-lunwind"] if toolchain.mingw() else []),   # (llvm-mingw: the C++ parts' runtime, linked in; MSVC's comes by itself)
-                           capture_output=True, text=True)
+                           exe)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
             print("link FAILED (%.0fs), %d undefined symbols" % (time.time() - t, len(undefined)))
@@ -1679,7 +1881,7 @@ def main():
                 ["-shared", "-o", vdll] + linker("/map:" + vdll[:-4] + ".map") + ["@" + vrsp, "-luser32"] + \
                 (linker("/nodefaultlib:clang_rt.profile.lib") if os.environ.get("RX_VK_PGO") == "gen" else []) + \
                 (["-lc++", "-lunwind"] if toolchain.mingw() else []) + ngx_link(NGX_SDK, toolchain.mingw())
-        r = subprocess.run(link, capture_output=True, text=True)
+        r = run_link(link, vdll)
         if r.returncode:
             undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
             print("%s link FAILED, %d undefined symbols" % (VK_LIB, len(undefined)))

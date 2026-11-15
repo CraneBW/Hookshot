@@ -714,6 +714,28 @@ what you test.
 **Never use it for numbers:** no fps or frame-time measurements, build timings, hitch or stutter checks, profiles,
 and no release or player build. Build those with the defaults.
 
+#### Links skipped, and the compile commands
+
+A link whose inputs and outputs are as the last successful one left them is not run again: the build says
+`(hookshot.exe: what it reads and writes is as the last link left it, not linked again)`. Each link keeps a record beside its
+output, `<output>.linkkey` (`nx2/build.py` `run_link`), of what decides it:
+
+- the command, the compiler, the system headers' stamp, each object's key and the files the command names (resources, the
+  symbol order);
+- every file the linker itself says it read (asked with `-Wl,--verbose` for lld's MinGW driver, `-Xlinker /verbose` for
+  lld-link, `-Wl,--trace` on Linux), so a library it found by search path (`-l`, `-static-libstdc++`, the C runtime's
+  archives) counts too, and the linker program the compiler runs;
+- the outputs, the binary and its map, by size, time and file id: a map deleted, or a file copied over the binary, links
+  again.
+
+A link that failed, or whose linker gave no list, keeps no record, so the next build links. To link again by hand, delete
+the `.linkkey` file. Outside the checkout's own `work/`, the build's clean-up can let the build files go
+(`HOOKSHOT_KEEP_BUILD_FILES=1` keeps them all), and a record gone just means the next build links.
+
+Each build also writes `sa/build/compile_commands.json`, every compile with its flags, for clangd and clang-tidy (point
+clangd at that folder, or link the file to the checkout's top, which `.gitignore` leaves out). The lifted C is left out (about
+1.4 GB, which clangd's background index would read); the host's commands still name the lifted headers' folders.
+
 #### The renderer's play profile
 
 The Vulkan back end is built with a play profile of its own (after
