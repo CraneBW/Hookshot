@@ -106,7 +106,7 @@ Never push to `forge`: Hookshot's `main` takes reviewed pull requests only. `pr 
     else, and whether the Test Farm (`@Beanstalk ...` on the PR) or a person by hand runs it. Never leave it unclear
     what ran and what didn't;
   - **Risks**, with **Compatibility** (saves, the options file, the caches, the vk ABI, the builder's tools);
-  - screenshots when the change shows on screen.
+  - **screenshots** when the change shows on screen (how: *A change that shows on screen*, below).
 - **It is tested and measured before it is marked ready.** Passing the checks is not enough on its own:
   - **Run the change in the game** and say where (the area, the GPU, the driver, the OS) and what you saw. If you
     couldn't run it, say so, and leave it WIP until someone has: the Test Farm (`@Beanstalk <what to test>` on
@@ -115,6 +115,20 @@ Never push to `forge`: Hookshot's `main` takes reviewed pull requests only. `pr 
     or frame time, the log line it moves, memory where it is about memory. Several runs or an in-session A/B, since a
     single run each way varies more than most changes gain.
   - **A fix shows the bug gone:** the log line, the screenshot or the steps that failed before and pass now.
+  - **A change that shows on screen carries screenshots in the description**, taken by you: the game, the launcher,
+    a menu, a website page. Don't describe a visual change in words alone, and don't leave the pictures for a
+    reviewer to take. Caption them like the Measurements columns (`Before: main @ <hash>`, `After: this PR @
+    <hash>`), the same spot and settings in each. Shoot a website page from a local build (`npm run build`, then
+    `npm run preview` in `website/`) in dark and light and at phone width (390 px), with made-up data where the page
+    reads files. Screenshots of the game are fine ([CONTRIBUTING.md](CONTRIBUTING.md)); game files never are.
+    Drop them into the description on the PR's web page, or upload each with the forge sign-in and paste the
+    `browser_download_url` it returns as `![caption](url)`:
+
+    ```
+    TOKEN=$(printf 'protocol=https\nhost=git.magicbean.dev\n\n' | python -I scripts/forge.py credential get | sed -n 's/^password=//p')
+    curl -s -H "Authorization: token $TOKEN" -F "attachment=@shot.png;type=image/png" \
+      "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Hookshot/issues/<n>/assets?name=shot.png"
+    ```
   - **A switch ships at its recommended value**, not off for its own sake: on by default when the measurements back
     it, off when it is only for testing ([CONTRIBUTING.md](CONTRIBUTING.md#code-and-data-conventions)). A new default
     (a switch on for everyone, a preset, a limit) says which hardware it was measured on, and what it costs where it
