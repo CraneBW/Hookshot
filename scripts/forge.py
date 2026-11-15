@@ -840,13 +840,16 @@ def cmd_pr(args):
                   % (WIP.strip(), pr["number"], pr["number"]))
     elif args.action == "list":
         mine = me() if args.mine else None
+        # (from the issues list, which has what this prints: the pulls list loads each PR's branches and repositories,
+        # 8.9 s a page against 0.6 s on 2026-11-15; --mine asks Forgejo for yours only, not every page to filter here)
+        by = "&created_by=" + urllib.parse.quote(mine) if mine else ""
         page, shown = 1, 0
         while True:
-            prs = api("GET", "/repos/%s/pulls?state=%s&limit=50&page=%d" % (REPO, args.state, page)) or []
+            prs = api("GET", "/repos/%s/issues?type=pulls&state=%s&limit=50&page=%d%s" % (REPO, args.state, page, by)) or []
             for p in prs:
                 if mine and p["user"]["login"] != mine:
                     continue
-                state = "merged" if p.get("merged") else p["state"]
+                state = "merged" if (p.get("pull_request") or {}).get("merged") else p["state"]
                 print("#%-5d %-7s %-16s %s" % (p["number"], state, p["user"]["login"], p["title"]))
                 shown += 1
             if len(prs) < 50:
