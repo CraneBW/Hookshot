@@ -52,6 +52,7 @@ class ShaderStampCacheTests(unittest.TestCase):
             "gpu/vk/vk_api.h": "struct Api {};\n",
             "gpu/vk/vk_dlss.cpp": "int dlss;\n",
             "gpu/vk/vk_fsr4.cpp": "int fsr;\n",
+            "gpu/vk/vk_xess.cpp": "int xess;\n",
             "gpu/vk/vk_ngx_msvc_rt.cpp": "int msvc_rt;\n",
             "host/mingw_msvc_shims.c": "int shims;\n",
             "host/pgo_rt.c": "int pgo_rt;\n",
@@ -307,6 +308,16 @@ class ShaderStampCacheTests(unittest.TestCase):
                 self.assertEqual(self.changed(plain, first), own)
                 self.assertEqual(self.changed(first, again), set())
                 self.assertEqual(self.changed(first, second), own)   # (the same path, another profile: built again)
+
+    def test_xess_reaches_only_vk_xess_on_windows(self):
+        # (Intel XeSS: its headers in every Windows build, for vk_xess.cpp alone; none on Linux, where its stubs say why)
+        for linux in (False, True):
+            with self.subTest(linux=linux):
+                jobs = self.jobs(linux)
+                self.assertEqual({n for n, j in jobs.items() if "-DHOOKSHOT_XESS" in j["flags"]},
+                                 set() if linux else {"gpu/vk/vk_xess.cpp"})
+                self.assertFalse([n for n, j in jobs.items() if any("third_party" in f and "xess" in f for f in j["flags"])
+                                  and n != "gpu/vk/vk_xess.cpp"])
 
 
 class NgxSdkTests(unittest.TestCase):
