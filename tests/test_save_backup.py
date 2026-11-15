@@ -21,7 +21,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (tests/srccut.py: python -I leaves this folder off the path)
 from srccut import block  # noqa: E402
 
-RUN_ALL_ARGS = ["--cc", "{cc}"]
+RUN_ALL_ARGS = ["--cc", "gcc"]
+RUN_ALL_SKIP = {"windows": "the runner gives no C compiler on Windows: run it with --cc <llvm-mingw clang>"}
 ROOT = Path(__file__).resolve().parents[1]
 
 MAIN = r'''
