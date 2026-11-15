@@ -106,6 +106,20 @@ def dlss_args(dlss):
     return ["--fetch-ngx-sdk", "--accept-nvidia-license"] if dlss else []
 
 
+def folder_has_fsr(folder):
+    """Whether a game folder was built with AMD FSR 4: make_game.py's mark in it (FSR_MARK)."""
+    return bool(folder) and os.path.isfile(os.path.join(folder, make_game.FSR_MARK))
+
+
+def fsr_args(fsr, toggled=True):
+    """make_game.py's AMD FSR 4 arguments: --fsr when ticked; an update whose tick was not changed here says nothing, and the
+    folder's mark keeps what it was built with (make_game.py fsr_wanted); one unticked here builds it without (--no-fsr).
+    Nothing is downloaded on Linux: AMD's library, amd_fidelityfx_upscaler_vk.so, is the player's, in the game folder"""
+    if not toggled:
+        return []
+    return ["--fsr"] if fsr else ["--no-fsr"]
+
+
 def make_game_env(dlss, environ=None):
     """The environment make_game.py runs in. HOOKSHOT_NGX_SDK is set only when DLSS is chosen (one set in the shell is not
     passed on when unticked, as on Windows). Every build compiles hookshot_vk.so (the AppImage carries no built one)."""
@@ -514,6 +528,7 @@ class Builder(tk.Tk):
         self.latest = None
         self.source_picked = False
         self.dlss_toggled = False
+        self.fsr_toggled = False
         self.tools = linux_update.tools_tag(linux_update.running_root() or ROOT)
         # (the update track: the one chosen in the Track menu, saved; by default these tools' own)
         own = linux_update.track_of(self.tools)
@@ -530,6 +545,7 @@ class Builder(tk.Tk):
         self.language = tk.StringVar(value=dict(make_game.LANGUAGES).get(code, names[0]))
         self.prepare = tk.BooleanVar(value=self.cfg.get("prepare", "1") != "0")   # (make_game.py's last step: off, at the first start)
         self.dlss = tk.BooleanVar(value=self.cfg.get("dlss", "0") == "1")
+        self.fsr = tk.BooleanVar(value=self.cfg.get("fsr", "0") == "1")   # (AMD FSR 4: make_game.py --fsr)
         self.check_text = tk.StringVar()
         self.space_text = tk.StringVar()
         self.stage_text = tk.StringVar()
@@ -920,6 +936,11 @@ class Builder(tk.Tk):
                         command=self.on_dlss_changed, cursor="hand2").pack(anchor="w", pady=(px(12), 0))
         ttk.Label(options, text="For NVIDIA RTX graphics cards. NVIDIA's files stay on this PC: never share a game folder built with them.",
                   style="Small.TLabel", wraplength=px(540)).pack(anchor="w", padx=(px(26), 0), pady=(px(2), 0))
+        ttk.Checkbutton(options, text="AMD FSR 4", variable=self.fsr, command=self.on_fsr_changed,
+                        cursor="hand2").pack(anchor="w", pady=(px(12), 0))
+        ttk.Label(options, text="For AMD Radeon RX 9000 graphics cards. AMD's FSR 4 library is not included: put "
+                  "amd_fidelityfx_upscaler_vk.so in the game folder, then choose AMD FSR 4 as the Upscaler in the game's menu.",
+                  style="Small.TLabel", wraplength=px(540)).pack(anchor="w", padx=(px(26), 0), pady=(px(2), 0))
 
         ttk.Label(bottom, textvariable=self.status, style="Status.TLabel", wraplength=px(800)).grid(
             row=0, column=0, sticky="w", pady=(0, px(12)))
@@ -1140,6 +1161,12 @@ class Builder(tk.Tk):
         save_config(self.cfg)
         self.apply_mode()
 
+    def on_fsr_changed(self):
+        self.fsr_toggled = True
+        self.cfg["fsr"] = "1" if self.fsr.get() else "0"
+        save_config(self.cfg)
+        self.apply_mode()
+
     def check_version(self):
         args = ["--nup", self.nup.get()] if self.kind.get() == "nup" else ["--exefs", self.exefs.get()]
         self.check_text.set("Checking the game version...")
@@ -1175,7 +1202,9 @@ class Builder(tk.Tk):
         self.mode = linux_update.choose_mode(game, self.tools, self.latest, self.source_picked, kept, self.switching())
         dlss_changed = bool(kept and game and not self.source_picked and getattr(self, "dlss_toggled", False) and
                             hasattr(self, "dlss") and bool(self.dlss.get()) != folder_has_dlss(expanded))
-        if self.mode == "up-to-date" and dlss_changed:
+        fsr_changed = bool(kept and game and not self.source_picked and getattr(self, "fsr_toggled", False) and
+                           hasattr(self, "fsr") and bool(self.fsr.get()) != folder_has_fsr(expanded))
+        if self.mode == "up-to-date" and (dlss_changed or fsr_changed):
             self.mode = "update-game"
         button = self.build_button
         if button is None:
@@ -1194,9 +1223,10 @@ class Builder(tk.Tk):
         except tk.TclError:
             pass
         target = linux_update.update_target(self.latest, self.tools, self.switching())
-        if self.mode == "update-game" and dlss_changed and game == target:
-            self.status.set("Update builds your game again %s NVIDIA DLSS."
-                            % ("with" if self.dlss.get() else "without"))
+        if self.mode == "update-game" and (dlss_changed or fsr_changed) and game == target:
+            what = [("with" if self.dlss.get() else "without") + " NVIDIA DLSS"] if dlss_changed else []
+            what += [("with" if self.fsr.get() else "without") + " AMD FSR 4"] if fsr_changed else []
+            self.status.set("Update builds your game again %s." % " and ".join(what))
         elif self.mode == "update-game":
             self.status.set("Hookshot %s is available. Your game is %s. Update downloads only what changed, then compiles what changed."
                             % (target, game))
@@ -1349,7 +1379,7 @@ class Builder(tk.Tk):
             return
         dlss = bool(self.dlss.get()) if getattr(self, "dlss_toggled", False) else folder_has_dlss(folder)
         cmd = [sys.executable, "-I", os.path.join(ROOT, "nx2", "make_game.py"), "--update", folder] + \
-            ([] if self.prepare.get() else ["--no-prepare-shaders"]) + dlss_args(dlss)   # (as the last build chose)
+            ([] if self.prepare.get() else ["--no-prepare-shaders"]) + dlss_args(dlss) +             fsr_args(bool(self.fsr.get()), getattr(self, "fsr_toggled", False))   # (as the last build chose)
         self.heading.configure(text="Updating your game")
         self.stage_text.set("Compiling what changed")
         self.started = time.time()
@@ -1404,7 +1434,7 @@ class Builder(tk.Tk):
         # fewer, 80% of the total memory at 3.5 GB each, and the CPU sat at 29%
         cmd = [sys.executable, "-I", os.path.join(ROOT, "nx2", "make_game.py")] + src + ["--out", out, "--language", code] + \
             ([] if jobs is None else ["--jobs", str(jobs)]) + ([] if self.prepare.get() else ["--no-prepare-shaders"]) + \
-            (dlss_args(True) if dlss else [])
+            (dlss_args(True) if dlss else []) + (fsr_args(True) if getattr(self, "fsr", None) and self.fsr.get() else [])
         slow = slow_disk_warning(out)   # (a warning, not a stop: a hard drive still builds, only much slower)
         if slow is not None and not messagebox.askokcancel("Hookshot", slow):
             return
