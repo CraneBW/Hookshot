@@ -82,6 +82,7 @@ namespace mkwvk {
 int display_refresh_mhz();   // (below, outside the unnamed namespace)
 
 std::vector<std::string> gpu_device_names;
+std::vector<gpu_choice::Card> gpu_device_cards;
 const MkwVkHost* host;
 int64_t prof_ns[PROF_COUNT];
 Device dev;
@@ -199,14 +200,17 @@ bool pick_device() {
 
     std::vector<uint32_t> valid_gpus;
     gpu_device_names.clear();
+    gpu_device_cards.clear();
     for (uint32_t i = 0; i < n; i++) {
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(all[i], &p);
-        logf("vk: device %u: %s, Vulkan %u.%u, driver %#x, type %d", i, p.deviceName, VK_API_VERSION_MAJOR(p.apiVersion),
-             VK_API_VERSION_MINOR(p.apiVersion), p.driverVersion, (int)p.deviceType);
+        logf("vk: device %u: %s, Vulkan %u.%u, driver %#x, type %d, id %04x:%04x", i, p.deviceName,
+             VK_API_VERSION_MAJOR(p.apiVersion), VK_API_VERSION_MINOR(p.apiVersion), p.driverVersion, (int)p.deviceType,
+             p.vendorID, p.deviceID);
         if (p.apiVersion >= VK_API_VERSION_1_3) {
             valid_gpus.push_back(i);
             gpu_device_names.push_back(p.deviceName);
+            gpu_device_cards.push_back({p.vendorID, p.deviceID});   // (the row's saved card: gpu_choice.h card_id)
         }
     }
     menu_set_gpu_count((int)valid_gpus.size());
