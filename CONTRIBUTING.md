@@ -47,8 +47,8 @@ Five minutes, then a first build.
    `git blame` past your clone, a version name from the tags (a shallow build calls itself by its commit, `2331f46`),
    and cutting a release (`scripts/release.py`). For those, `git fetch --unshallow --tags` once.
 
-2. **Get the team's tooling and sign in.** The sign-in, `forge.py` (forks, pull requests, issues), the team chat and
-   test requests live in [MagicBeanDev/Tooling](https://git.magicbean.dev/MagicBeanDev/Tooling), shared by every
+2. **Get the team's tooling and sign in.** The sign-in, `forge.py` (forks, pull requests, issues) and the team chat live
+   in [MagicBeanDev/Tooling](https://git.magicbean.dev/MagicBeanDev/Tooling), shared by every
    MagicBeanDev repository. Clone it beside this checkout, keep it current (`git -C ../Tooling pull --ff-only`), and
    run its scripts from here:
 
@@ -59,7 +59,7 @@ Five minutes, then a first build.
 
    Click **Sign in with Discord** (or sign in with the email account you made on git.magicbean.dev) and approve. That
    one sign-in covers git.magicbean.dev (git signs in by itself from then on, and the remote `forge` points at
-   Hookshot), the team chat and [test requests](docs/test-requests.md). The first time creates your account.
+   Hookshot) and the team chat. The first time creates your account.
    [Tooling's docs/forge.md](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/docs/forge.md) has the details and the other commands.
 
    **Using Claude Code?** Install the team's plugin once per PC, for the skills (`/magicbean:team-updates`,
@@ -88,7 +88,7 @@ break.
 
 | | What |
 |---|---|
-| **Test on other hardware** | NVIDIA cards are the most tested; the README's [status table](README.md#project-status) says what works where, and the [tested configurations catalogue](https://hookshot.magicbean.dev/tested-configurations/) lists the runs behind it. Reports from AMD and Intel cards, other drivers, other distributions and SteamOS help even when everything works. Pull requests that need a run on your hardware are queued as [test requests](docs/test-requests.md). |
+| **Test on other hardware** | NVIDIA cards are the most tested; the README's [status table](README.md#project-status) says what works where, and the [tested configurations catalogue](https://hookshot.magicbean.dev/tested-configurations/) lists the runs behind it. Reports from AMD and Intel cards, other drivers, other distributions and SteamOS help even when everything works. Lend your PC to the [Test Farm](https://beanstalk.magicbean.dev/how): it tests approved pull requests on your hardware by itself. |
 | **Play further** | The tested area is the start of the game. Reaching new areas, cutscenes, menus and items finds problems nobody has seen. |
 | **Report what is broken** | Use the [issue forms](https://git.notrexed.dev/Hookshot/Hookshot/issues/new/choose): game problem, install or build problem, save problem or idea. Include the version, your hardware, where you were and `hookshot_log.txt`. |
 | **Send a fix** | Branch, fix, test, open a pull request from your fork ([how](#commits-and-pull-requests)). Small, focused changes are the easiest to review. |
