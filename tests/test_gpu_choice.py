@@ -39,7 +39,7 @@ def main():
         raise SystemExit("pick_device takes the GPU row before RX_VK_DEVICE")
     menu = (vk / "vk_menu.cpp").read_text(encoding="utf-8")
     if not preset_exempt(menu, "gpu_device"):
-        raise SystemExit("vk_menu.cpp: changing the GPU row resets the quality preset (and its VRAM budget) to Custom")
+        raise SystemExit("vk_menu.cpp: changing the GPU row resets the quality preset to Custom")
     # (the row saved as the card itself, gpu_device_id=, and found where it is in this run's list: gpu_choice.h)
     if "gpu_device_cards.push_back({p.vendorID, p.deviceID})" not in pick or \
             pick.index("gpu_device_cards.push_back") > pick.index("menu_set_gpu_count("):

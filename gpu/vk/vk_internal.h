@@ -125,8 +125,9 @@ extern Device dev;
 /// A750 froze the PC on four compute pipelines (issue 496). An Intel UHD on Windows read address 0x170 inside igvk64
 /// during the first scene's compiles (two frames in hookshot_vk.dll, and no "driver faulted compiling" line, so the
 /// call was not inside guarded_graphics). One thread enters vkCreateShaderModule and vkCreate*Pipelines.
-/// Other vendors, and Intel on other systems, are not held. The Intel shader compiles row's Side by side, or
-/// RX_VK_NO_INTEL_SERIAL=1 over it: side by side, as before.
+/// Other vendors, and Intel on other systems, are not held. The Intel shader compiles row's Side by side, its Auto on
+/// the Arc B-series (intel_compiles.h: where side by side was measured), or RX_VK_NO_INTEL_SERIAL=1 over it: side by
+/// side, as before.
 /// ask: a create that compiles nothing (VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT), on the replay thread so a
 /// draw or dispatch never waits for a compile. It never waits here either: while a worker holds the gate, busy is set and
 /// the caller answers VK_PIPELINE_COMPILE_REQUIRED (cold) without asking the driver.
@@ -134,7 +135,12 @@ bool intel_compiles_side_by_side();   // (vk_menu.cpp: the row as this run start
 bool intel_quick_compute();   // (vk_menu.cpp: the Intel quick compute builds row, as it is now: vk_draw.cpp compute_optimize)
 inline bool intel_gate_on() {
 #ifdef _WIN32
-    static const bool on = !intel_compiles_side_by_side() && dev.props.vendorID == 0x8086;
+    static const bool on = [] {
+        if (dev.props.vendorID == 0x8086 && intel_compiles_side_by_side())   // (said once: which it is shows in every log)
+            logf("vk: Intel's compiler is entered side by side (Intel shader compiles row: Side by side, its Auto on the Arc "
+                 "B-series, or RX_VK_NO_INTEL_SERIAL=1)");
+        return !intel_compiles_side_by_side() && dev.props.vendorID == 0x8086;
+    }();
     return on;
 #else
     return false;
@@ -268,6 +274,7 @@ void memory_capture_submit();
 bool memory_take_capture(uint64_t value, uint64_t completed);
 int64_t memory_late_wait_ns();   // (hookshot: RX_VK_FRAME_TRACE's late_wait_ms)
 bool memory_capture_now(uint64_t value, uint64_t completed);   // (hookshot: made and taken at once)
+uint64_t memory_captures_begun();   // (hookshot: how many captures have been begun so far; any thread)
 /// The submission the replay records next (bindings note it: a pool's mirror is in use until it is done)
 void memory_recording_value(uint64_t value, uint64_t completed);
 // (hookshot) The recording being made, as vk_replay.cpp numbers them (Recording::part), and the newest of them in which
@@ -388,6 +395,8 @@ void destroy_sparse_buffer(VkBuffer buffer);
 /// Device-local memory this process uses and what the driver allows it now (VK_EXT_memory_budget), summed over the
 /// device-local heaps; false when unknown
 bool vram_usage(uint64_t* used, uint64_t* budget, uint64_t* block_free = nullptr);
+/// (vk_memory.cpp) the largest device-local heap's size: the card's video memory (0: none)
+uint64_t device_vram_bytes();
 /// vram_usage asked of the driver now (VMA asks again for a new frame index), for the status line; false when the driver
 /// gives no budget (VK_EXT_memory_budget): used is then the game's own allocations
 bool vram_usage_now(uint64_t* used, uint64_t* budget);

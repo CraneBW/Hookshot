@@ -15,6 +15,7 @@
 #endif
 #include "hos_paths.h"
 #include "game_layout.h"
+#include "options_path.h"
 #include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
@@ -229,7 +230,7 @@ int hos_posix_guest_discard(void *p, size_t n) {
 }
 #endif
 
-/* The guest window, for the renderer (gpu/render/rx_buffer.cpp). */
+/* The guest window, for the renderer (MkwVkHost.guest_base and guest_size, host/rx_backend.c). */
 uint8_t *hos_guest_base(void) { return A64_MEM; }
 uint64_t hos_guest_size(void) { return GUEST_SPACE; }
 
@@ -377,23 +378,46 @@ static const char *saves_dir(const char *beside) {
     char real[MAX_PATH];
     move_old = realpath(beside, real), move_from = beside, move_new = dir;
     /* (looked at first, then moved: with an entry the new place has already, the old place is kept, and it keeps them all.
-       The others used to go all the same, and the game then ran here without them) */
+       The others used to go all the same, and the game then ran here without them. So does one that cannot go, a copy that
+       fails (a full disk): the entries that went before it come back, and a copied one's old place goes only once all are
+       there. They used to stay in the new place, and the next start found them there and kept the old place without them) */
+    struct { char *name; int copied; } *went = NULL;
+    size_t n_went = 0;
     for (int move = 0; move < 2 && !kept; move++) {
         WIN32_FIND_DATAA fd;
         HANDLE h = FindFirstFileA(pattern, &fd);
         if (h == INVALID_HANDLE_VALUE) return dir;
         do {
-            if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
+            if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..") || (move && kept)) continue;
             char from[MAX_PATH], to[MAX_PATH];
             snprintf(from, sizeof from, "%s" SEP_S "%s", beside, fd.cFileName);
             snprintf(to, sizeof to, "%s" SEP_S "%s", dir, fd.cFileName);
-            if (!move) kept += GetFileAttributesA(to) != INVALID_FILE_ATTRIBUTES;
-            else if (!has_link(from) && MoveFileExA(from, to, 0)) moved++;
-            else if (copy_tree(from, to)) delete_tree(from), moved++;
-            else delete_tree(to), kept++;
+            if (!move) {
+                kept += GetFileAttributesA(to) != INVALID_FILE_ATTRIBUTES;
+                continue;
+            }
+            void *more = realloc(went, (n_went + 1) * sizeof *went);
+            char *name = more ? strdup(fd.cFileName) : NULL;
+            if (more) went = more;
+            if (!name) kept++;
+            else if (!has_link(from) && MoveFileExA(from, to, 0)) went[n_went].name = name, went[n_went++].copied = 0;
+            else if (copy_tree(from, to)) went[n_went].name = name, went[n_went++].copied = 1;
+            else delete_tree(to), free(name), kept++;
         } while (FindNextFileA(h, &fd));
         FindClose(h);
     }
+    for (size_t i = 0; i < n_went; i++) {
+        char from[MAX_PATH], to[MAX_PATH];
+        snprintf(from, sizeof from, "%s" SEP_S "%s", beside, went[i].name);
+        snprintf(to, sizeof to, "%s" SEP_S "%s", dir, went[i].name);
+        if (!kept) {
+            moved++;
+            if (went[i].copied) delete_tree(from);
+        } else if (went[i].copied) delete_tree(to);
+        else if (!MoveFileExA(to, from, 0)) hos_log("saves: %s could not come back to %s", to, from);
+        free(went[i].name);
+    }
+    free(went);
     if (kept) {
         hos_log("saves: %d of %s's entries could not go to %s: the saves stay in %s", kept, beside, dir, beside);
         return beside;
@@ -1812,6 +1836,9 @@ static int game_main(int argc, char **argv) {
     }
     load_hookshot_env();
 #endif
+    /* (the settings file, in the user folder: chosen before the crash window's helper, the Discord status and the renderer read
+       it, and after hookshot_env.txt, which may set HOS_OPTIONS_FILE; Linux's main chose it already: host/options_path.c) */
+    hos_options_choose(argc, argv);
     {
         const char *protect_hearts = getenv("HOS_OOT_PROTECT_HEARTS");
         hos_oot_protect_hearts = protect_hearts && !strcmp(protect_hearts, "1");
@@ -1861,7 +1888,13 @@ static int game_main(int argc, char **argv) {
 #if !defined(_WIN32) && !defined(A64_MEM_ZERO)
             startup_stderr = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 0);
 #endif
-            if (freopen(path, "w", stderr)) setvbuf(stderr, NULL, _IONBF, 0);
+            /* (opened first: freopen closes stderr when it cannot open the file, and the next file opened would take its
+               descriptor. A log that cannot be written leaves the stderr the game was started with) */
+            FILE *log = fopen(path, "w");
+            if (log) {
+                fclose(log);
+                if (freopen(path, "w", stderr)) setvbuf(stderr, NULL, _IONBF, 0);
+            }
         } else hos_crash_record_prepare(NULL);   /* an externally supplied stderr, not the game's log */
     }
     hos_log("hookshot %s", HOOKSHOT_VERSION);   /* (the log's first line: which build a report comes from) */
@@ -1952,6 +1985,7 @@ static int game_main(int argc, char **argv) {
     }
     if (!hos_user_dir) hos_user_dir = "user";
     CreateDirectoryA(hos_user_dir, NULL);
+    hos_options_carry();   /* (a game folder's settings from before into the user folder, once: host/options_path.c) */
     /* (host/save_backup.c: an empty save folder takes the newest backup from outside the game folder, before the game reads
        its saves; then this start's saves are backed up when something is newer than the last backup) */
     hos_save_restore_if_empty(hos_user_dir);
@@ -2003,20 +2037,14 @@ static int game_main(int argc, char **argv) {
         float want = e ? (float)atof(e) : 0.0f;
         if (!e) {
             int saved = -1, version = 0;   /* (the Aspect ratio's ultrawide= and options_version=, -1 / 0 without them) */
-            char path[MAX_PATH];
-            const DWORD len = hos_game_path_a(path, MAX_PATH);
-            char *slash = len ? strrchr(path, SEP) : NULL;
-            if (slash) {
-                snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "hookshot_options.ini");
-                FILE *o = fopen(path, "r");
-                if (o) {
-                    char line[80];
-                    while (fgets(line, sizeof line, o)) {
-                        if (!strncmp(line, "ultrawide=", 10)) saved = atoi(line + 10) != 0;
-                        if (!strncmp(line, "options_version=", 16)) version = atoi(line + 16);
-                    }
-                    fclose(o);
+            FILE *o = fopen(hos_options_file(), "r");
+            if (o) {
+                char line[80];
+                while (fgets(line, sizeof line, o)) {
+                    if (!strncmp(line, "ultrawide=", 10)) saved = atoi(line + 10) != 0;
+                    if (!strncmp(line, "options_version=", 16)) version = atoi(line + 16);
                 }
+                fclose(o);
             }
             const int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
             /* (no line: the monitor's shape; an older file's 16:9 on a screen narrower than 16:9 too: hos_aspect_on) */
@@ -2163,6 +2191,7 @@ int main(int argc, char **argv) {
     void hos_display_loop(void);
     hos_game_layout();   /* (the game folder's cache/ and logs/, before anything writes there, --prepare-shaders too: host/game_layout.c) */
     load_hookshot_env();
+    hos_options_choose(argc, argv);   /* (before the Discord status reads it, below: host/options_path.c) */
     driver_cache_room();
     driver_cache_folder();
     game_argc = argc, game_argv = argv;

@@ -29,15 +29,17 @@
 
 #include "vk_internal.h"
 #include "vk_texture.h"   // (upload_command_buffer)
+#include "vk_draw.h"      // (linux_pressure_shortfall)
 #include "vk_gprof.h"      // (RX_VK_PASS_TIMING)
 #include "import_hold.h"
 #include "import_fence.h"
-#include "mirror_budget.h"   // (mirror_budget's rules: Auto's, and a preset's cap)
+#include "mirror_budget.h"   // (mirror_budget's rule, by the card)
 #include "mirror_trim.h"
 #include "wb_learn.h"
 #include "mirror_inherit.h"
 #include "retired_give_back.h"
 #include "sparse_mirror.h"
+#include "linux_pressure.h"
 #include <atomic>
 #include <unordered_set>
 #ifdef __linux__
@@ -1040,6 +1042,15 @@ void cap_buf_retire(std::map<uint32_t, CapBuf>::iterator it) {
     cap_buf_free(it->second.buffer, it->second.alloc, it->second.map, it->second.size);
     cap_bufs.erase(it);
 }
+void cap_free_trim(uint64_t keep_bytes) {
+    std::lock_guard lk(cap_free_mu);
+    while (!cap_free.empty() && cap_free_bytes > keep_bytes) {
+        const FreeBuf f = cap_free.back();
+        cap_free.pop_back();
+        cap_free_bytes -= std::min(cap_free_bytes, f.size);
+        destroy_buffer(f.buffer, f.alloc);
+    }
+}
 // (a capture's buffer by its size class: 2, 4, 8, then 16 MB and up to the MB. It was never under 16 MB, for captures of ~1 MB:
 // 25 kept ones were 413 MB of host-cached system memory, all resident, and three to a 64 MB block left 14 MB of each unused.
 // RX_VK_CAP_MIN_MB=<n>: the smallest (2), 16: as before. From 16 MB each has a memory object of its own: RX_VK_CAP_BLOCKS=1: not)
@@ -1177,6 +1188,9 @@ uint64_t cap_ranges_ver = 1;   // (any of the captures' range lists changed: cap
 std::vector<std::pair<uint64_t, uint64_t>> pool_cap_ranges;   // (merged; cap_ranges_mu)
 uint32_t pool_cap_gen = 0;
 uint64_t captures_made = 0, pool_cap_built = 0;              // (cap_ranges_mu)
+// (hookshot) how many captures have been begun (capture_make, before it collects the written pages), for any thread to
+// read: what a thread wrote before it read N is in capture N+1, or in an older one (memory_captures_begun)
+std::atomic<uint64_t> captures_begun{0};
 std::unordered_map<uint64_t, uint64_t> pool_first_seen;     // (a pool's start -> the capture it was first seen at)
 uint64_t capture_pool_max() {
     static const uint64_t v = (getenv("RX_VK_CAPTURE_POOL_MB") ? (uint64_t)atoll(getenv("RX_VK_CAPTURE_POOL_MB")) : 64) << 20;
@@ -1810,8 +1824,10 @@ void memory_capture_submit() {
     captures.push_back(std::move(c));
 }
 /// (the pages the CPU wrote since the last capture, copied now: a submit's capture, or memory_capture_now's)
+uint64_t memory_captures_begun() { return captures_begun.load(std::memory_order_acquire); }
 std::unique_ptr<Capture> capture_make() {
     if (!capture_on()) return nullptr;
+    captures_begun.fetch_add(1, std::memory_order_release);   // (before the written pages are collected: memory_captures_begun)
     const auto t0 = std::chrono::steady_clock::now();
     std::unique_ptr<Capture> c;
     {
@@ -3208,13 +3224,6 @@ uint64_t device_vram_bytes() {
         if (dev.memory.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) vram = std::max(vram, (uint64_t)dev.memory.memoryHeaps[h].size);
     return vram;
 }
-bool preset_caps_memory() {
-    static const uint64_t nominal_gb[] = {0, 4, 6, 8, 12, 16};
-    // (by the budgets' preset, which Custom keeps: a smaller preset on a bigger card stays the card's own after a row is tuned too)
-    if (opts.budget <= 0 || opts.budget > 5) return true;   // (none: what the file says)
-    const uint64_t vram = device_vram_bytes();
-    return !vram || vram <= ((nominal_gb[opts.budget] << 30) + (768ull << 20));
-}
 // (RX_VK_MSYNC_PASS: defined after memory_end_submission)
 bool msync_pass_add(Pool& p, VkBuffer buf, const std::vector<VkBufferCopy>& rs);
 void msync_pass_flush();
@@ -3222,16 +3231,12 @@ void msync_pass_report();
 extern bool msync_batching;
 namespace {
 uint64_t mirror_budget() {
-    // (Auto: a quarter of the card, at most 3 GB, an eighth on cards of 4.5 GB or less: mirror_budget.h auto_bytes)
+    // (a quarter of the card, at most 2 GB under 15 GB, else 3 GB; at most 256 MB on cards of 4.5 GB or less: mirror_budget.h.
+    // No menu row or Quality preset sets it; RX_VK_MIRROR_MB=<MB> for a test)
     static const uint64_t b = [] {
         if (const char* e = getenv("RX_VK_MIRROR_MB")) return (uint64_t)atoi(e) << 20;
         return mirror_rule::auto_bytes(device_vram_bytes());
     }();
-    // (the Insert menu's quality preset sets one, 256 MB at Minimum (4GB): it was never read, and an 8 GB card kept ~2 GB of
-    // mirrors with the 4GB preset on, 2026-11-08)
-    // (only on a card the preset is for: preset_caps_memory; a preset's never past Auto's on this card: mirror_budget.h budget_bytes)
-    if (opts.mirror_mb > 0 && !getenv("RX_VK_MIRROR_MB") && preset_caps_memory())
-        return mirror_rule::budget_bytes((uint64_t)opts.mirror_mb << 20, opts.budget > 0, device_vram_bytes());
     return b;
 }
 uint64_t mirror_bytes = 0, mirror_epoch = 0;
@@ -3530,7 +3535,8 @@ void cpu_words_merge() {   // (holding cpu_words_mu)
 } // namespace
 void memory_cpu_owned(uint64_t guest, uint64_t size) {
     static const bool off = env_on("RX_VK_WB_REPORTS");
-    if (off || !guest) return;
+    // (no mirrors: no write-back will ever cut these words out, and they piled up to 65536 to be sorted, merged and dropped)
+    if (off || !guest || !mirror_on()) return;
     std::lock_guard lk(cpu_words_mu);
     if (cpu_words.size() + cpu_words_recent.size() + cpu_words_new.size() > 65536) {   // (as before: forgotten when it gets this big)
         cpu_words_merge();   // (which leaves cpu_words_new empty)
@@ -4475,6 +4481,7 @@ void mirrors_give_back(uint64_t want_bytes) {   // (pools_mu held)
 // play: the pools given back were long unbound.) ----
 bool system_heap_usage(uint64_t* used, uint64_t* budget);   // (vk_vma.cpp)
 std::deque<std::map<uint64_t, Pool>::node_type> evicted_pools;
+uint64_t evicted_import_bytes = 0;
 int64_t st_imports_evicted = 0;
 uint64_t st_import_bytes_evicted = 0;
 constexpr uint64_t kImportIdle = 600;
@@ -4482,6 +4489,7 @@ constexpr uint64_t kImportIdle = 600;
 void imports_give_back() {   // (pools_mu held)
     while (!evicted_pools.empty() && evicted_pools.front().mapped().retired_value <= mem_completed) {
         Pool& p = evicted_pools.front().mapped();
+        evicted_import_bytes -= std::min(evicted_import_bytes, p.hi - p.lo);
         destroy_import_buffer(p.buffer);
         vkFreeMemory(dev.device, p.memory, nullptr);
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
@@ -4542,7 +4550,25 @@ void imports_give_back() {   // (pools_mu held)
     if (retired_mode() == retired_give_back::Mode::GRACE) used = retired_give_back::settled(used, dead_import_bytes);
     if (grace) used = retired_give_back::settled(used, evicted_waiting);   // (held for their wait: given back already)
     const uint64_t want = retired_give_back::want(used, cap, high, low);
-    if (!want) return;
+    // (and under Linux memory pressure, once per /proc/meminfo sample (vk_texture.cpp texture_frame): the shortfall less what is
+    // on its way back already, and over one episode of pressure no more in all than its deepest shortfall: linux_pressure.h
+    // episode_want. Said in lines of its own, not as the system heap's)
+    uint64_t linux_want = 0, over_seq = 0;
+    static uint64_t last_over_seq = 0, episode_deepest = 0, episode_given = 0;
+    if (const uint64_t over = linux_pressure_shortfall(&over_seq)) {
+        if (over_seq != last_over_seq) {
+            last_over_seq = over_seq;
+            cap_free_trim(32ull << 20);
+            episode_deepest = std::max(episode_deepest, over);
+            linux_want = linux_pressure::episode_want(linux_pressure::import_want(over, dead_import_bytes + evicted_import_bytes),
+                                                      episode_deepest, episode_given);
+        }
+    } else {
+        episode_deepest = episode_given = 0;   // (out of pressure: the next episode starts afresh)
+    }
+    const bool for_linux = linux_want > want;
+    const uint64_t want_bytes = std::max(want, linux_want);
+    if (!want_bytes) return;
     std::vector<std::map<uint64_t, Pool>::iterator> idle;
     for (auto it = imported.begin(); it != imported.end(); ++it) {
         const Pool& p = it->second;
@@ -4554,20 +4580,27 @@ void imports_give_back() {   // (pools_mu held)
     uint64_t freed = 0;
     int n = 0;
     for (auto it : idle) {
-        if (freed >= want) break;
+        if (freed >= want_bytes) break;
         Pool& p = it->second;
         guest_pages_set(p.lo, p.hi, 0);
         p.retired_value = mem_rec_value;   // (this submission's recording is being made: freed once it is done)
         if (grace) p.retired_value = ~0ull, p.retired_ms = import_now_ms();   // (AMD, Intel on Windows: after the wait, above)
         freed += p.hi - p.lo;
+        evicted_import_bytes += p.hi - p.lo;
         n++;
         evicted_pools.push_back(imported.extract(it));
     }
+    if (for_linux) episode_given += freed - std::min(freed, want);
     if (!n) {
         static int logged_none;
-        if (logged_none++ < 8)
-            logf("vk: system heap %llu of %llu MB: no idle import to give back (%zu imported)", (unsigned long long)(used >> 20),
-                 (unsigned long long)(budget >> 20), imported.size());
+        if (logged_none++ < 8) {
+            if (for_linux)
+                logf("vk: memory pressure on Linux: no idle import to give back for %llu MB (%zu imported)",
+                     (unsigned long long)(linux_want >> 20), imported.size());
+            else
+                logf("vk: system heap %llu of %llu MB: no idle import to give back (%zu imported)", (unsigned long long)(used >> 20),
+                     (unsigned long long)(budget >> 20), imported.size());
+        }
         return;
     }
     pools_gen++;
@@ -4575,11 +4608,21 @@ void imports_give_back() {   // (pools_mu held)
     std::fill(std::begin(pool_cache), std::end(pool_cache), nullptr);
     if (mirror_on()) publish_cap_ranges();
     st_imports_evicted += n, st_import_bytes_evicted += freed;
-    static int logged;
-    if (logged++ < 40 || logged % 64 == 0)
-        logf("vk: system heap %llu of %llu MB: %d idle imports given back (%llu MB); %lld (%llu MB) in all",
-             (unsigned long long)(used >> 20), (unsigned long long)(budget >> 20), n, (unsigned long long)(freed >> 20),
-             (long long)st_imports_evicted, (unsigned long long)(st_import_bytes_evicted >> 20));
+    if (for_linux) {
+        static int logged_linux;
+        if (logged_linux++ < 8 || logged_linux % 16 == 0)
+            logf("vk: memory pressure on Linux: %d idle imports given back (%llu MB of %llu MB asked; %llu MB in this episode, "
+                 "deepest shortfall %llu MB); %lld (%llu MB) in all (RX_VK_AVAIL_RESERVE_MB, RX_VK_COMMIT_RESERVE_MB)",
+                 n, (unsigned long long)(freed >> 20), (unsigned long long)(linux_want >> 20),
+                 (unsigned long long)(episode_given >> 20), (unsigned long long)(episode_deepest >> 20),
+                 (long long)st_imports_evicted, (unsigned long long)(st_import_bytes_evicted >> 20));
+    } else {
+        static int logged;
+        if (logged++ < 40 || logged % 64 == 0)
+            logf("vk: system heap %llu of %llu MB: %d idle imports given back (%llu MB); %lld (%llu MB) in all",
+                 (unsigned long long)(used >> 20), (unsigned long long)(budget >> 20), n, (unsigned long long)(freed >> 20),
+                 (long long)st_imports_evicted, (unsigned long long)(st_import_bytes_evicted >> 20));
+    }
 }
 
 // ---- (hookshot) an import trimmed back to the game's live pools (mirror_trim.h) ----
@@ -5450,7 +5493,9 @@ bool wbd_pipe_ready() {
     return ok;
 }
 void shadow_written_to(std::vector<uint32_t>& list, const uint32_t* pages, int64_t n) {
-    if (n <= 0 || !wb_diff_on()) return;
+    // (no mirrors: the lists are read by a write-back's diff only, shadows_forget_written, and none is ever made. They grew
+    // to 8 million pages, 32 MB, before being dropped, again and again: about 1 % of the replay thread on a Steam Deck)
+    if (n <= 0 || !wb_diff_on() || !mirror_on()) return;
     std::lock_guard lk(shadow_written_mu);
     if (shadow_written_pages.size() + shadow_written_collected_list.size() + shadow_written_by_replay.size() > (8u << 20)) {
         shadow_written_all = true;   // (no write-back has read them for a long while: all of them, then)
@@ -5471,7 +5516,7 @@ int guest_cpu_write(uint64_t gpu, const void* src, uint64_t n) {
     return ok;
 }
 void guest_cpu_wrote(uint64_t gpu, uint64_t n) {
-    if (!n || !wb_diff_on()) return;
+    if (!n || !wb_diff_on() || !mirror_on()) return;   // (as shadow_written_to: nor are the pages looked up)
     uint32_t pages[64];
     int k = 0;
     for (uint64_t a = gpu & ~4095ull; a < gpu + n; a += 4096) {   // (GPU pages are mapped to guest memory page by page)

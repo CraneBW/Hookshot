@@ -82,7 +82,6 @@ before it starts.
    | From `tools` | To | Variable |
    |---|---|---|
    | `tools\cpm` | anywhere | `RX_CPM` points at it (Vulkan headers and FFmpeg; without it, system headers or `HOOKSHOT_*_HEADERS`, the standalone build stops) |
-   | `tools\wgpu-native` | anywhere | `WGPU_NATIVE` points at it (the WebGPU fallback renderer; without it the game is built without one) |
    | `tools\third_party` | `third_party\` | (its `.dll`, `.exe`, `.lib` and `.sha1` files, to the same places: `a64emit`, `lld-link`, `zbic` and SDL2) |
    | `tools\work` | `work\` | (hot-function list, link order, profile and icon; without it the game builds but runs slower) |
 

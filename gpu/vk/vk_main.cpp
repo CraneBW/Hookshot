@@ -86,6 +86,13 @@ int display_refresh_mhz();   // (below, outside the unnamed namespace)
 std::vector<std::string> gpu_device_names;
 std::vector<gpu_choice::Card> gpu_device_cards;
 const MkwVkHost* host;
+std::string options_path() {
+    if (host && host->options_path) {
+        const char* p = host->options_path();
+        return p ? p : "";
+    }
+    return game_folder_path() + "hookshot_options.ini";
+}
 int64_t prof_ns[PROF_COUNT];
 Device dev;
 PFN_vkGetInstanceProcAddr instance_proc() { return vkx::instance_proc_addr(); }
@@ -298,11 +305,7 @@ bool create_device() {
     // fallback the GTX 10xx and RX 5000 cards run (issue 640) can be tried on any GPU. The Graphics tab's row it was, and its
     // mesh_shaders= in hookshot_options.ini, no longer choose: the line is only told of in the log)
     static const mesh_rule::Choice mesh_choice = [] {
-        char exe[MAX_PATH];
-        const DWORD len = game_module_path(exe, MAX_PATH);   // (the game folder, not bin beside the launcher: vk_paths.h)
-        std::string ini(exe, len);
-        ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "hookshot_options.ini";
-        if (FILE* fl = fopen(ini.c_str(), "r")) {
+        if (FILE* fl = fopen(options_path().c_str(), "r")) {   // (vk_paths.h)
             char line[80];
             int old = 0;
             while (fgets(line, sizeof line, fl))
@@ -544,12 +547,8 @@ bool create_device() {
     // over it. Off is null descriptors only: some NVIDIA cards ran slower with it on, issues 394, 418, 419)
     static const bool robust = []() -> bool {
         if (const char* e = getenv("RX_VK_ROBUST")) return atoi(e) != 0;
-        char exe[MAX_PATH];
-        const DWORD n = game_module_path(exe, MAX_PATH);   // (the game folder, not bin beside the launcher: vk_paths.h)
-        std::string ini(exe, n);
-        ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "hookshot_options.ini";
         int v = 0;   // (Auto)
-        if (FILE* f = fopen(ini.c_str(), "r")) {
+        if (FILE* f = fopen(options_path().c_str(), "r")) {   // (vk_paths.h)
             char line[80];
             while (fgets(line, sizeof line, f))
                 if (!strncmp(line, "robust_buffers=", 15)) {
@@ -1471,9 +1470,11 @@ void auto_profile() {
     hw.rtx = hw.vendor == ::auto_settings::NVIDIA && strstr(p.deviceName, "RTX");
     // (RDNA 4: "AMD Radeon RX 9070 XT", RADV's "(RADV GFX1201)")
     hw.rdna4 = hw.vendor == ::auto_settings::AMD && (strstr(p.deviceName, "RX 9") || strstr(p.deviceName, "GFX12"));
-    // (the Steam Deck's APU, LCD and OLED, or SteamOS's own flag)
+    // (the Steam Deck's APU, LCD and OLED, or Steam's flag on an integrated GPU: Steam sets SteamDeck=1 wherever it runs as on a
+    // Deck, Gaming Mode sessions on desktops with a discrete card too, which are no handheld)
     const char* deck = getenv("SteamDeck");
-    hw.handheld = (deck && atoi(deck) == 1) || strstr(p.deviceName, "Custom GPU 0405") || strstr(p.deviceName, "Custom GPU 0932");
+    hw.handheld = (deck && atoi(deck) == 1 && hw.integrated) || strstr(p.deviceName, "Custom GPU 0405") ||
+                  strstr(p.deviceName, "Custom GPU 0932");
     hw.dlss_built = dlss_built();
     hw.fsr4_built = fsr4_built();
     hw.threads = (int)std::thread::hardware_concurrency();

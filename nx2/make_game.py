@@ -38,6 +38,7 @@ import queue
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import threading
 import time
@@ -54,12 +55,13 @@ import toolchain as _toolchain
 import disk as _disk
 import object_store as _object_store
 import lift_store as _lift_store
+import game_title
 # (hookshot) RX_TARGET=windows on Linux: the Windows game, with llvm-mingw's Linux release (HOOKSHOT_MINGW, or llvm-mingw
 # beside the builder), to run under Proton or copy to a Windows PC
 LINUX, CROSS = not _toolchain.windows(), _toolchain.windows() and os.name != "nt"
 # (SDL2.dll is sdl2-compat: it loads SDL3.dll from beside the exe. Left out of bin\ since v2.0.0, it said "Failed loading SDL3
 # library" three times and no controller worked: Discord #bug-reporting, 11-08)
-BESIDE = ["hookshot", "hookshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["hookshot.exe", "hookshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll"]
+BESIDE = ["hookshot", "hookshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["hookshot.exe", "hookshot_vk.dll", "SDL2.dll", "SDL3.dll"]
 LANGUAGES = [("en-US", "English (US)"), ("en-GB", "English (UK)"), ("fr", "French (France)"), ("fr-CA", "French (Canada)"), ("de", "German"),
              ("it", "Italian"), ("es", "Spanish (Spain)"), ("es-419", "Spanish (Latin America)"), ("pt-BR", "Portuguese (Brazil)"), ("nl", "Dutch"),
              ("pl", "Polish"), ("ru", "Russian"), ("ja", "Japanese"), ("ko", "Korean"), ("zh-Hans", "Chinese (Simplified)"),
@@ -319,6 +321,7 @@ class PhaseClock:
 
     def __init__(self, started, now=time.time):
         self.now, self.seconds, self.stage, self.since = now, {}, "checks", started
+        self.part_since = started
 
     def add(self, name, seconds):
         self.seconds[name] = self.seconds.get(name, 0.0) + max(0.0, float(seconds))
@@ -329,6 +332,12 @@ class PhaseClock:
         if self.stage is not None:
             self.add(self.stage, t - self.since)
         self.stage, self.since = stage, t
+
+    def part(self, name):
+        """(the finish's pieces) the time since the stage began, or since its last part, as "<stage>: <name>\""""
+        t = self.now()
+        self.add("%s: %s" % (self.stage, name), t - max(self.since, self.part_since))
+        self.part_since = t
 
     def line(self, line):
         """A line a step printed, as it comes"""
@@ -1573,6 +1582,27 @@ def vk_profile_for(work, environ, readable=None, root=ROOT):
     return prof if (readable or (lambda p: profile_readable(p, any_os=True)))(prof) else None
 
 
+def game_name(out, work, nup=None):
+    """The game's own name and icon (nx2/game_title.py): read from the .nup when there is one and kept in the folder, then, on
+    Windows, made into the exe's icon and the name Windows shows for it (work/hookshot_game.res, linked by nx2/build.py). A
+    folder built from an unpacked dump has neither: the game stays "Hookshot". Nothing here stops a build"""
+    if nup:
+        try:
+            got = game_title.from_nup(nup)
+        except (OSError, SystemExit, ValueError, struct.error) as e:
+            got = None
+            print("the game's name and icon could not be read from the .nup (%s): the game is named Hookshot" % e, flush=True)
+        if got:
+            game_title.keep(out, *got)
+    title, icon = game_title.kept(out)
+    print("the game's name: %s, its icon: %s" % (title or "none (Hookshot)", "yes" if icon else "none"), flush=True)
+    if not LINUX:
+        try:
+            game_title.write_res(out, os.path.join(work, game_title.RES_FILE))
+        except OSError as e:
+            print("the exe's icon and name were not made (%s): it is named Hookshot" % e, flush=True)
+
+
 def copy_writable(src, dst):
     """src's bytes at dst, writable whatever src's mode: copy2 took the mode along, and from a read-only install (a Nix
     store, a packaged tools folder) the copies in the work folder were read-only, so lift.py could not write chunks.txt
@@ -1584,17 +1614,41 @@ def copy_writable(src, dst):
     shutil.copyfile(src, dst)
 
 
-def check_romfs_folder(romfs):
-    """A chosen romfs folder holds what the build reads from it (prompt_assets.py, shader_census.py: Pack/ZsDic.pack.zs and
-    System/Resource), said before the game folder is made. Issue 467: another tool's packed copy (index.json and one romfs.bin) was
-    built for 15 minutes into 27 GB, and the game stopped at boot without its system files"""
+# What a romfs must hold for the build and the game's start, each as (any one of its names, test): the build reads
+# Pack/ZsDic.pack.zs and System/Resource (prompt_assets.py, shader_census.py), and the game cannot start without its heap
+# definition, which it opens as Product. then Default. (#689 and a v3.0.0-rc.4 player: a romfs with no System folder crashed
+# at boot every time, "write 0x100000000000, guest 0", its heaps set up without their sizes; that file alone missing does too)
+ROMFS_NEEDED = ((("Pack/ZsDic.pack.zs",), os.path.isfile), (("System/Resource",), os.path.isdir),
+                (("System/HeapSize/Product.Nin_Ounce_NVN2.HeapDef.byml.zs",
+                  "System/HeapSize/Default.Nin_Ounce_NVN2.HeapDef.byml.zs"), os.path.isfile))
+
+
+def romfs_missing(romfs):
+    """The first of ROMFS_NEEDED that romfs lacks (its first name), or None"""
     folder = long_path(romfs)   # (a dump's deepest paths pass 260 characters: #1468)
-    missing = next((name for name, there in (("Pack/ZsDic.pack.zs", os.path.isfile), ("System/Resource", os.path.isdir))
-                    if not there(os.path.join(folder, *name.split("/")))), None)
+    return next((names[0] for names, there in ROMFS_NEEDED
+                 if not any(there(os.path.join(folder, *name.split("/"))) for name in names)), None)
+
+
+def check_romfs_folder(romfs):
+    """A chosen romfs folder holds what the build and the game's start need (ROMFS_NEEDED), said before the game folder is
+    made. Issue 467: another tool's packed copy (index.json and one romfs.bin) was built for 15 minutes into 27 GB, and the
+    game stopped at boot without its system files"""
+    folder = long_path(romfs)
+    missing = romfs_missing(romfs)
     if missing:
         packed = (" It holds a romfs.bin, a packed copy of the game's files: extract it first."
                   if os.path.isfile(os.path.join(folder, "romfs.bin")) else "")
         fail("The romfs folder %s does not hold the game's files (no %s): choose the extracted RomFS.%s" % (romfs, missing, packed))
+
+
+def check_unpacked_romfs(romfs, source):
+    """The same for a romfs this builder unpacked from a .nup, or kept in the game folder for an update (source says which):
+    a game built from it could not start. Before the build, as for a chosen folder"""
+    missing = romfs_missing(romfs)
+    if missing:
+        fail("%s does not hold all of the game's files (no %s): a game built from it could not start. Dump the game again and "
+             "choose the complete dump in Hookshot Builder." % (source, missing))
 
 
 def refuse_dump_links(folder):
@@ -2207,6 +2261,64 @@ def stale_copies(found, parents, visible):
     return [pid for pid in found if pid not in visible and parents.get(pid) not in visible]
 
 
+INSTALLED_NOTE = ".hookshot_installed.json"   # (in the game folder: what the finish copied in, each file's hash and stat)
+
+
+def file_sha1(path):
+    h = hashlib.sha1(usedforsecurity=False)
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def installed_stat(st):
+    """What says a file in the game folder is still the one the finish put there: nothing but a write that keeps its size
+    and time, in place, changes all four"""
+    return [st.st_size, st.st_mtime_ns, st.st_ino, stat.S_IMODE(st.st_mode)]
+
+
+def read_installed(out):
+    try:
+        with open(os.path.join(out, INSTALLED_NOTE), encoding="utf-8") as f:
+            note = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return note if isinstance(note, dict) else {}
+
+
+def installed_already(src, dst, out, note):
+    """dst is src as the finish would copy it (shutil.copy2): the file the last finish put there (INSTALLED_NOTE: its stat
+    unchanged) with src's bytes (its hash) and mode. dst itself is never read: on a cold cache that read took longer than
+    the copy (10 s for the exe on the lab's btrfs, where the copy is a clone). A <dst>.new an earlier build stopped before
+    swapping goes then, as nothing is staged over it. Anything unreadable or unnoted is not the same: copied as before"""
+    try:
+        s, d = os.stat(src), os.stat(dst)
+        had = note.get(os.path.relpath(dst, out).replace(os.sep, "/"))
+        same = (isinstance(had, dict) and had.get("stat") == installed_stat(d) and s.st_size == d.st_size
+                and stat.S_IMODE(s.st_mode) == stat.S_IMODE(d.st_mode) and had.get("sha1") == file_sha1(src))
+    except OSError:
+        return False
+    if same:
+        with contextlib.suppress(OSError):
+            os.remove(dst + ".new")
+    return same
+
+
+def note_installed(out, note, files):
+    """After the swap: each of files (src, dst) as it is in the folder now, for the next finish's installed_already. Not
+    written, the next finish copies them all again, as before"""
+    try:
+        for src, dst in files:
+            note[os.path.relpath(dst, out).replace(os.sep, "/")] = {"sha1": file_sha1(src), "stat": installed_stat(os.stat(dst))}
+        path = os.path.join(out, INSTALLED_NOTE)
+        with open(path + ".new", "w", encoding="utf-8") as f:
+            json.dump(note, f, sort_keys=True)
+        os.replace(path + ".new", path)
+    except OSError as e:
+        print("the note of the files copied in was not saved (%s): the next build copies them again" % e, flush=True)
+
+
 def end_stale_games(folders):
     """(Windows) The running processes whose exe is in one of folders (the game being updated): those with no visible window, a
     copy left behind (a shader preparation that hung, a game whose window closed but whose process did not end), are ended and
@@ -2334,6 +2446,7 @@ def main(a=None):
             fail("This game folder has no copy of the game files to update from: it was built before updates came in. Choose your game files "
                  "in Hookshot Builder and build into the same folder once; updates after that work by themselves.")
         check_cache_paths(out, (kept, romfs))
+        check_unpacked_romfs(romfs, "This game folder's copy of the game files (%s)" % romfs)
         shutil.copytree(kept, exefs)
         check_modules(exefs)
         stand_in_damaged_files(out, romfs)   # (a folder unpacked by an earlier builder from a 23.3 GB dump)
@@ -2355,6 +2468,7 @@ def main(a=None):
             same = read_stamp(good).strip() == stamp
         if same:
             print("the game was read from this .nup before: reading it again is skipped", flush=True)
+            check_unpacked_romfs(romfs, "Your .nup file %s" % a.nup)   # (unpacked by a builder before this check)
             shutil.copytree(kept, exefs)
         else:
             shutil.rmtree(game, ignore_errors=True)
@@ -2368,6 +2482,7 @@ def main(a=None):
                 check_supported_build(staged_exefs)
                 if not os.path.isdir(os.path.join(game, "romfs")):
                     fail("The package did not contain a romfs folder.")
+                check_unpacked_romfs(os.path.join(game, "romfs"), "Your .nup file %s" % a.nup)
             except (OSError, SystemExit):
                 try:
                     shutil.rmtree(game)
@@ -2403,6 +2518,7 @@ def main(a=None):
         with contextlib.suppress(FileNotFoundError):   # (the copies are this dump's now, not the .nup's that stamp names)
             os.remove(os.path.join(out, ".hookshot_romfs"))
     check_supported_build(exefs)
+    game_name(out, work, None if a.update else a.nup)
 
     # (made once on the development PC: lists of addresses and counts, no game code)
     # (hookshot_vk.profdata: the renderer's own profile, counts over Hookshot's own code)
@@ -2607,6 +2723,11 @@ def main(a=None):
     staged.append((os.path.join(work, "sa", "image", "image.bin"), os.path.join(out, "image.bin")))
     if launcher:
         staged.append((launcher, os.path.join(out, BESIDE[0])))
+    # (a file the last finish put in the folder, still as it was and with the same bytes as the new one, is not copied again:
+    # an update with nothing changed links the same 460 MB exe again, and its copy and swap were 4-8 s of the finish on the
+    # lab, more where an antivirus reads each new exe. A file that differs is staged and swapped as before)
+    installed = read_installed(out)
+    staged = [(src, dst) for src, dst in staged if not installed_already(src, dst, out, installed)]
     for src, dst in staged:
         try:
             if os.path.exists(dst + ".new"):
@@ -2616,6 +2737,7 @@ def main(a=None):
             fail("Could not stage the new build at %s. Check that %s is readable and the staged file and output folder are writable, "
                  "close any program using that file, then retry. No installed files were replaced; the compiled source is still available."
                  % (dst + ".new", src))
+    PHASES.part("copying the new files in")
     if not LINUX:   # (a copy of this game still running holds its exe: one with no window is a leftover, ended; else named)
         shown = end_stale_games([game_dir, out])
         if shown:
@@ -2627,6 +2749,15 @@ def main(a=None):
         except PermissionError:
             fail("Could not replace %s. Close any running copy of Hookshot and check that the file and folder are writable, then retry. "
                  "Staged replacements remain beside the installed files; the compiled source remains at %s." % (dst, src))
+    if staged:
+        note_installed(out, installed, staged)
+    if not LINUX:   # (the WebGPU renderer's library, which builds from before the Vulkan back end was the only renderer left)
+        for d in sorted({game_dir, out}):
+            try:
+                if os.path.isfile(os.path.join(d, "wgpu_native.dll")):
+                    os.remove(os.path.join(d, "wgpu_native.dll"))
+            except OSError:
+                pass
     if launcher:   # (a folder built before the launcher: its libraries left the folder for bin\; hookshot is the launcher now)
         stale = [] if LINUX else sorted(f for f in os.listdir(out) if f.endswith(".dll") and f.startswith(("av", "sw")))
         for n in BESIDE[1:] + stale + ["hookshot.map", "hookshot-game.exe"]:
@@ -2638,6 +2769,7 @@ def main(a=None):
     place_ngx_runtime(out)
     if fsr_wanted(a, out) and getattr(a, "fetch_fsr_runtime", False):
         place_fsr_runtime(out)
+    PHASES.part("swap and runtimes")
     # every shader of the game, for its first start to translate (gpu/vk/vk_shader.cpp seed_open). Without it the game still runs, compiling them
     # as it meets them: not worth stopping a finished build for
     # (made again only when the game's shader files, the census or the list itself changed: 4 s and 514 MB written at every update)
@@ -2647,6 +2779,7 @@ def main(a=None):
         print("the shader list was not made: the game will compile its shaders as it plays", flush=True)
     else:
         note_shader_list(work, romfs, os.path.join(out, "hookshot_shaders.bin"))
+    PHASES.part("shader list")
     # (hookshot) the button prompts of other controllers (host/prompts.c): the game's icon font redrawn per controller, with fontTools.
     # Without it the game shows its own icons
     prompts = os.path.join(out, "prompts")
@@ -2659,8 +2792,9 @@ def main(a=None):
              check=False, output=sys.stderr):
         print("the button prompts of other controllers were not made: the game shows its own", flush=True)
         shutil.rmtree(prompts, ignore_errors=True)
+    PHASES.part("button prompts")
     icon = os.path.join(ROOT, "assets", "hookshot.png")
-    if LINUX and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c)
+    if LINUX and not game_title.write_png(out, os.path.join(out, "hookshot.png")) and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c; the game's own when its .nup had one)
         copy_writable(icon, os.path.join(out, "hookshot.png"))   # (a second build overwrites the first's)
     seed_pipelines(out)
     ship_state_list(out)
@@ -2686,6 +2820,7 @@ def main(a=None):
                 f.write("builder_local=1\n")
             elif os.environ.get("HOOKSHOT_BUILDER_EXE"):
                 f.write("builder=%s\n" % os.environ["HOOKSHOT_BUILDER_EXE"])
+    PHASES.part("pipeline lists, icon and stamps")
     # (the game's code as read: written again by every build, so not left behind in the work folder. The translated code (sa\gen)
     # and the compiled objects stay: the next build skips the lift when nothing it reads changed (#428) and compiles only what
     # changed; the builder says how much stays and lets it go. Kept in a development checkout)
@@ -2707,10 +2842,12 @@ def main(a=None):
                   "what changed (HOOKSHOT_KEEP_BUILD_FILES=1 keeps all)" % (
                       work, kept >> 20, "" if lift_kept is None else " and the translation's other files (%d MB)" % (lift_kept >> 20)),
                   flush=True)
+    PHASES.part("build files deleted")
     # (HOOKSHOT_OBJ_STORE: the store's own clean-up, after the folder's; nx2/object_store.py prune)
     removed, freed = _object_store.prune()
     if removed:
         print("object store: %d objects no work folder used lately let go (%d MB)" % (removed, freed >> 20), flush=True)
+    PHASES.part("object store")
     total_seconds = time.time() - STARTED
     PHASES.enter(None)
     previous = record_times(work, run_files, compile_seconds, total_seconds, modules=plan[1],
