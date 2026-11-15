@@ -463,8 +463,6 @@ def main():
     p.add_argument("--shard", type=shard_arg, metavar="K/N", help="run only the K-th of N parts (split by the times)")
     p.add_argument("--write-times", action="store_true",
                    help="write this run's times to tests/run_all_times.json for this OS (a full run only)")
-    p.add_argument("--changed", nargs="?", const="origin/main", metavar="BASE",
-                   help="only the checks that read a file changed since BASE's merge base (default origin/main), or an untracked one")
     p.add_argument("--list", action="store_true",
                    help="print the name of each check a run would start, one a line, and run none")
     p.add_argument("--junit", metavar="FILE", help="also write the results as JUnit XML to FILE")
@@ -472,7 +470,7 @@ def main():
                    help="a name must be a check's whole path, and with names given and none matching, run nothing")
     p.add_argument("--changed", nargs="?", const="", metavar="BASE",
                    help="only the checks that read a file changed since BASE's merge base (default main on the remote that "
-                        "points at Hookshot, forge/main as forge.py adds it, else origin/main), or an untracked one")
+                        "points at Hookshot's forge, else origin/main), or an untracked one")
     a = p.parse_args()
     if a.write_times and (a.names or a.shard):
         p.error("--write-times needs a full run: no names, no --shard")
