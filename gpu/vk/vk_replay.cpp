@@ -5305,6 +5305,13 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     si.pNext = reflex_submit_id(nullptr, reflex_present_frame);
     res = vkQueueSubmit2(dev.queue, 1, &si, f.done);
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
+    if (res != VK_SUCCESS) {
+        // (the present below waits for the semaphore this submit signals: with the submit refused it would wait for good, on the
+        // presents' own queue unseen by anything that waits on the replay's queue)
+        static int logged;
+        if (logged++ < 8) logf("vk: the present's blit submit failed (VkResult %d): this frame is not shown", (int)res);
+        return;
+    }
     if (present_defer_into) {   // (present ahead: the copy is queued; present_commit shows it at its time)
         present_defer_into->used = true;
         present_defer_into->index = index;
@@ -5381,6 +5388,7 @@ static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk) {
     }
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
     reflex_presented();
+    if (res == VK_ERROR_DEVICE_LOST) device_lost();   // (on the presents' own queue this is the first place a lost device shows)
     if (res == VK_ERROR_SURFACE_LOST_KHR) {
         if (!qk.owns_lock()) qk.lock();
         invalidate_lost_surface(res);
