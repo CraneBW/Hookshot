@@ -136,7 +136,8 @@ def main():
     state = hid[hid.index("static volatile LONG pad_raw_now;"):hid.index("uint32_t hos_pad_raw(")]
     code = "\n".join((
         block(api, "enum { HOS_SW_A") + ";", block(api, "enum { HOS_PAD_SOUTH") + ";",
-        re.search(r"^enum \{ HOS_PAD_TOUCHPAD = \d+ \};", api, re.M).group(0),
+        # (a touchpad of its own past the pads' list where it has one; Hookshot's is in HOS_PAD_SOUTH's list)
+        (lambda m: m.group(0) if m else "")(re.search(r"^enum \{ HOS_PAD_TOUCHPAD = \d+ \};", api, re.M)),
         PRELUDE,
         block(hid, "static const signed char pad_default[HOS_SW_N] =") + ";",
         block(hid, "static void stick_max("), block(hid, "static uint64_t bound_pad_buttons("), state,

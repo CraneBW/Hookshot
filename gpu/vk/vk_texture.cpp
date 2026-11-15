@@ -2256,7 +2256,12 @@ void destroy_later(Texture& tex) {
     if (tex.pool_key && tex.allocation && tex.sparse_chunks.empty() && pool_cap()) {   // (a render target's: to the pool, its views too)
         d.pool_key = tex.pool_key, d.view_map = std::move(tex.views), d.bytes = tex.bytes + tex.pad;
         tex.views.clear();
-        pool_put(d);
+        // (to the pool at once: its next user is a later recording, which the queue runs after this one's. Not while a later
+        // submission still reads it: a write-back whose wait timed out copies from it at rec_value + 1, after this recording
+        // (flush_textures), so a recording now could write it first. The dead list pools that one once the GPU is past it.
+        // tests/test_readback_timeout_source.py)
+        if (tex.last_value <= rec_value) pool_put(d);
+        else dead.push_back(std::move(d));
     } else {
         for (auto& kv : tex.views)
             if (kv.second) d.views.push_back(kv.second);

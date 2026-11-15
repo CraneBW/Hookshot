@@ -51,6 +51,9 @@ FIXTURE = r'''
 namespace gpu_choice = mkwvk::gpu_choice;
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/stat.h>   // (save: the options file's mode)
+#include <unistd.h>
 #endif
 #include <algorithm>
 #include <atomic>

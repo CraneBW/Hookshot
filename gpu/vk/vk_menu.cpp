@@ -2160,6 +2160,10 @@ void save() {
     in_place = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT);   // (a link: written through it)
 #else
     if (char* real = realpath(path.c_str(), nullptr)) path = real, free(real);
+    else {   // (a link to a file not made yet, whose target realpath cannot name: written through it, so it stays a link)
+        struct stat lst{};
+        in_place = lstat(path.c_str(), &lst) == 0 && S_ISLNK(lst.st_mode);
+    }
     struct stat st{};
     const bool exists = stat(path.c_str(), &st) == 0;
     if (exists && access(path.c_str(), W_OK) != 0) {
