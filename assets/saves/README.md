@@ -35,4 +35,10 @@ assets/saves/
 `launch --repo-save <name>` copies only `slot_00/` into the run's empty save folder; the game makes `account.sav` and
 `option.sav` there when it loads the slot.
 
-There are no saves here yet. How to make one: [docs/saves-script.md](../../docs/saves-script.md#saves-in-the-repository).
+## The saves
+
+| Name | Where it stands |
+|---|---|
+| `kokiri-start` | Kokiri Forest, Link's house, right after the opening (a new game, control just given) |
+
+How to make one: [docs/saves-script.md](../../docs/saves-script.md#saves-in-the-repository).
