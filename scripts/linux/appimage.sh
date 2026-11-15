@@ -123,6 +123,14 @@ for f in crtbegin.o crtbeginS.o crtbeginT.o crtend.o crtendS.o libgcc.a libgcc_e
 done
 # (libgcc_s.so is a linker script naming /lib/x86_64-linux-gnu/libgcc_s.so.1: found in the sysroot through lib -> usr/lib)
 
+# ---- the third-party code's objects, compiled here with the build tools every player's build uses (tools.lock's clang,
+# sysroot and CPM headers), so a player's build links them instead of compiling them: Eden's shader recompiler, sirit, Dear
+# ImGui, zstd, libopus. Their sources are in the image too (above); nothing of the game's, and none of the renderer's own
+# files, which every build compiles. A build whose keys differ (another compiler, other headers, another CPU level) compiles
+# them as before (nx2/third_party_objects.py); scripts/linux/check_player_build.sh checks that a player's build finds them all.
+# (After the sysroot, which they are compiled against: a merge took this out with the sysroot moved below the licences) ----
+HOOKSHOT_SYSROOT=$S "$PY" -I -B nx2/third_party_objects.py make "$T/third_party_objects" --jobs "$(nproc)"
+
 # ---- check: the bundled compiler builds and links a program against the sysroot, and it runs ----
 cat > "$B/t.c" <<'EOF'
 #include <pthread.h>

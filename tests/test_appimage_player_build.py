@@ -139,6 +139,16 @@ class TheChecksAreWired(unittest.TestCase):
                           ("HOOKSHOT_SDL2", lib + "/libSDL2-2.0.so.0")):
             self.assertEqual(got.get(var), want, var)
 
+    def test_the_image_makes_the_third_party_objects(self):
+        # (2026-11-15: a merge dropped appimage.sh's one line that makes the set, and v2.3.0's and v2.3.1's first images made
+        # every Linux player's first build compile the third-party code again; check_player_build.sh caught it on the image.
+        # The set is compiled against the image's sysroot, so after it)
+        script = (ROOT / "scripts/linux/appimage.sh").read_text(encoding="utf-8")
+        make = script.find('nx2/third_party_objects.py make "$T/third_party_objects"')
+        self.assertGreater(make, 0, "appimage.sh makes no third-party object set")
+        self.assertLess(script.index("\nS=$L/sysroot"), make)
+        self.assertIn("HOOKSHOT_SYSROOT=$S ", script[script.rindex("\n", 0, make):make])
+
     def test_no_prebuilt_renderer(self):
         # (2026-11-14: every build compiles the Vulkan back end, as with DLSS and FSR 4: one way to build it. Nothing sets or
         # reads HOOKSHOT_VK_PREBUILT, and appimage.sh builds no renderer and copies none into the image)
