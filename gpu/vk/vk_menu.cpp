@@ -776,7 +776,7 @@ const char* tx_pad_layout(int v);
 // host lets the default stand in and opens it again once it is back, and the name stays in the ini. In the ini the name is
 // cut to kMicNameKept bytes (at a character's start), so the line fits the 80-byte readers of the file (host/nn_hid.c,
 // nn_applet.c, hos_main.c), and a name is matched by that much of it
-constexpr int kMaxMics = 16;
+constexpr int kMaxMics = 64;
 constexpr size_t kMicNameKept = 60;
 std::string mic_want;      // (the chosen microphone's name, cut to kMicNameKept; empty: Off or the default chosen)
 bool mic_missing = false;  // (mic_want is not plugged in: the row's last entry, 2 + mic_listed, stands for it)

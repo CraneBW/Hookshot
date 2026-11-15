@@ -984,7 +984,12 @@ Only `compile_shaders=`, the build's choice, stays in the game folder's file, wh
 case with `_` for spaces (`frame_generation=2`, `invert_camera_x=1`), except Output resolution, which is `output_res`.
 `gpu/vk/vk_menu.cpp` writes the whole file at every change (`save`), with `options_version=5`,
 `microphone_device=<name>` when a microphone is chosen by name, and the controls (`pad_<button>`, `key_<button>` and `toggle_<button>`:
-the README's [Controls](../README.md#controls)). A value outside a row's range is clamped when it is read. A text field
+the README's [Controls](../README.md#controls)). The microphone list retains up to 64 recording endpoints, shared by physical
+and virtual devices: `MAX_DEVICES` in `host/nn_audio_in.c` and `kMaxMics` in `gpu/vk/vk_menu.cpp` must agree. Off and Default
+are additional selector choices, not recording endpoints. Devices after the first 64 returned by the audio backend are
+omitted. `microphone_device` remains name-based; no options-format or renderer-ABI change is needed for the larger list.
+`tests/test_audio_in.py` covers high-index selection, the 64-endpoint boundary, reconnect under a new device ID and Default
+using fake SDL state; it does not establish real-device capture. A value outside a row's range is clamped when it is read. A text field
 (Custom output size: printable ASCII, with full-width digits and `ｘ` folded to ASCII) is saved as its setting is:
 Custom output size as `output_res`. A pad can edit it without a keyboard: D-pad Left/Right moves the caret, Up/Down
 cycles the character, the right shoulder inserts a digit and the left shoulder removes a character. The end caret
