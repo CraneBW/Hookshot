@@ -47,6 +47,8 @@ struct TemporalEngine {
 };
 bool chain_start(){return true;}int chain_prepare(){return 1;}bool chain_evaluate(){return true;}
 void chain_release(){}uint64_t chain_memory(){return 0;}
+struct { bool hdr = false; } chain_state_v;   /* (Hookshot's chain state: no native HDR presented here) */
+auto& chain_state() { return chain_state_v; }
 /* CALLBACK */
 /* REGISTRATION */
 /* GATE */

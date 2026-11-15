@@ -227,6 +227,7 @@ int main(void) {
 
 SITE_MAIN = r'''
 volatile float hos_ui_qx, hos_ui_qy;
+volatile uint64_t hos_wide_cover_screen;   /* (Hookshot's loading cover: the site notes its screen) */
 volatile uint32_t hos_wide_keep_mask;
 static void run(uint64_t vt, float *row0, float *row1) {
     Ctx k;

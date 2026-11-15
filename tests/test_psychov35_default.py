@@ -45,6 +45,8 @@ bool temporal_off(){return mode==ur::OFF;}
 int env_switch(const char* name){const char* s=std::getenv(name);return s && *s?std::atoi(s):-1;}
 namespace fsr3fi {int frames_wanted(){return fg;}}
 /* TONE */
+struct { bool hdr = false; } chain_state_v;   /* (Hookshot's chain state: no native HDR presented here) */
+auto& chain_state() { return chain_state_v; }
 /* HDR_CALLBACK */
 /* TEMPORAL */
 namespace independent {

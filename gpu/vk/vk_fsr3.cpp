@@ -884,7 +884,11 @@ bool chain_evaluate(VkCommandBuffer cmd, const TemporalFrame& f) {
 void chain_release() { fsr3::release(); }   // (the passes stay; their images are made again when FSR 3.1 draws next)
 uint64_t chain_memory() { return fsr3::memory(); }   // (its internal images, for the chain's status line)
 /// It takes HDR colour while the game presents its native HDR (chain_prepare): the chain gives it linear light, unclamped
-bool chain_hdr() { return chain_state().hdr; }
+// (and, from upstream, PsychoV35's linear HDR path while the scene's tone mapping runs: its compatibility is on by default)
+bool chain_hdr() {
+    static const bool psycho = upscaler_rows::psychov35_compatibility(env_switch("RX_VK_PSYCHOV35_DLSS"));
+    return chain_state().hdr || (psycho && scene_tonemap_on());
+}
 // (hdr: linear light past 1 with the game's native HDR, chain_hdr; fsr_depth: its passes are built with
 // FFX_FSR3UPSCALER_OPTION_INVERTED_DEPTH, scripts/fsr3_shaders.py; retry: an
 // evaluation that fails (no room for its constants in the frame's stream) leaves that frame to the network, and the next one
