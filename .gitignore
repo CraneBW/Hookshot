@@ -21,6 +21,7 @@ gamefile/
 
 # ---- build output and caches ----
 build/
+/third_party_objects/
 __pycache__/
 *.pyc
 *.o

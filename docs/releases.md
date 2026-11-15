@@ -26,13 +26,20 @@ Each version is one Forgejo release, made by `.forgejo/workflows/release.yml`:
 
 | Hookshot (MagicBeanDev/Hookshot) | The launcher (MagicBeanDev/LongshotLauncher) |
 |---|---|
-| `HookshotBuilder-<v>-windows-x64.zip`: the Windows builder (its setup as `HookshotBuilder.exe`, the builder and Hookshot's sources in `HookshotBuilder\`, `tools.lock`, `VERSION`, and `recomplauncher.json` at the top) | `LongshotLauncher-<v>-windows-x64-setup.exe`: one self-contained program that installs itself (below); `LongshotLauncher-<v>-windows-x64-portable.zip`: the same program as `LongshotLauncher.exe` with its `portable` file |
-| `Hookshot-<v>-x86_64.AppImage`: the Linux builder (the builder, its Python, Hookshot's sources, its `tools.lock` and `recomplauncher.json`; the player's build compiles the Vulkan back end); its build tools are not inside | `LongshotLauncher-<v>-x86_64.AppImage` |
+| `HookshotBuilder-<v>-windows-x64.zip`: the Windows builder (its setup as `HookshotBuilder.exe`, the builder and Hookshot's sources in `HookshotBuilder\`, the third-party code's objects in `HookshotBuilder\tools\third_party_objects`, `tools.lock`, `VERSION`, and `recomplauncher.json` at the top) | `LongshotLauncher-<v>-windows-x64-setup.exe`: one self-contained program that installs itself (below); `LongshotLauncher-<v>-windows-x64-portable.zip`: the same program as `LongshotLauncher.exe` with its `portable` file |
+| `Hookshot-<v>-x86_64.AppImage`: the Linux builder (the builder, its Python, Hookshot's sources, the third-party code's objects in `usr/share/hookshot/third_party_objects`, its `tools.lock` and `recomplauncher.json`; the player's build compiles the Vulkan back end); its build tools are not inside | `LongshotLauncher-<v>-x86_64.AppImage` |
 | `tools.lock`: the tools the builders download | |
 | `SHA256SUMS`, `SHA256SUMS.sig` | `SHA256SUMS`, `SHA256SUMS.sig` |
 
 `SHA256SUMS` is `sha256sum`'s format, one `<64 hex>  <name>` line per file. `SHA256SUMS.sig` is the base64 of the DER ECDSA
 P-256 signature of `SHA256SUMS`'s exact bytes, by the release key. A release's files never change: a fix is the next version.
+
+The third-party code's objects (`nx2/third_party_objects.py`: Eden's shader recompiler, sirit, Dear ImGui, zstd, libopus;
+on Windows suyu's code under the WebGPU renderer too) are compiled by the release with the tools a player's build uses
+(`tools.lock`'s compiler, sysroot and CPM headers; on Windows the same llvm-mingw release's Linux build), so a player's
+first build links them instead of compiling them. Only the sources beside them go into them: nothing of the game's, and
+none of the renderer's own files (DLSS, FSR 4 and the play profile are the player's). A build takes one only by its object
+key, which names the compiler and what the headers preprocess to: one that does not fit is compiled as before.
 
 Release files are Forgejo attachments: `[attachment] MAX_SIZE` (2048 MB on git.magicbean.dev now) caps each file, and
 `[repository.release] ALLOWED_TYPES` must stay empty (every type) for `.AppImage`, `.exe`, `.lock` and `SHA256SUMS`. The
