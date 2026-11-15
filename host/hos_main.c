@@ -9,6 +9,7 @@
    Environment: HOS_TRACE=1 (log HLE calls), HOS_MEMORY_MB (memory the game is told it has),
                 HOS_NVN_CONTINUE=1 (go on past nvnBootstrapLoader). */
 #include "hos.h"
+#include "save_backup.h"
 #ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/hookshot_env.h"
 #endif
@@ -1951,6 +1952,10 @@ static int game_main(int argc, char **argv) {
     }
     if (!hos_user_dir) hos_user_dir = "user";
     CreateDirectoryA(hos_user_dir, NULL);
+    /* (host/save_backup.c: an empty save folder takes the newest backup from outside the game folder, before the game reads
+       its saves; then this start's saves are backed up when something is newer than the last backup) */
+    hos_save_restore_if_empty(hos_user_dir);
+    hos_save_backup(hos_user_dir, "at start");
     if (!reserve_guest()) {
         fprintf(stderr, "cannot reserve the guest window\n");
         return 1;
