@@ -73,7 +73,9 @@ class CompileStopsOnExceptionTests(unittest.TestCase):
                 return False
 
             def communicate(child):
-                time.sleep(0.05)
+                # (long enough for the main thread to hear of the failure and cancel the queue while this one runs, on a busy
+                # machine too: at 50 ms a loaded test run let a second queued compile start now and then)
+                time.sleep(0.3)
                 Path(child.obj).write_bytes(b'authored object')
                 return '', ''
 
