@@ -79,11 +79,20 @@ void load_device(VkDevice device) {
 
 namespace mkwvk {
 
+bool predicted_complete();   // vk_draw.cpp: completion of explicit All preparation, including zero keys
+
 int display_refresh_mhz();   // (below, outside the unnamed namespace)
 
 std::vector<std::string> gpu_device_names;
 std::vector<gpu_choice::Card> gpu_device_cards;
 const MkwVkHost* host;
+std::string options_path() {
+    if (host && host->options_path) {
+        const char* p = host->options_path();
+        return p ? p : "";
+    }
+    return game_folder_path() + "hookshot_options.ini";
+}
 int64_t prof_ns[PROF_COUNT];
 Device dev;
 PFN_vkGetInstanceProcAddr instance_proc() { return vkx::instance_proc_addr(); }
@@ -296,11 +305,7 @@ bool create_device() {
     // fallback the GTX 10xx and RX 5000 cards run (issue 640) can be tried on any GPU. The Graphics tab's row it was, and its
     // mesh_shaders= in hookshot_options.ini, no longer choose: the line is only told of in the log)
     static const mesh_rule::Choice mesh_choice = [] {
-        char exe[MAX_PATH];
-        const DWORD len = game_module_path(exe, MAX_PATH);   // (the game folder, not bin beside the launcher: vk_paths.h)
-        std::string ini(exe, len);
-        ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "hookshot_options.ini";
-        if (FILE* fl = fopen(ini.c_str(), "r")) {
+        if (FILE* fl = fopen(options_path().c_str(), "r")) {   // (vk_paths.h)
             char line[80];
             int old = 0;
             while (fgets(line, sizeof line, fl))
@@ -542,12 +547,8 @@ bool create_device() {
     // over it. Off is null descriptors only: some NVIDIA cards ran slower with it on, issues 394, 418, 419)
     static const bool robust = []() -> bool {
         if (const char* e = getenv("RX_VK_ROBUST")) return atoi(e) != 0;
-        char exe[MAX_PATH];
-        const DWORD n = game_module_path(exe, MAX_PATH);   // (the game folder, not bin beside the launcher: vk_paths.h)
-        std::string ini(exe, n);
-        ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "hookshot_options.ini";
         int v = 0;   // (Auto)
-        if (FILE* f = fopen(ini.c_str(), "r")) {
+        if (FILE* f = fopen(options_path().c_str(), "r")) {   // (vk_paths.h)
             char line[80];
             while (fgets(line, sizeof line, f))
                 if (!strncmp(line, "robust_buffers=", 15)) {
@@ -1322,7 +1323,8 @@ bool started_up() {
         part = 0;
         const bool prepared = prepare_run(progress, false, true);
         // (or the last run did not finish the prediction; Compile shaders on Most: never, compile_all)
-        const bool predict = (prepared || predict_pending()) && compile_all();
+        // An explicit All request also upgrades a folder prepared on Most. Completed All work stays skipped.
+        const bool predict = compile_all() && (prepared || predict_pending() || !predicted_complete());
         if (!prepared && !bar.counted[0]) bar.skip(0);   // (an already prepared seed can still import pipeline states)
         // (no prediction: its part of the bar goes. On Most after a preparation too: left in, the step to the noted pipelines
         // counted it done at its guess, and the bar jumped by the prediction's share, about half of it)
