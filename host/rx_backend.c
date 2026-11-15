@@ -12,6 +12,9 @@
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/dlss_math.h"
 #include "control.h"
+#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/hookshot_env.h"
+#endif
 
 /* the WebGPU renderer (gpu/render, renamed) */
 int wgr_start(void *hwnd);
@@ -396,7 +399,7 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
         hos_log("rx: the renderer could not be loaded (%s): nothing will be drawn. Start the game from Hookshot (the launcher), "
                 "or install the game again there", err == ERROR_MOD_NOT_FOUND ? "the file or a library it needs is missing"
                                                  : err == ERROR_BAD_EXE_FORMAT ? "the file is damaged" : "Windows refused it");
-        if (!preparing_shaders && !getenv("HOS_HEADLESS") && strcmp(dll, "hookshot_vk.dll") == 0) {
+        if (!preparing_shaders && !env_on("HOS_HEADLESS") && strcmp(dll, "hookshot_vk.dll") == 0) {
             char text[MAX_PATH + 512];
             snprintf(text, sizeof text,
                      "Hookshot's renderer could not be loaded:\n\n%s\n(Windows error %lu)\n\nThe window would stay black. Start the "

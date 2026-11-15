@@ -1685,7 +1685,7 @@ void device_lost_notice() {
     logf("vk: THE GRAPHICS CARD STOPPED (device lost): the picture stays black until the game is started again. "
          "Please send hookshot_log.txt with a report");
 #ifdef _WIN32
-    if (dev.offscreen || getenv("HOS_HEADLESS")) return;   // (no window: shader preparation, tests)
+    if (dev.offscreen || env_on("HOS_HEADLESS")) return;   // (no window: shader preparation, tests)
     std::thread([name = std::string(dev.props.deviceName)] {
         const std::string text = "The graphics card (" + name + ") stopped responding to Hookshot (Vulkan: device lost), so the "
             "picture will stay black. The game cannot recover from this: close it and start it again.\n\nIf it happens again at "
