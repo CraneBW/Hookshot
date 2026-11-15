@@ -729,6 +729,7 @@ std::atomic<int64_t> pcache_built_since_save{0};
 // size: data the cache took in since. The pipeline creation feedback cannot tell the new ones apart: NVIDIA's driver reports
 // most precompiled pipelines as not found in the app's cache (~460 of ~12,900 here), which it then serves from its own.
 std::atomic<size_t> pcache_saved_size{0};
+bool pcache_no_save = false;   // (RX_VK_PCACHE_LOAD=0: pcache_init)
 /// A pipeline cache file's data, or nothing when it cannot be read or was made by another device or driver
 PipelineCacheFile pcache_file_read(const std::string& path) {
     return PipelineCacheFile::read(path, [](const uint8_t* head, uint64_t size) {
@@ -903,7 +904,7 @@ PlayCache* play_cache_make() {
 /// (the start-up done, vk_main's start) play begins: what is made from now on goes into the play generations
 void play_cache_begin() {
     static const bool off = getenv("RX_VK_PLAY_CACHE") && atoi(getenv("RX_VK_PLAY_CACHE")) == 0;
-    if (off || !pcache || !dev.vk13.pipelineCreationCacheControl || play_cache.load()) return;
+    if (pcache_no_save || off || !pcache || !dev.vk13.pipelineCreationCacheControl || play_cache.load()) return;
     if (PlayCache* g = play_cache_make()) {
         play_cache.store(g);
         logf("vk: pipeline cache: what play makes goes into play files (RX_VK_PLAY_CACHE=0: into the one cache)");
@@ -1023,7 +1024,6 @@ VkResult create_cached(VkResult (*create)(VkPipelineCache, const CI*, VkPipeline
 bool play_cache_in_use() { return play_cache.load() != nullptr; }
 // ---- (end of the play caches) ----
 
-bool pcache_no_save = false;   // (RX_VK_PCACHE_LOAD=0: pcache_init)
 // (RX_VK_PCACHE_LOAD=0, an A/B of what the file costs in memory: its 2.5 GB read whole and held by the driver. The cache
 // starts empty and is not saved; the driver's own shader cache is all there is)
 bool pcache_load_off() {
@@ -1067,7 +1067,7 @@ void pcache_init() {
     }
     logf("vk: pipeline cache %s (%zu KB)", pcache_path.c_str(), data.size() >> 10);
     data = {};
-    if (pcache) play_files_merge();
+    if (pcache && !off) play_files_merge();
     // (what it holds as read, the play files too: a save of data that size has nothing to add to the files)
     size_t held = 0;
     PcacheFetch fetch(-1);
@@ -8641,7 +8641,9 @@ bool prepare_is_update() {
 /// before the stamp says they are: a start that ended before the save would otherwise find them cold for good)
 bool pcache_saved_now() {
     size_t before = 0;
-    if (!pcache) return false;
+    // (RX_VK_PCACHE_LOAD=0: the save does nothing, and the file left from before, read against the cache that started empty,
+    // would pass for it: the record is not written as done)
+    if (!pcache || pcache_no_save) return false;
     {
         PcacheFetch fetch(-1);
         if (vkGetPipelineCacheData(dev.device, pcache, &before, nullptr) != VK_SUCCESS) return false;
