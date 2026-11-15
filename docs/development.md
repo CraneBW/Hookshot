@@ -46,7 +46,9 @@ Run everything with `python -I` from this folder.
 | `python -I nx2/test_leaf.py [--count 3000 --states 4] [--calls]` | random whole functions (or call trees), Unicorn vs recompiled native code on the real image |
 | `python -I nx2/lift.py --standalone --write` then `python -I nx2/build.py --standalone --jobs 4` | the standalone game: `work/sa/build/hookshot.exe` + `hookshot_vk.dll` |
 | `powershell -File scripts/run-vk.ps1 [-Window] [-Seconds 120] [-Name x]` | a muted test run on Vulkan, with screenshots in `work/runs/<name>/shots` |
+| `python -I scripts/memtour.py <game folder> --save <save folder> [--dests 13,1,2 \| all] [--dwell 40]` | a memory tour (Linux): the game folder started headless through the control bridge, the save loaded, a teleport through areas with a walk in each, and the game's resident + swapped memory, `MemAvailable` and swap sampled every 2 s: `mem.csv`, `marks.csv` and `summary.md` (peaks and each area's numbers) in a new folder. For "the game outgrows my RAM" reports, and for A/B runs of a change that should move it ([control.md](control.md)) |
 | `python -I scripts/prof.py <stacks file>` | a profile sampled with `HOS_PROFILE=<seconds>` + `HOS_SAMPLE=<thread>` + `HOS_SAMPLE_FILE=<stacks file>` (the sampler runs only with `HOS_PROFILE` set), named from the linker maps |
+| `python -I scripts/coverage/cover.py run <game folder> [--gen <lifted C folder>]` | which lifted functions a play session runs, and when each first ran (Windows; a DLL loaded into the built game marks each `f_` function once; Ctrl+Alt+M marks the title screen, being in play and later moments): `report` (their share of the lifted C and its compile cost, how many had run by each mark, a hot list's cover) and `compare` (one session's functions as a list, another session played against it) read the run folder on any OS. Results go to `%LOCALAPPDATA%\HookshotCover`: offsets, names and times, nothing from the game |
 | `python -I scripts/tested_configurations.py [--output work/tested-configurations.md]` | Read the [tested configurations](tested-configurations.md), combining new run files with the frozen table; UTF-8 stdout by default, or a local Markdown file that is not committed |
 
 The recorder's game-free regression is `python -I -B tests/test_recorder_sync.py --headers <Vulkan-Headers/include>`.
@@ -520,6 +522,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_LOAD=create` or `start` | When programs and their pipelines are loaded from what the preparation kept. Without the switch: `create` where the GPU has mesh shaders, `start` where it draws mesh programs through the compute fallback; and `start` on an install where first uses waited for loads for over 2 s in one session, or for over 500 ms in two sessions running (only waits longer than 20 ms count; one such session alone leaves `hookshot_load_start.txt.waited`, which the next start takes away), or where the loads found over 500 listed pipelines in no cache (draws left out for pipelines no list names are not counted: they happen in `start` too) (`hookshot_load_start.txt` in the game folder's `cache`, removed by a preparation or by hand). The first start of the game after a preparation builds every noted pipeline and every kept compute program's pipeline into the pipeline cache once, before the title, and lets each go; the preparation's own process does the same to fill the driver's cache but leaves no marker, since its pipeline cache does not answer the game's process on NVIDIA. With the compressed program cache (`RX_VK_PROGRAM_CACHE_ZSTD=1`) always `start`, whatever this switch says: its records are only read whole. The log says which and why. `start`: every listed one before the title, as before. `create`: none by a list; each program's kept variants and noted pipelines are loaded by a background job when the game makes the program (from the caches only: never a translation or a compile there), and a first draw that comes before its job ran runs it itself. The first start after a preparation builds each noted pipeline into the pipeline cache once and lets it go (before the title, with the precompile's progress), and only then loads at create. `RX_VK_LOAD_WORKERS=<n>` (2): the jobs that run at once (0, to measure: none, a draw loads what it needs itself); `RX_VK_LOAD_UNLISTED=1`: programs no list has a pipeline of are loaded at their create call too (otherwise at their first draw, as with `start`); `RX_VK_LOAD_WORKERS_LOADING=<n>`: while no frame was presented for 100 ms (the same unless set) |
 | `RX_VK_MODULE_IDS=0` | Shader module identifiers off (`VK_EXT_shader_module_identifier`). With them a compute program's module is learned by its identifier when it is first made from its code (`hookshot_module_ids.bin`, for one program cache and one driver), and in a later run the load at the program's create call makes that variant's pipeline from the caches without reading its code or making a module; where no cache has the pipeline the code is read as before |
 | `RX_VK_PRECOMPILE=0` or `1` | The shader preparation before the title off or on (on in builds made with `RX_RELEASE=1`, as the builders' are) |
+| `RX_VK_SEED_CHECK=1` | Keeps the shaders seed open after the start and marks each of the replay's program misses with the seed stages it holds (`miss_note`'s `+`), to check a seed against what play asks for. Development only: its key set is filled only then, and filling it in play races the marks' reads |
 | `RX_VK_MESH_SHADERS=native` or `compute` | How task and mesh programs run, read as the device is made (`gpu/vk/mesh_mode.h`; it was the Graphics tab's Mesh shaders row). Unset or any other value: Automatic, the GPU's own mesh shaders where it has them; the compute fallback where it has not, on Linux AMD (RADV, issue 2245), and for the task + mesh draws of the GPUs `RX_VK_TASK_MESH_FALLBACK`'s default names. `native`: the GPU's own for every draw (a GPU without them still gets the fallback). `compute`: the fallback on every GPU. `RX_VK_FORCE_MESH_FALLBACK=1` is `compute` over it. The log's `vk: mesh shaders:` line says which and where it came from. A change translates the programs again, as the program cache's stamp holds the GPU's mesh path (and every `RX_VK_MESH*` switch's text). The old `mesh_shaders=` line in `hookshot_options.ini` is no longer read: the log names it, and the menu's next save drops it |
 | `RX_VK_PIPELINE_TRACE=1` | Log graphics program keys before pipeline construction and compute program keys before background compilation, so a long-running build can be identified before it returns. Off by default. |
 | `RX_VK_TASK_MESH_FALLBACK=0` or `1` | Task + mesh draws through the compute fallback (1) or the driver's mesh shaders (0). By default the fallback is on for AMD's Navi 21 (RX 6800, 6800 XT, 6900 XT, 6950 XT, Radeon Pro W6800, W6900X, V620), Navi 22 (RX 6700, 6700 XT, 6750 XT, 6700M to 6850M XT) and Navi 23 (RX 6600, 6600 XT, 6650 XT, their mobile models, Radeon Pro W6600, W6600M) on Windows: each chip's every ID that pci-ids or amdgpu.ids name a card for, where the native path timed out the driver ([Hookshot #996](https://github.com/NotRexed/Hookshot/issues/996)). Navi 24 (RX 6300, 6400, 6500 XT, Radeon Pro W6300 to W6500M) is not on by default: no report yet; `RX_VK_TASK_MESH_FALLBACK=1` to try. The device IDs: `mesh_rule::task_mesh_fallback_default` in `gpu/vk/mesh_mode.h` |
@@ -628,6 +631,15 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `RX_VK_COMMIT_RESERVE_MB=<MB>` | Windows only: the commit the texture cache leaves free before Windows' commit limit (RAM plus the page file; default 2560, `0` turns the rule off). Every VRAM block counts against the process's commit, so below that much headroom (`GlobalMemoryStatusEx`'s `ullAvailPageFile`) the shortfall comes off the textures' budget and eviction and compaction give blocks back; the log says `vk: commit limit near:` at most every 600 frames while it is on. At the limit itself, `hos_commit` and the first-touch handler wait up to 5 s for commit (error 1455) before giving up |
 | `RX_VK_DESC_COUNTS=0` | A/B switch: a draw's descriptor build (`build_descriptors`, `gpu/vk/vk_draw.cpp`) counts the program's descriptors before every build, as before; by default the three counts are taken once and kept with the program (`Program::desc_counts`), once it is ready. The same writes and reserves either way |
 
+**What a build compiles again.** Each object is named by its source, its flags and the headers it depends on
+(`nx2/build.py` `object_key`), and kept in the object cache under that name. The Vulkan back end's own files (`gpu/vk`,
+not eden or sirit) are compiled with `-MD`, and the next build names each by the headers its depfile says it read
+(`renderer_deps`), so a renderer header edit compiles the files that include it. A file with no depfile yet (the first
+build, or one fetched from the object store, `HOOKSHOT_OBJ_STORE` above) is named by every header under `gpu/vk`,
+`gpu/render` and `gpu/compat`, as before. Lifted files depend on every runtime header, and the host's on every
+`host/*.h`. `vk_menu.cpp` and `host/hos_main.c` carry the version, a fingerprint of every source, so any source change
+compiles those two again.
+
 Builds keep the button prompts when their source, fonts, game assets, button tables, image overrides,
 Python, package/library versions and generation options still match, and every generated file still has its recorded
 size and content hash. The inputs are checked before and after generation; changed or unreadable inputs leave no reusable
@@ -694,6 +706,28 @@ The report keeps its per-program counts and adds `code` rows with the native sta
 recorded, including programs loaded from the cache. The four keys are vertex/mesh/compute, fragment, task and the
 header-only stage; zero means no key was available. Distinct tuples for the same program stay separate. These are
 recorded-query identities, not a complete draw replay or display timestamps. The queries can perturb frame timing.
+#### Links skipped, and the compile commands
+
+A link whose inputs and outputs are as the last successful one left them is not run again: the build says
+`(hookshot.exe: what it reads and writes is as the last link left it, not linked again)`. Each link keeps a record beside its
+output, `<output>.linkkey` (`nx2/build.py` `run_link`), of what decides it:
+
+- the command, the compiler, the system headers' stamp, each object's key and the files the command names (resources, the
+  symbol order);
+- every file the linker itself says it read (asked with `-Wl,--verbose` for lld's MinGW driver, `-Xlinker /verbose` for
+  lld-link, `-Wl,--trace` on Linux), so a library it found by search path (`-l`, `-static-libstdc++`, the C runtime's
+  archives) counts too, and the linker program the compiler runs;
+- the outputs, the binary and its map, by size, time and file id: a map deleted, or a file copied over the binary, links
+  again.
+
+A link that failed, or whose linker gave no list, keeps no record, so the next build links. To link again by hand, delete
+the `.linkkey` file. Outside the checkout's own `work/`, the build's clean-up can let the build files go
+(`HOOKSHOT_KEEP_BUILD_FILES=1` keeps them all), and a record gone just means the next build links.
+
+Each build also writes `sa/build/compile_commands.json`, every compile with its flags, for clangd and clang-tidy (point
+clangd at that folder, or link the file to the checkout's top, which `.gitignore` leaves out). The lifted C is left out (about
+1.4 GB, which clangd's background index would read); the host's commands still name the lifted headers' folders.
+
 #### The renderer's play profile
 
 The Vulkan back end is built with a play profile of its own (after

@@ -8,6 +8,7 @@ import hashlib
 import importlib.util
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -25,8 +26,12 @@ THIRD_PARTY = ("gpu/vk/eden/", "gpu/vk/sirit/", "third_party/imgui/", "third_par
 def production_code(path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     names = {"tree_headers", "vk_sources", "flag_text", "object_key", "zstd_jobs"}
-    functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
-    assert {n.name for n in functions} == names
+    # (renderer_deps and its helpers and globals: the back end's files keyed by their depfile's headers; an older build.py has none)
+    later = {"renderer_deps", "depfile_paths", "depfile_of"}
+    functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names | later]
+    assert names <= {n.name for n in functions}
+    functions = [n for n in tree.body if isinstance(n, ast.Assign) and any(
+        isinstance(t, ast.Name) and t.id in ("HEADER_EXTS", "_HEADER_DIGESTS", "DEPFILE_JOBS") for t in n.targets)] + functions
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
     # Execute the real branch that hashes the translator, chooses per-source flags/deps and appends Vulkan jobs.
     branches = [n for n in ast.walk(main) if isinstance(n, ast.If) and any(
@@ -106,7 +111,7 @@ class ShaderStampCacheTests(unittest.TestCase):
 
     def jobs(self, linux, version="fixture", release=False, ngx="", mingw="llvm-mingw", fsr=False, pgo="", stamp="fixture"):
         namespace = {
-            "os": os, "hashlib": hashlib,
+            "os": os, "re": re, "hashlib": hashlib,
             "GPU": str(self.root / "gpu"), "POSIX": str(self.root / "host/posix"), "HOST": str(self.root / "host"),
             "LINUX": linux, "CPU": ["-march=native", "-DHOOKSHOT_NATIVE_CPU=fixture"],
             # (the third-party parts' CPU level and the stamp their keys end with: nx2/third_party_objects.py)

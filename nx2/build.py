@@ -139,10 +139,19 @@ def no_throttle(handle=None):
     except (OSError, ValueError, TypeError):
         pass
 
-# (the dev-loop proposal's A4) a link whose inputs are the last one's is not run again. Its key: the command, each object's key
-# (its .o.sha1 stamp; its size and time without one), and the contents of the other files the command names (libraries,
-# resources, the symbol order), kept beside the output as <output>.linkkey with the output's size. A link that fails, or an
-# output of another size, forgets it. 3 s for the exe and less for the DLL on Windows, every build
+# (the dev-loop proposal's A4) a link whose inputs are the last one's is not run again. What decides it, kept beside the output as
+# <output>.linkkey (JSON) after each link that succeeded:
+#   - the key: the command, the compiler, the system headers' stamp, each object's key (its .o.sha1 stamp; its size and time
+#     without one), and the contents of the other files the command names (resources, the symbol order);
+#   - every file the linker itself read, as it says (link_trace): the libraries it found by search path (-l, -static-libstdc++,
+#     the C runtime's archives and start files) as well as the ones named, by size and time; and the linker program;
+#   - the outputs: the binary and every map the command asks for, by size, time and file id, so a file written over one, or a
+#     map deleted, links again.
+# A link with no such record (it failed, the linker's list could not be read, or a toolchain this does not know) always runs.
+# Delete <output>.linkkey to link again by hand. 3 s for the exe and less for the DLL on Windows, every build
+LINK_RECORD = 1
+
+
 def link_inputs(cmd, output):
     """The files a link reads: the objects of its @response files, and the other existing files it names (not its outputs)"""
     objs, others = [], []
@@ -161,9 +170,20 @@ def link_inputs(cmd, output):
     return objs, others
 
 
+def link_maps(cmd):
+    """The maps the command asks the linker to write: -Map=<file> (lld, GNU ld), /map:<file> (lld-link, and lld's MinGW driver
+    through -Xlink=)"""
+    maps = []
+    for arg in cmd:
+        m = re.search(r"(?:^|[,=])(?:--?Map=|/map:)(.+)$", arg, re.I)
+        if m:
+            maps.append(m.group(1))
+    return maps
+
+
 def link_key(cmd, output):
     h = hashlib.sha1("\0".join(cmd).encode(), usedforsecurity=False)
-    # (the compiler and its libraries: a new one compiles every object again to the same keys, and the link must follow it)
+    # (the compiler: a new one compiles every object again to the same keys, and the link must follow it)
     cc = shutil.which(cmd[0]) or cmd[0]
     st = os.stat(cc)
     h.update(("%s %d %d\n" % (cc, st.st_size, st.st_mtime_ns)).encode())
@@ -184,39 +204,133 @@ def link_key(cmd, output):
     return h.hexdigest()
 
 
+_LINK_TARGETS = {}
+
+
+def link_trace(cmd):
+    """What makes the linker list every file it reads, for the compiler's target (-dumpmachine with the command's --target):
+    lld and GNU ld on Linux print each with --trace; lld's MinGW driver and lld-link say "Reading <file>" when verbose. None for
+    a target this does not know: that link keeps no record and always runs"""
+    probe = [cmd[0]] + [a for a in cmd if a.startswith("--target=")] + ["-dumpmachine"]
+    key = tuple(probe)
+    if key not in _LINK_TARGETS:
+        try:
+            r = subprocess.run(probe, capture_output=True, text=True)
+            _LINK_TARGETS[key] = r.stdout.strip().lower() if r.returncode == 0 else ""
+        except OSError:
+            _LINK_TARGETS[key] = ""
+    t = _LINK_TARGETS[key]
+    if "msvc" in t:
+        return ["-Xlinker", "/verbose"]
+    if "mingw" in t or "windows" in t:
+        return ["-Wl,--verbose"]
+    if "linux" in t:
+        return ["-Wl,--trace"]
+    return None
+
+
+# (lld's verbose lines: the files it reads, the archive members it takes, an object's directives, the command its MinGW driver
+# made; none is an error or a warning)
+_VERBOSE = re.compile(r"^(?:ld\.lld|lld-link|lld)(?:\.exe)?: (?:Reading|Loaded|Directives:) |^lld-link(?:\.exe)? -lldmingw ")
+
+
+def traced_files(text):
+    """The files a link's own list names (link_trace), and the rest of its output without that list. An archive's member
+    (lib.a(member.o)) counts as its archive; a line that names no file that exists is output, not the list"""
+    files, rest = [], []
+    for line in text.splitlines():
+        s = line.strip()
+        m = re.match(r"^(?:ld\.lld|lld-link|lld)(?:\.exe)?: Reading (.+)$", s)
+        name = m.group(1) if m else s
+        gnu = re.match(r"^-l\S+\s+\((.+)\)$", name)   # (GNU ld's -t: a library by its -l name, then the file it found)
+        name = gnu.group(1) if gnu else name
+        member = re.match(r"^(.+)\(([^()]+)\)$", name)
+        if member and os.path.isfile(member.group(1)):
+            name = member.group(1)
+        if name and os.path.isfile(name):
+            files.append(os.path.abspath(name))
+        elif not _VERBOSE.match(s):
+            rest.append(line)
+    return files, "\n".join(rest) + ("\n" if rest else "")
+
+
+def link_program(cmd):
+    """The linker the compiler runs for this command (the first word of -###'s last command), or None"""
+    try:
+        r = subprocess.run(cmd + ["-###"], capture_output=True, text=True)
+    except OSError:
+        return None
+    for line in reversed((r.stderr or "").splitlines()):
+        m = re.match(r'^\s*"([^"]+)"', line)
+        if m:   # (Windows: clang names ld.lld without its .exe)
+            return next((p for p in (m.group(1), m.group(1) + ".exe", shutil.which(m.group(1))) if p and os.path.isfile(p)), None)
+    return None
+
+
+def file_stats(paths, ident=False):
+    """[path, size, mtime_ns(, file id)] for each, or None when one is gone"""
+    out = []
+    for p in paths:
+        try:
+            st = os.stat(p)
+        except OSError:
+            return None
+        out.append([p, st.st_size, st.st_mtime_ns] + ([st.st_ino] if ident else []))
+    return out
+
+
 def run_link(cmd, output):
-    """subprocess.run(cmd) for a link, or nothing when its inputs are the last successful one's (link_key)"""
+    """subprocess.run(cmd) for a link, or nothing when everything it read and wrote is as the last successful one left it"""
     keyfile = output + ".linkkey"
+    outputs = [output] + link_maps(cmd)
     try:
         key = link_key(cmd, output)
     except OSError:   # (an input gone: the linker says which)
         key = None
     try:
-        with open(keyfile) as f:
-            old = f.read().split()
-    except OSError:
-        old = []
-    if key and os.path.exists(output) and old == [key, str(os.path.getsize(output))]:
-        print("  (%s: its inputs are the last link's, not linked again)" % os.path.basename(output), flush=True)
+        with open(keyfile, encoding="utf-8") as f:
+            old = json.load(f)
+    except (OSError, ValueError):
+        old = None
+    program = link_program(cmd)
+    if (key and program and isinstance(old, dict) and old.get("record") == LINK_RECORD and old.get("key") == key
+            and old.get("linker") == file_stats([program]) and old.get("outputs") == file_stats(outputs, ident=True)
+            and old.get("inputs") and old.get("inputs") == file_stats([i[0] for i in old["inputs"]])):
+        print("  (%s: what it reads and writes is as the last link left it, not linked again)" % os.path.basename(output), flush=True)
         return subprocess.CompletedProcess(cmd, 0, "", "")
     with contextlib.suppress(OSError):
         os.remove(keyfile)
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode == 0 and key and os.path.exists(output):
-        with open(keyfile, "w") as f:
-            f.write("%s %d\n" % (key, os.path.getsize(output)))
+    trace = link_trace(cmd)
+    r = subprocess.run(cmd + (trace or []), capture_output=True, text=True)
+    if trace is not None:
+        out_files, r.stdout = traced_files(r.stdout or "")
+        err_files, r.stderr = traced_files(r.stderr or "")
+        objs = {os.path.abspath(o) for o in link_inputs(cmd, output)[0]}   # (the objects: their stamps are in the key)
+        read = sorted({f for f in out_files + err_files if f not in objs and f not in map(os.path.abspath, outputs)})
+    else:
+        read = []
+    record = {"record": LINK_RECORD, "key": key, "linker": file_stats([program]) if program else None,
+              "outputs": file_stats(outputs, ident=True), "inputs": file_stats(read)}
+    if r.returncode == 0 and key and program and read and record["outputs"] and record["inputs"] and record["linker"]:
+        with open(keyfile, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=0)
     return r
 
 
 COMPDB = "compile_commands.json"
 
 
-def write_compdb(out, jobs):
-    """(the dev-loop proposal's A8) <build>/compile_commands.json: every compile this build runs, as compile_one runs it, for clangd
-    and clang-tidy (nx2/dev.py compdb puts it at the checkout's top). The lifted code's and the host's commands name the lift's
-    gen/ and rt64/ folders, which are this build's; a failure to write it is no failed build"""
+def write_compdb(out, jobs, lifted=None):
+    """(the dev-loop proposal's A8) <build>/compile_commands.json, for clangd and clang-tidy: every compile this build runs, with
+    compile_one's compiler and flags. It names the source itself: since #385 compile_one compiles a giant lifted function's
+    file from a temporary copy (split_giants.compile_copy), which is gone by the time an editor reads this. The lifted C
+    (lifted: the gen/ folder, about 1.4 GB) is left out, or clangd's background index would read all of it; the host's commands
+    still name gen/ and rt64/ for their headers. Point clangd at the file (--compile-commands-dir, or a link to it at the
+    checkout's top, which .gitignore leaves out). A failure to write it is no failed build"""
+    top = os.path.normcase(os.path.abspath(lifted)) + os.sep if lifted else None
     entries = [{"directory": os.getcwd(), "file": src, "output": obj, "arguments": [cc] + list(fl) + ["-c", src, "-o", obj]}
-               for cc, src, obj, fl, deps in jobs]
+               for cc, src, obj, fl, deps in jobs
+               if not (top and os.path.normcase(os.path.abspath(src)).startswith(top))]
     tmp = os.path.join(out, COMPDB + ".new")
     try:
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
@@ -344,6 +458,77 @@ def tree_headers(*roots, skip=()):
         for path in sorted(found):
             h.update(os.path.basename(path).encode() + open(path, "rb").read())
     return h.hexdigest().encode()
+
+
+# (the dev-loop proposal's A6) the back end's own files depended on every header under gpu/vk, gpu/render, gpu/compat and suyu's
+# texture decoders (tree_headers): a comment in vk_present_rect.h, which two files include, compiled 35 files again (417 s of
+# compiler time, 35 s on 24 threads). Each is compiled with -MD now, and clang's depfile beside the object (vk_x.d for vk_x.o)
+# says which headers it read. The next build names the object by those of them under the same folders, their names and
+# contents (renderer_deps), and the blob stays for a file with no depfile yet or one that cannot be read. What a file reads from
+# elsewhere (the Vulkan and SPIR-V headers, the compiler's) counts as before: by the flags and the system headers' stamp.
+HEADER_EXTS = (".h", ".hpp", ".inc")
+_HEADER_DIGESTS = {}   # (a header's path -> its name and content's sha1, once a run: many files read the same headers)
+DEPFILE_DEPS = b"depfile:"   # (what renderer_deps' dependency text starts with when it comes from a depfile)
+DEPFILE_PENDING = "depfile-pending"   # (the stamp of an object compiled now from a depfile key, until rekey_depfiles keys it)
+
+
+def depfile_paths(text):
+    """The prerequisites of a make-style depfile (clang -MD): the target and its ':' left out, line continuations joined,
+    '\\ ' a space in a name, '$$' a '$', '\\#' a '#'. Clang writes the names with '/' on Windows too"""
+    text = text.replace("\\\r\n", " ").replace("\\\n", " ")
+    colon = re.search(r":(\s|$)", text)
+    if not colon:
+        return []
+    paths, cur, i, body = [], [], 0, text[colon.end():]
+    while i < len(body):
+        c = body[i]
+        if c == "\\" and i + 1 < len(body) and body[i + 1] in " #":
+            cur.append(body[i + 1])
+            i += 2
+            continue
+        if c == "$" and body[i + 1:i + 2] == "$":
+            cur.append("$")
+            i += 2
+            continue
+        if c.isspace():
+            if cur:
+                paths.append("".join(cur))
+                cur = []
+        else:
+            cur.append(c)
+        i += 1
+    if cur:
+        paths.append("".join(cur))
+    return paths
+
+
+def depfile_of(obj):
+    return obj[:-2] + ".d" if obj.endswith(".o") else obj + ".d"
+
+
+def renderer_deps(blob, roots, obj):
+    """The headers under roots that obj's last compile read (its depfile), by name and content; blob, the whole folders', when
+    there is no depfile or it names nothing under them"""
+    try:
+        with open(depfile_of(obj), encoding="utf-8", errors="replace") as f:
+            paths = depfile_paths(f.read())
+    except OSError:
+        return blob
+    tops = [os.path.normcase(os.path.abspath(r)) + os.sep for r in roots]
+    picked = sorted({os.path.normcase(os.path.abspath(p)) for p in paths if p.endswith(HEADER_EXTS)
+                     and os.path.normcase(os.path.abspath(p)).startswith(tuple(tops))})
+    if not picked:
+        return blob
+    h = hashlib.sha1(b"depfile 1\0", usedforsecurity=False)
+    for path in picked:
+        if path not in _HEADER_DIGESTS:
+            try:
+                with open(path, "rb") as f:
+                    _HEADER_DIGESTS[path] = os.path.basename(path).encode() + hashlib.sha1(f.read(), usedforsecurity=False).digest()
+            except OSError:   # (a header gone since: the key changes, and the file is compiled again)
+                _HEADER_DIGESTS[path] = os.path.basename(path).encode() + b"\0gone"
+        h.update(_HEADER_DIGESTS[path])
+    return DEPFILE_DEPS + h.hexdigest().encode()
 
 
 def ngx_library(sdk, linux):
@@ -587,6 +772,7 @@ def tree_ws(pid):
     return total
 
 
+# doc: docs/compiler-memory-accounting.md
 def rss_mb(proc):
     """A running compiler's resident memory in MB (0: exited, not known, or not started yet)"""
     if proc is None:
@@ -851,10 +1037,11 @@ def write_info(out):
 def flag_text(fl):
     """The flags an object key is named by. Include folders are left out (their headers are in deps). The builder's
     own folder is <root> (issue 565: versions\\<tag>\\... made every update look new). --sysroot= is <sysroot>: the
-    AppImage mount is a new /tmp/.mount_... path every start, and that path is not a change in the headers."""
+    AppImage mount is a new /tmp/.mount_... path every start, and that path is not a change in the headers. -MD is left out:
+    it writes the depfile beside the object (renderer_deps) and changes nothing in it."""
     kept = []
     for f in fl:
-        if f.startswith("-I"):
+        if f.startswith("-I") or f == "-MD":
             continue
         if f.startswith("--sysroot="):
             f = "--sysroot=<sysroot>"
@@ -1134,6 +1321,32 @@ def migrate_stamps(gen, obj_dir, fl, deps):
 
 
 PLANNED = {}   # (src, obj) -> the object key plan_jobs worked out, so compile_one does not hash every source again
+DEPFILE_JOBS = {}   # (a back-end object -> the folders' blob, the folders, its other deps: renderer_deps, rekey_depfiles)
+
+
+def rekey_depfiles(jobs):
+    """After the compile: each back-end object stamped and cached by the key its own depfile gives (renderer_deps), the only key
+    that vouches for it. An object compiled now is stamped DEPFILE_PENDING by compile_one when its planned key came from the last
+    compile's depfile, which may lack a header the new source reads (hckrman101 on #2706: add an include, take it out, edit the
+    header, put it back, and that key named an object built with the old header); one compiled from the folders' blob was cached
+    by that key too, which covers every header. One stamped otherwise is another build's and is left alone"""
+    for cc, src, obj, fl, deps in jobs:
+        if obj not in DEPFILE_JOBS or not os.path.exists(obj):
+            continue
+        stamp = obj + ".sha1"
+        try:
+            with open(stamp) as f:
+                old = f.read()
+        except OSError:
+            continue
+        if old != DEPFILE_PENDING and old != (PLANNED.get((src, obj)) or object_key(src, fl, deps)):
+            continue
+        blob, roots, extras = DEPFILE_JOBS[obj]
+        key = object_key(src, fl, renderer_deps(blob, roots, obj) + extras)
+        cache_put(obj, key)   # (also when it is the planned key: compile_one caches no object by a depfile key)
+        if key != old:
+            with open(stamp, "w") as f:
+                f.write(key)
 
 
 # (hookshot) the order of the compile: the longest first (LPT), so no long one starts late and runs alone at the end. The lift's
@@ -1197,6 +1410,12 @@ def compile_one(job):
     if r.returncode:
         failure = r.stderr or r.stdout or "Compiler exited with status %d without diagnostics." % r.returncode
         return src, time.time() - t, failure[-4000:]
+    if deps.startswith(DEPFILE_DEPS):
+        # (keyed by the last compile's depfile: this source may read headers that one did not, so the key does not vouch for the
+        # object. rekey_depfiles stamps and caches it by the key its own new depfile gives; a build that stops before that leaves
+        # it pending, and the next one compiles it again)
+        open(stamp, "w").write(DEPFILE_PENDING)
+        return src, time.time() - t, None
     open(stamp, "w").write(key)
     cache_put(obj, key)
     return src, time.time() - t, None
@@ -1434,8 +1653,9 @@ def main():
         # rebuild their ~500 files; the back end itself depends on everything, suyu's texture decoders included)
         vk_lib_deps = tree_headers(os.path.join(vk, "eden"), os.path.join(vk, "sirit"), os.path.join(vk, "compat"),
                                    os.path.join(GPU, "compat"))
-        vdeps = tree_headers(vk, os.path.join(GPU, "render"), os.path.join(GPU, "compat"),
-                             os.path.join(GPU, "third_party", "suyu", "video_core", "textures"))
+        vdeps_roots = (vk, os.path.join(GPU, "render"), os.path.join(GPU, "compat"),
+                       os.path.join(GPU, "third_party", "suyu", "video_core", "textures"))
+        vdeps = tree_headers(*vdeps_roots)
         # (hookshot) Dear ImGui (third_party/imgui) draws the overlays over the window's image (gpu/vk/vk_imgui.cpp; vk_menu.cpp
         # draws with it). Its objects see only its own headers; its headers are a dependency of the two files that include them
         imgui = os.path.normpath(os.path.join(kit.HERE, "..", "third_party", "imgui"))
@@ -1473,18 +1693,22 @@ def main():
         for src in vk_sources():
             name = os.path.relpath(src, vk).replace(os.sep, "_")[:-4]
             lib = os.path.relpath(src, vk).split(os.sep)[0] in ("eden", "sirit")
-            vk_jobs.append((cxx, src, os.path.join(obj_dir, "vk_" + name + ".o"),
-                            (tp_vflags if lib else vflags + vk_pgo_flags) +
+            obj = os.path.join(obj_dir, "vk_" + name + ".o")
+            extras = ((logo_text if os.path.basename(src) == "vk_imgui.cpp" else b"") +
+                      (ngx_deps if os.path.basename(src) == "vk_dlss.cpp" else b"") +
+                      (xess_deps if os.path.basename(src) == "vk_xess.cpp" else b"") +
+                      (imgui_deps if os.path.basename(src) in imgui_users else b""))
+            if not lib:   # (the back end's own files: the headers their depfile names, renderer_deps; DEPFILE_JOBS re-keys them)
+                DEPFILE_JOBS[obj] = (vdeps, vdeps_roots, extras)
+            vk_jobs.append((cxx, src, obj,
+                            (tp_vflags if lib else vflags + vk_pgo_flags) + ([] if lib else ["-MD"]) +
                             ([shader_stamp] if os.path.basename(src) == "vk_shader.cpp" else []) +
                             ([stamp_def] if os.path.basename(src) == "vk_menu.cpp" else []) +
                             (ngx_flags if os.path.basename(src) == "vk_dlss.cpp" else []) +
                             (imgui_flags if os.path.basename(src) in imgui_users else []) +
                             (fsr_flags if os.path.basename(src) == "vk_fsr4.cpp" else []) +
                             (xess_flags if os.path.basename(src) == "vk_xess.cpp" else []),
-                            vk_lib_deps + tp_deps if lib else vdeps + (logo_text if os.path.basename(src) == "vk_imgui.cpp" else b"") +
-                            (ngx_deps if os.path.basename(src) == "vk_dlss.cpp" else b"") +
-                            (xess_deps if os.path.basename(src) == "vk_xess.cpp" else b"") +
-                            (imgui_deps if os.path.basename(src) in imgui_users else b"")))
+                            vk_lib_deps + tp_deps if lib else renderer_deps(vdeps, vdeps_roots, obj) + extras))
         # (hookshot) the program cache's zstd compression (RX_VK_PROGRAM_CACHE_ZSTD): third_party/zbic's single-file
         # zstd, built as C into the same DLL. Its headers are the object's dependencies.
         zstd_src = os.path.join(kit.ROOT, "third_party", "zbic", "zstd.c")
@@ -1545,7 +1769,7 @@ def main():
     global GATE
     GATE = None if os.environ.get("HOOKSHOT_MEM_GATE") == "0" else MemoryGate()
     eta_jobs = GATE.expected(a.jobs) if GATE else a.jobs   # (the countdown with the compilers the memory holds, not --jobs)
-    write_compdb(out, jobs)
+    write_compdb(out, jobs, gen)
     counted, expected, pending = os.environ.get("HOOKSHOT_TIMES"), {}, []
     if OBJ_STORE:   # (the objects this build needs that another work folder built: in the folder's cache before the plan counts them)
         object_store.share(OBJ_CACHE, OBJ_STORE)   # (the folder's own first, those of a build that stopped before it shared them too)
@@ -1615,7 +1839,8 @@ def main():
         print("the third-party objects: %d in %s (%d MB), stamp %s" % (
             len(made), a.third_party_objects, sum(e["size"] for e in made.values()) >> 20, tp_stamp[:16]), flush=True)
         return 0
-    if OBJ_STORE:
+    rekey_depfiles(vk_jobs)
+    if OBJ_STORE:   # (after rekey_depfiles: the objects it caches by their depfile's key go to the store too)
         print("object store: %d new objects to it" % object_store.share(OBJ_CACHE, OBJ_STORE), flush=True)
     if a.standalone and not vk_only:
         write_kept(gen, jobs)
