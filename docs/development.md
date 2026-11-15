@@ -646,6 +646,15 @@ memory and are not always faster. **Build memory**: Automatic keeps the free-mem
 `HOOKSHOT_MEM_LIMIT_GB`, so the compilers may reserve that much together whatever is free now (the ones that always run,
 up to 4 on Windows, still run under a smaller number). The builders' `--cli` passes both on as it finds them.
 
+**What a build compiles again.** Each object is named by its source, its flags and the headers it depends on
+(`nx2/build.py` `object_key`), and kept in the object cache under that name. The Vulkan back end's own files (`gpu/vk`,
+not eden or sirit) are compiled with `-MD`, and the next build names each by the headers its depfile says it read
+(`renderer_deps`), so a renderer header edit compiles the files that include it. A file with no depfile yet (the first
+build, or one fetched from the object store, `HOOKSHOT_OBJ_STORE` above) is named by every header under `gpu/vk`,
+`gpu/render` and `gpu/compat`, as before. Lifted files depend on every runtime header, and the host's on every
+`host/*.h`. `vk_menu.cpp` and `host/hos_main.c` carry the version, a fingerprint of every source, so any source change
+compiles those two again.
+
 Builds keep the button prompts when their source, fonts, game assets, button tables, image overrides,
 Python, package/library versions and generation options still match, and every generated file still has its recorded
 size and content hash. The inputs are checked before and after generation; changed or unreadable inputs leave no reusable
