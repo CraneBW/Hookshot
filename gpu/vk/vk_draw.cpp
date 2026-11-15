@@ -4625,6 +4625,15 @@ void buffer_markers_report() {
 } // namespace
 
 void draw_records_log(uint64_t lo, uint64_t hi);
+bool pass_trace_on();   // (below)
+// (hookshot) RX_VK_PASS_TRACE=1: when the GPU hangs, the last frames' passes and dispatches in stream order go to the log,
+// once (Hookshot's pass_traces_log): the pass the hung draw was in, and what wrote the textures it read
+static void hang_pass_trace() {
+    static std::atomic<bool> written{false};
+    if (!pass_trace_on() || written.exchange(true)) return;
+    const uint64_t f = texture_frame_no();
+    pass_traces_log(f > 7 ? f - 7 : 0, f);
+}
 void device_lost_notice();   // (vk_main.cpp)
 void checkpoints_report() {
     static bool done;
