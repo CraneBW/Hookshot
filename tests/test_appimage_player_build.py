@@ -12,6 +12,7 @@ started a build from it. The AppImage workflow does the same with the real image
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -114,6 +115,29 @@ class TheChecksAreWired(unittest.TestCase):
             used_at = script.find('"$%s/' % var)
             self.assertGreaterEqual(set_at, 0, var + " is never set")
             self.assertLess(set_at, used_at, var + " is used before it is set")
+
+    @unittest.skipUnless(shutil.which("sh"), "AppRun is a POSIX shell script")
+    def test_apprun_points_into_the_image(self):
+        # (2026-11-14: the merge that took out the prebuilt renderer took out AppRun's `LIB=` too, and v2.3.0's AppImage
+        # exported EMSDK=/emsdk and HOOKSHOT_SYSROOT=/sysroot: every Linux player's build fell back to the system's clang with no
+        # sysroot and stopped at "'stdio.h' file not found". AppRun's set-up runs here under -u, as the image runs it)
+        apprun = (ROOT / "builder/linux/AppRun").read_text(encoding="utf-8")
+        head = apprun[:apprun.index("\nPY=")]
+        temp = tempfile.TemporaryDirectory(prefix="hookshot-apprun-")
+        self.addCleanup(temp.cleanup)
+        (Path(temp.name) / "AppRun").write_text("")
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+        # (the folder as the shell spells it, with links resolved as readlink -f does: MSYS's spelling on Windows)
+        here = subprocess.run(["sh", "-c", 'cd "$1" && pwd -P', "sh", temp.name], env=env, capture_output=True,
+                              text=True).stdout.strip()
+        r = subprocess.run(["sh", "-u", "-c", head + '\nenv\n', here + "/AppRun"], env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = dict(line.split("=", 1) for line in r.stdout.splitlines() if "=" in line)
+        lib = here + "/usr/lib/hookshot"
+        for var, want in (("HOOKSHOT_TOOLS", here + "/usr/share/hookshot"), ("EMSDK", lib + "/emsdk"),
+                          ("HOOKSHOT_SYSROOT", lib + "/sysroot"), ("HOOKSHOT_FFMPEG", lib + "/ffmpeg"),
+                          ("HOOKSHOT_SDL2", lib + "/libSDL2-2.0.so.0")):
+            self.assertEqual(got.get(var), want, var)
 
     def test_no_prebuilt_renderer(self):
         # (2026-11-14: every build compiles the Vulkan back end, as with DLSS and FSR 4: one way to build it. Nothing sets or
