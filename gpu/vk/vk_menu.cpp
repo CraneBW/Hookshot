@@ -907,6 +907,8 @@ uint64_t auto_for = 0;               // (the fingerprint of the hardware the opt
 uint64_t auto_fp = 0;                // (this PC's, menu_auto_for_gpu)
 uint64_t auto_tuned = 0;             // (the fingerprint the measured tuning in play finished for: auto_tuned=)
 ::auto_settings::Tuning auto_tuning;   // (the measured tuning in play, menu_auto_tune; its steps kept as auto_steps=)
+std::string gpu_saved_card;           // (the GPU device row's card as the options file saved it, gpu_device_id=: gpu_choice.h)
+bool gpu_card_missing = false;        // (that card is not among this run's GPUs: menu_set_gpu_count)
 void apply_auto(bool keep_own);   // (below: the Auto preset's rows)
 void apply_preset(int p) {
     if (p == kAutoPreset) {
@@ -2061,6 +2063,7 @@ void save() {
                         key == "auto_tuned" || key == "auto_output" || key == "auto_steps";
             // (and the Mesh shaders row's line, no longer read (gpu/vk/mesh_mode.h): dropped, not kept for nothing)
             mine |= key == "mesh_shaders";
+            mine |= key == "gpu_device_id";   // (the GPU device row's card: written below)
             for (const Row& r : rows)
                 if (!mine && r.value && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
@@ -2100,6 +2103,11 @@ void save() {
         // (not a row: the budgets Custom keeps. 0 too: with a preset on, the VRAM budget row chosen by the player, which the next
         // start must not take back to the preset's)
         fprintf(f, "memory_budget=%d\n", opts.budget);
+        // (the GPU device row's card itself, not only its place in the list: gpu_choice.h. A saved card not here this run, the
+        // row still at the Auto it started on, stays saved for when it is back)
+        const std::string card = opts.gpu_device > 0 ? gpu_choice::card_id(gpu_device_cards, opts.gpu_device - 1)
+                                 : opts.gpu_device == 0 && gpu_card_missing ? gpu_saved_card : std::string();
+        if (!card.empty()) fprintf(f, "gpu_device_id=%s\n", card.c_str());
         if (auto_for) fprintf(f, "auto_for=%016llx\n", (unsigned long long)auto_for);   // (the hardware Auto (this PC) chose for)
         if (auto_tuned) fprintf(f, "auto_tuned=%016llx\n", (unsigned long long)auto_tuned);   // (and measured in play for)
         // (the tuning's steps so far and whether one went down: the no-seesaw rule and the two steps hold across restarts)
@@ -4545,6 +4553,7 @@ void menu_init() {
             if (!strcmp(line, "dynamic_resolution")) old_dynres = atoi(eq + 1);
             if (!strcmp(line, "menu_size") && atoi(eq + 1) == 0) menu_auto = true;
             if (!strcmp(line, "auto_for")) auto_for = strtoull(eq + 1, nullptr, 16);
+            if (!strcmp(line, "gpu_device_id")) gpu_saved_card.assign(eq + 1, strcspn(eq + 1, " \t\r\n"));   // (menu_set_gpu_count)
             if (!strcmp(line, "auto_tuned")) auto_tuned = strtoull(eq + 1, nullptr, 16);
             if (!strcmp(line, "auto_steps")) {
                 int steps = 0, down = 0;
@@ -4733,7 +4742,20 @@ int resolution_scale() {
     return s > 0 ? (int)(twelfths(s) * 10000.0f / 12.0f + 0.5f) : 0;   // (the twelfth game_size labels)
 }
 
+/// The usable GPUs counted (vk_main.cpp pick_device, gpu_device_cards filled): the row offers them, and a card the options file
+/// saved (gpu_device_id=) is found where it is in this run's list, whatever its place was (gpu_choice.h). One not here (taken
+/// out, an eGPU unplugged) is Auto for the run, and stays saved (save) until the row is changed. A file from before the card
+/// was saved keeps its place (gpu_device=), and saves the card at its next save
 void menu_set_gpu_count(int count) {
+    if (!gpu_saved_card.empty()) {
+        const int at = gpu_choice::menu_of_card(gpu_device_cards, gpu_saved_card);
+        gpu_card_missing = at == 0;
+        if (at > 0 && at != opts.gpu_device)
+            logf("vk: GPU device: the saved card (%s) is %d: %s now, not %d", gpu_saved_card.c_str(), at - 1,
+                 gpu_device_names[at - 1].c_str(), opts.gpu_device - 1);
+        else if (!at) logf("vk: GPU device: the saved card (%s) is not here: Auto for this run, kept for when it is back", gpu_saved_card.c_str());
+        opts.gpu_device = at;
+    }
     for (Row& r : rows) {
         if (r.value == &opts.gpu_device) {
             r.hi = count;
