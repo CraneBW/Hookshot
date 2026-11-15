@@ -330,6 +330,23 @@ def patch_glyph(source):
                       "extern void hos_prompts_glyph(uint64_t slot);\n")
 
 
+# (hookshot, after ProjectReLink, 2026-11-15) The game's zstd sequence loop (f_801102e0, ZSTD_decompressSequences_body of its
+# zstd 1.4) natively: most of the loading threads' time arriving in Hyrule Castle (host/zstd_native.c says what was measured:
+# 720 MB/s against 340 lifted). At the head of the lifted function, inside it (split_hot cuts the file at function heads: the
+# call travels with the function): the host runs the loop and the function returns, or (HOS_ZSTD_NATIVE=0) the lifted body
+# runs as before. The stream hook below (HOS_NATIVE_ZSTD=1, the host's libzstd for the whole stream) never reaches it
+ZSTD_SEQ_HEAD = "void f_801102e0(Ctx *__restrict A64_NOESC c) {\n"
+ZSTD_SEQ_CALL = ("    { extern int hos_zstd_seq(Ctx *, void (*)(Ctx *));   /* (nx2/oot_patches.py: host/zstd_native.c) */\n"
+                 "      if (hos_zstd_seq(c, f_801102e0)) return; }\n")
+
+
+def patch_zstd_seq(s):
+    """The native zstd sequence loop's call at the head of f_801102e0 (the supported build's: its address is that build's)"""
+    if ZSTD_SEQ_HEAD not in s or ZSTD_SEQ_CALL in s:
+        return None
+    return s.replace(ZSTD_SEQ_HEAD, ZSTD_SEQ_HEAD + ZSTD_SEQ_CALL, 1)
+
+
 ZSTD_HEAD = "void f_80115c80(Ctx *__restrict A64_NOESC c) {\n"
 ZSTD_CALL = "    if (hos_zstd_stream(c)) return;   /* (nx2/oot_patches.py: HOS_NATIVE_ZSTD, the host's libzstd) */\n"
 
@@ -863,6 +880,11 @@ def patch_file(s, name, protect_hearts=False):
             lines.append("oot_patches: the zstd stream decode's host hook in " + name)
         out = zs
         counts["zstd stream hook"] += 1
+    seq = patch_zstd_seq(out) if protect_hearts else None
+    if seq is not None:
+        out = seq
+        counts["zstd sequence loop"] += 1
+        lines.append("oot_patches: the native zstd sequence loop in " + name)
     layout = patch_text_layout(out) if protect_hearts else None
     if layout is not None:
         out = layout
