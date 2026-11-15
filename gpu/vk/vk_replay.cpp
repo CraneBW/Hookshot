@@ -4139,7 +4139,7 @@ void do_present(const nvn_tex* t, const int crop[4], float cover) {
         const bool fg_after = framegen_on() && tex && !fg_inline;
         interpolated = framegen_on() && tex && fg_inline &&
                        framegen_record(r.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample), sw,
-                                       sh, crop, cover);
+                                       sh, crop, cover, present_native_pq.load(std::memory_order_relaxed));
         texture_frame(completed());
         full_barrier(r.cmd);
         presents++;
@@ -4230,7 +4230,7 @@ void do_present(const nvn_tex* t, const int crop[4], float cover) {
             // (its slot is free again once the next submit's value is reached: that one comes after it)
             Recording& g = begin_recording(value + 1);
             interpolated = framegen_record(g.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample),
-                                           sw, sh, crop, cover);
+                                           sw, sh, crop, cover, present_native_pq.load(std::memory_order_relaxed));
             submit_recording(g, false);
         }
         // (frame generation at Off or Auto, where DLSS-G is not asked: its feature, if made, let go, vk_dlss.cpp)

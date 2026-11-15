@@ -34,8 +34,9 @@ E=third_party/a64-kit/lift
 "$PY" -I -c "import sys; sys.path.insert(0, 'nx2'); import zbic; zbic.lib()"
 
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/share/hookshot"
+mkdir -p "$APPDIR/usr/share/hookshot" "$APPDIR/usr/lib/hookshot"
 T=$APPDIR/usr/share/hookshot
+L=$APPDIR/usr/lib/hookshot   # (what the image builds with: emsdk's clang, FFmpeg, SDL2, the sysroot; AppRun points there)
 
 # ---- the tools (the sources the player's build compiles, and the scripts) ----
 cp -a nx2 host scripts LICENSE readme.md assets "$T/"
@@ -121,6 +122,14 @@ for f in crtbegin.o crtbeginS.o crtbeginT.o crtend.o crtendS.o libgcc.a libgcc_e
     [ -e "$GCC/$f" ] && cp -aL "$GCC/$f" "$G/" || true
 done
 # (libgcc_s.so is a linker script naming /lib/x86_64-linux-gnu/libgcc_s.so.1: found in the sysroot through lib -> usr/lib)
+
+# ---- the third-party code's objects, compiled here with the build tools every player's build uses (tools.lock's clang,
+# sysroot and CPM headers), so a player's build links them instead of compiling them: Eden's shader recompiler, sirit, Dear
+# ImGui, zstd, libopus. Their sources are in the image too (above); nothing of the game's, and none of the renderer's own
+# files, which every build compiles. A build whose keys differ (another compiler, other headers, another CPU level) compiles
+# them as before (nx2/third_party_objects.py); scripts/linux/check_player_build.sh checks that a player's build finds them all.
+# (After the sysroot, which they are compiled against: a merge took this out with the sysroot moved below the licences) ----
+HOOKSHOT_SYSROOT=$S "$PY" -I -B nx2/third_party_objects.py make "$T/third_party_objects" --jobs "$(nproc)"
 
 # ---- check: the bundled compiler builds and links a program against the sysroot, and it runs ----
 cat > "$B/t.c" <<'EOF'
