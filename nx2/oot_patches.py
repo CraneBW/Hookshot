@@ -995,18 +995,6 @@ def patch_file(s, name, protect_hearts=False):
     return out, counts, lines
 
 
-def report(paths, counts, protect_hearts=False):
-    """The warnings from the files' counts (each file's patch_file counts, in the order of paths), and the step divides' rule:
-    both or neither, so a file of paths that has the hook is put back"""
-    done = {"dynamic resolution branch": 0, "text speed block": 0, "fixed path's scale": 0, "movie's frame count": 0,
-            "ocarina note wait": 0}
-    if protect_hearts:   # (the supported build's: these places are its functions)
-        done["menu focus hook"] = 0
-        done["menu tick hook"] = 0
-        done["text draw hook"] = 0
-        done["glyph hook"] = 0
-        done["text layout hook"] = 0
-
 # (hookshot, 15/11) The two name searches of f_805aeea0 (the lookup in the game's sorted containers) natively: host/names_native.c
 # says what was measured. At each loop's head the host runs the iterations it can and the loop goes on or out; at each exit,
 # the check of HOS_NAMES_NATIVE=2. Inside the function only (split_hot cuts the file at function heads, and a label of the
@@ -1044,6 +1032,17 @@ def patch_names(s):
     return s[:at] + body + s[end:]
 
 
+def report(paths, counts, protect_hearts=False):
+    """The warnings from the files' counts (each file's patch_file counts, in the order of paths), and the step divides' rule:
+    both or neither, so a file of paths that has the hook is put back"""
+    done = {"dynamic resolution branch": 0, "text speed block": 0, "fixed path's scale": 0, "movie's frame count": 0,
+            "ocarina note wait": 0}
+    if protect_hearts:   # (the supported build's: these places are its functions)
+        done["menu focus hook"] = 0
+        done["menu tick hook"] = 0
+        done["text draw hook"] = 0
+        done["glyph hook"] = 0
+        done["text layout hook"] = 0
         done["player heart protection"] = 0
         done["player flight"] = 0
         done["player flight rotation"] = 0
