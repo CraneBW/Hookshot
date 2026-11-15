@@ -149,7 +149,7 @@ void samplers_changed() {}
 void temporal_reset_failure() {}
 void prompts_at_once(const Row&) {}
 /* STOPS */
-void apply_auto(bool keep_own);
+void apply_auto();
 void logf(const char*, ...) {}
 /* PRESET */
 /* APPLY_AUTO */

@@ -47,6 +47,11 @@ FIXTURE = r'''
 #include "upscaler_rows.h"
 #include "auto_settings.h"
 #include "menu_restart.h"
+#include "gpu_choice.h"
+namespace gpu_choice = mkwvk::gpu_choice;
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -96,14 +101,13 @@ bool filter_needed() { return true; }
 const char* dlss_preset_env() { return nullptr; }
 /* ROW_FIXED */
 /* STOPS */
-/* BUDGETS */
-/* SYNC_BUDGETS */
 /* AUTO_STATE */
 /* ENV_HELPERS */
-void apply_auto(bool keep_own);
+void apply_auto();
 /* APPLY_PRESET */
 /* APPLY_AUTO */
 
+std::vector<gpu_choice::Card> gpu_device_cards;   // (the GPU row's cards, save: gpu_device_id=)
 std::string ini_file;
 std::string ini_path() { return ini_file; }
 std::string mic_want;
@@ -290,7 +294,7 @@ void test_presets_and_live_changes() {
                 apply_preset(kAutoPreset);   // The production Auto path, not a no-op stand-in.
                 CHECK(opts.preset == kAutoPreset && opts.crt_filter == filter && opts.crt_lines == lines);
                 CHECK(opts.output_res == 1);
-                apply_auto(true);           // Choosing again after the hardware changes also preserves CRT.
+                apply_auto();               // Choosing again after the hardware changes also preserves CRT.
                 CHECK(opts.crt_filter == filter && opts.crt_lines == lines);
                 CHECK(opts.output_res == 1);
             }
@@ -353,9 +357,7 @@ def fixture(source):
         "/* CRT_LINES_ROW */": rows["CRT lines"],
         "/* ROW_FIXED */": definition(menu, "bool row_fixed"),
         "/* STOPS */": definition(menu, "bool stops_at_ends"),
-        "/* BUDGETS */": menu[menu.index("constexpr int kVramBudgets ="):menu.index("const char* tx_vram_budget(")],
-        "/* SYNC_BUDGETS */": definition(menu, "void sync_preset_budgets"),
-        "/* AUTO_STATE */": menu[menu.index("::auto_settings::Choice auto_choice;"):menu.index("void apply_auto(bool keep_own);")],
+        "/* AUTO_STATE */": menu[menu.index("::auto_settings::Choice auto_choice;"):menu.index("void apply_auto();")],
         "/* ENV_HELPERS */": menu[menu.index("struct EnvOverride {"):menu.index("std::string ini_path() {")],
         "/* APPLY_PRESET */": definition(menu, "void apply_preset"),
         "/* APPLY_AUTO */": definition(menu, "void apply_auto"),

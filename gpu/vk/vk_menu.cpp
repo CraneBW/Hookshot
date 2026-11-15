@@ -916,7 +916,7 @@ uint64_t auto_tuned = 0;             // (the fingerprint the measured tuning in 
 ::auto_settings::Tuning auto_tuning;   // (the measured tuning in play, menu_auto_tune; its steps kept as auto_steps=)
 std::string gpu_saved_card;           // (the GPU device row's card as the options file saved it, gpu_device_id=: gpu_choice.h)
 bool gpu_card_missing = false;        // (that card is not among this run's GPUs: menu_set_gpu_count)
-void apply_auto(bool keep_own);   // (below: the Auto preset's rows)
+void apply_auto();   // (below: the Auto preset's rows)
 void apply_preset(int p) {
     if (p == kAutoPreset) {
         apply_auto();   // (chosen on the row: all of its rows, as any preset)
