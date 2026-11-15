@@ -2060,10 +2060,10 @@ void save() {
             // (memory_budget and auto_for too: save() writes them, and the file's old line, kept after it, won at the next start;
             // auto_output, the Output resolution Auto once set, is no longer written: its old line is dropped)
             bool mine = key == "microphone_device" || key == "options_version" || key == "memory_budget" || key == "auto_for" ||
-                        key == "auto_tuned" || key == "auto_output" || key == "auto_steps";
+                        key == "auto_tuned" || key == "auto_output" || key == "auto_steps" ||
+                        key == "gpu_device_id";   // (the GPU device row's card: written below)
             // (and the Mesh shaders row's line, no longer read (gpu/vk/mesh_mode.h): dropped, not kept for nothing)
             mine |= key == "mesh_shaders";
-            mine |= key == "gpu_device_id";   // (the GPU device row's card: written below)
             for (const Row& r : rows)
                 if (!mine && r.value && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
