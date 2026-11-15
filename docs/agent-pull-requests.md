@@ -32,7 +32,8 @@ including their measurement, switch and tested-configuration requirements. The e
 - **A change the game doesn't run** (docs, tests only, a script or the checks) is measured by its applicable game-free
   checks; an unrelated game run is not a readiness requirement.
 - **A change the game runs** needs the in-game evidence those canonical sections require before it becomes ready. If you
-  could not run it, say so and keep the PR WIP until the Test Farm or a person has covered what is missing.
+  could not run it, say so and keep the PR WIP until the Test Farm or a person has covered what is missing. The
+  [measure skill](../.claude/skills/measure/SKILL.md) has the steps for numbers against `main`.
 
 When the PR needs hardware you do not have, follow the
 [request-testing skill](../.claude/skills/request-testing/SKILL.md).

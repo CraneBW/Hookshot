@@ -20,6 +20,8 @@ Read the guide for each task you perform:
   [docs/agent-pull-requests.md](docs/agent-pull-requests.md) has the agent-specific PR workflow.
 - **Posting a claim, finding, PR, blocker or finished task:** follow the
   [team-updates skill](.claude/skills/team-updates/SKILL.md).
+- **Measuring a change or a switch in the game against `main`:** follow the
+  [measure skill](.claude/skills/measure/SKILL.md).
 - **Requesting or performing a hardware test:** read [docs/test-requests.md](docs/test-requests.md) and follow the
   [request-testing](.claude/skills/request-testing/SKILL.md) or [testing](.claude/skills/testing/SKILL.md) skill.
 
