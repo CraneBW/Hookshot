@@ -28,6 +28,7 @@ static_assert(mkwvk::kQueueGraphics == VK_QUEUE_GRAPHICS_BIT && mkwvk::kQueueCom
 #include "auto_settings.h"
 #include "vk_dlss.h"
 #include "vk_fsr4.h"
+#include "vk_xess.h"
 #include "vk_reflex.h"
 #include "vk_antilag.h"
 #include "vk_progress.h"
@@ -182,6 +183,7 @@ bool create_instance() {
         std::vector<VkExtensionProperties> all(n);
         vkEnumerateInstanceExtensionProperties(nullptr, &n, all.data());
         dlss_instance_extensions(ext_list, all);
+        xess_instance_extensions(ext_list, all, app.apiVersion);   // (hookshot: Intel XeSS's, when its library is there: vk_xess.cpp)
         // (hookshot) the HDR10 colour space for the Insert menu's HDR (the menu's settings are read after the instance is made, so
         // whenever the driver has it; the SDR choice in create_swapchain keeps to the sRGB surface)
         if (has_extension(all, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME))
@@ -389,6 +391,7 @@ bool create_device() {
     dlss_fg_device_extensions(want, exts);   // (hookshot: NVIDIA DLSS Frame Generation's through NGX, asked of NGX)
     bool fsr_descriptor_buffer = false;   // (hookshot, linux: only with a Vulkan FSR 4 library beside the game, vk_fsr4.cpp)
     if (fsr4_wants_descriptor_buffer()) optional(VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME, fsr_descriptor_buffer);
+    xess_device_extensions(want, exts);   // (hookshot: Intel XeSS's, when its library is there and the instance took its own)
     reflex_device_extensions(want, exts);   // (hookshot: NVIDIA Reflex's, vk_reflex.cpp)
     antilag_device_extensions(want, exts);   // (hookshot: AMD Anti-Lag 2's, vk_antilag.cpp)
 
@@ -656,8 +659,13 @@ bool create_device() {
     dev.sparse_images = (families[dev.queue_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) && f.features.sparseBinding &&
                         f.features.sparseResidencyImage2D && !(getenv("RX_VK_SPARSE") && !atoi(getenv("RX_VK_SPARSE")));
     dev.sparse_buffers = (families[dev.queue_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) && f.features.sparseBinding;
+    // (hookshot) Intel XeSS's features (vk_xess.cpp), last, into the chain as it will be made: the library sets what it needs in
+    // the renderer's structures and adds what it lacks (VK_EXT_mutable_descriptor_type's); nothing without its library, and a
+    // refusal leaves the chain as it was and XeSS out for the run
+    void* chain = &f;
+    xess_device_features(&chain, tail);
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-    ci.pNext = &f;
+    ci.pNext = chain;
     ci.queueCreateInfoCount = (uint32_t)qs.size();
     ci.pQueueCreateInfos = qs.data();
     ci.enabledExtensionCount = (uint32_t)want.size();
@@ -1477,6 +1485,7 @@ void auto_profile() {
                   strstr(p.deviceName, "Custom GPU 0932");
     hw.dlss_built = dlss_built();
     hw.fsr4_built = fsr4_built();
+    hw.xess_ready = xess_library_loaded();
     hw.threads = (int)std::thread::hardware_concurrency();
 #ifdef _WIN32
     MEMORYSTATUSEX m{};

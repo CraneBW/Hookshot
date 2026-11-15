@@ -2108,6 +2108,51 @@ def place_fsr_runtime(out):
     return dst
 
 
+def xess_script():
+    """scripts/xess_sdk.py as a module: Intel's XeSS library, its files and SHA-256s"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("xess_sdk", os.path.join(ROOT, "scripts", "xess_sdk.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def xess_folder():
+    """Where --fetch-xess-runtime keeps Intel's XeSS library between builds: HOOKSHOT_XESS_SDK, else work/xess-sdk here"""
+    return os.environ.get("HOOKSHOT_XESS_SDK") or os.path.join(ROOT, "work", "xess-sdk")
+
+
+def fetch_xess_runtime(a):
+    """--fetch-xess-runtime (Windows; the launchers' Intel XeSS switch): Intel's signed libxess.dll (scripts/xess_sdk.py) into
+    xess_folder() before the build, once Intel's license was accepted (--accept-intel-license: the launcher asked first, as
+    for AMD's and NVIDIA's), each file checked against its SHA-256; only what is missing or not the file expected is
+    downloaded. Off unless asked: every Windows build has XeSS (gpu/vk/vk_xess.cpp), which runs once the library is there"""
+    if not getattr(a, "accept_intel_license", False):
+        fail("Intel XeSS needs Intel's license accepted first (--accept-intel-license).")
+    xess = xess_script()
+    print(xess.NOTICE, flush=True)
+    print("Intel's license accepted: getting Intel's XeSS library into %s" % xess_folder(), flush=True)
+    try:
+        xess.fetch(xess_folder(), say=lambda line: print(line, flush=True))
+    except (OSError, ValueError) as e:
+        fail("Intel's XeSS library could not be downloaded (%s). Check the connection and build again, or leave out "
+             "--fetch-xess-runtime and put Intel's libxess.dll beside the game yourself (the readme)." % e)
+
+
+def place_xess_runtime(out):
+    """(Intel XeSS, --fetch-xess-runtime) Intel's library into the game folder, where gpu/vk/vk_xess.cpp looks. Returns the
+    folder, or None when nothing was fetched or the player's own libxess.dll is there (left alone)"""
+    xess = xess_script()
+    if LINUX or not xess.complete(xess_folder()):
+        return None
+    if xess.other(out):
+        xess.install(xess_folder(), out, say=lambda line: print(line, flush=True))   # (it says what it left alone)
+        return None
+    dst = xess.install(xess_folder(), out)
+    print("Intel XeSS: Intel's libxess.dll in %s (Intel's, under Intel's license)" % dst, flush=True)
+    return dst
+
+
 def place_ngx_runtime(out):
     """(NVIDIA DLSS) a game built with NVIDIA's SDK (HOOKSHOT_NGX_SDK, as nx2/build.py takes it) gets DLSS's runtime in its ngx
     folder, where gpu/vk/vk_dlss.cpp looks first: nvngx_dlss.dll on Windows, libnvidia-ngx-dlss.so.<version> on Linux; and
@@ -2217,6 +2262,11 @@ def parse_args():
     p.add_argument("--fetch-fsr-runtime", action="store_true",
                    help="with --fsr (Windows): download AMD's FSR runtime (scripts/ffx_sdk.py) and put it in the game folder")
     p.add_argument("--accept-amd-license", action="store_true", help="AMD's FSR SDK license, accepted (with --fetch-fsr-runtime)")
+    # (Intel XeSS: every Windows build has it, and it runs once Intel's libxess.dll is beside the game. gpu/vk/vk_xess.cpp)
+    p.add_argument("--fetch-xess-runtime", action="store_true",
+                   help="(Windows) download Intel's XeSS library (scripts/xess_sdk.py) and put it in the game folder")
+    p.add_argument("--accept-intel-license", action="store_true",
+                   help="Intel's XeSS SDK license, accepted (with --fetch-xess-runtime)")
     a = p.parse_args()
     if a.prepare:   # (first: a bad --game below is said as RecompLauncher's "error" line)
         global PREPARE
@@ -2435,6 +2485,11 @@ def main(a=None):
     else:
         if os.path.isfile(os.path.join(out, FSR_MARK)):
             os.remove(os.path.join(out, FSR_MARK))
+    # (Intel XeSS: no mark, every Windows build has it; Intel's library only when asked, and never taken away by a build without)
+    if getattr(a, "fetch_xess_runtime", False) and not LINUX:
+        fetch_xess_runtime(a)
+    elif getattr(a, "fetch_xess_runtime", False):
+        print("--fetch-xess-runtime: Intel publishes no XeSS library for Linux, so a Linux build has no XeSS", flush=True)
     exefs = os.path.join(work, "exefs")
     romfs = os.path.join(out, "romfs")
 
@@ -2769,6 +2824,8 @@ def main(a=None):
     place_ngx_runtime(out)
     if fsr_wanted(a, out) and getattr(a, "fetch_fsr_runtime", False):
         place_fsr_runtime(out)
+    if getattr(a, "fetch_xess_runtime", False):
+        place_xess_runtime(out)
     PHASES.part("swap and runtimes")
     # every shader of the game, for its first start to translate (gpu/vk/vk_shader.cpp seed_open). Without it the game still runs, compiling them
     # as it meets them: not worth stopping a finished build for
