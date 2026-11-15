@@ -114,6 +114,8 @@ std::string driver_text() {
     return info.empty() ? name : name.empty() ? info : name + " " + info;
 }
 
+std::string device_name_text() { return std::string(dev.props.deviceName, strnlen(dev.props.deviceName, sizeof dev.props.deviceName)); }
+
 /// (hookshot) Milliseconds on the steady clock: the log's last line and the preparation's watchdog
 int64_t steady_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
