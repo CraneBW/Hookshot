@@ -34,6 +34,24 @@ static HWND g_win, g_text, g_bar;
 static wchar_t g_status[512];
 static volatile LONG g_percent = -1;
 static DWORD g_http_status;   /* (the last answer: 0 when the server was not reached) */
+static DWORD g_http_error;    /* (and then Windows' error for it: net_why) */
+#ifndef WINHTTP_OPTION_IPV6_FAST_FALLBACK
+#define WINHTTP_OPTION_IPV6_FAST_FALLBACK 140
+#endif
+/* (2026-11-15) Windows' error for a connection that got no answer, in words, so a player's screenshot says which it was: players
+   could not connect even through WARP or a VPN, and the message gave no reason */
+static const wchar_t *net_why(DWORD e) {
+    switch (e) {
+    case 12002: return L"the connection timed out";
+    case 12007: return L"the server's name could not be looked up (DNS)";
+    case 12029: return L"the connection was refused or blocked";
+    case 12030: case 12031: return L"the connection was cut";
+    case 12037: case 12038: case 12044: case 12045: case 12057: case 12157: case 12169: case 12175:
+        return L"a secure connection could not be made: an antivirus or firewall that checks HTTPS, or the PC's date and time";
+    case 12180: return L"a proxy setting could not be read";
+    default: return L"no answer";
+    }
+}
 static wchar_t g_cmdline[2048];
 static HbHome g_home;
 static int g_home_ok;
@@ -125,21 +143,29 @@ static int http_get(const char *url8, Sink sink, void *user, unsigned long long 
     wchar_t host[256], path[1024];
     uc.lpszHostName = host, uc.dwHostNameLength = 256;
     uc.lpszUrlPath = path, uc.dwUrlPathLength = 1024;
+    g_http_error = 0;
     if (!WinHttpCrackUrl(url, 0, 0, &uc)) return 0;
     HINTERNET s = WinHttpOpen(L"HookshotBuilder-Setup/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
     if (!s) s = WinHttpOpen(L"HookshotBuilder-Setup/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
-    if (!s) return 0;
+    if (!s) return g_http_error = GetLastError(), 0;
     /* (a stalled download fails after a minute without data, with the message, instead of waiting forever: a GitHub 504 hour) */
     WinHttpSetTimeouts(s, 30000, 30000, 30000, 60000);
     DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;   /* (a redirect never drops to clear text) */
     WinHttpSetOption(s, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof policy);
+    /* (2026-11-15) IPv4 tried at once when IPv6 does not answer, as browsers do: on a network whose IPv6 is broken (a VPN or
+       WARP that tunnels IPv4 only) the setup waited on IPv6 until its timeout while the browser loaded the same links. Windows
+       10 1903 and later; refused harmlessly before */
+    DWORD fast = 1;
+    WinHttpSetOption(s, WINHTTP_OPTION_IPV6_FAST_FALLBACK, &fast, sizeof fast);
     HINTERNET c = WinHttpConnect(s, host, uc.nPort, 0);
     LPCWSTR types[2] = {accept, NULL};
     HINTERNET r = c ? WinHttpOpenRequest(c, L"GET", path, NULL, WINHTTP_NO_REFERER, accept ? types : WINHTTP_DEFAULT_ACCEPT_TYPES,
                                          uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0)
                     : NULL;
     int ok = 0;
-    if (r && WinHttpSendRequest(r, WINHTTP_NO_ADDITIONAL_HEADERS, 0, NULL, 0, 0, 0) && WinHttpReceiveResponse(r, NULL)) {
+    if (!(r && WinHttpSendRequest(r, WINHTTP_NO_ADDITIONAL_HEADERS, 0, NULL, 0, 0, 0) && WinHttpReceiveResponse(r, NULL)))
+        g_http_error = GetLastError();   /* (why no answer came: net_why) */
+    else {
         DWORD code = 0, len = sizeof code;
         WinHttpQueryHeaders(r, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &code, &len, NULL);
         g_http_status = code;
@@ -149,7 +175,7 @@ static int http_get(const char *url8, Sink sink, void *user, unsigned long long 
             ok = 1;
             for (;;) {
                 DWORD n = 0;
-                if (!WinHttpReadData(r, buf, sizeof buf, &n)) { ok = 0; break; }
+                if (!WinHttpReadData(r, buf, sizeof buf, &n)) { g_http_error = GetLastError(); ok = 0; break; }
                 if (!n) break;
                 if (!sink(user, buf, n)) { ok = 0; break; }
                 got += n;
@@ -754,11 +780,23 @@ static DWORD WINAPI work(LPVOID unused) {
     enum { TRIES = 8 };
     /* (a list the player saved with a browser: the server is asked once, and the saved one is taken when it does not answer) */
     wchar_t saved_list[MAX_PATH];
-    const int have_saved = browser_file("hookshot-setup.txt", saved_list);
+    int have_saved = browser_file("hookshot-setup.txt", saved_list);
+    if (have_saved) {   /* (one saved for this: from the last 7 days. An old one, left from an install by hand weeks ago, names
+                           an old release and links that may be gone) */
+        WIN32_FILE_ATTRIBUTE_DATA d;
+        FILETIME now;
+        GetSystemTimeAsFileTime(&now);
+        const ULONGLONG at = GetFileAttributesExW(saved_list, GetFileExInfoStandard, &d)
+            ? ((ULONGLONG)d.ftLastWriteTime.dwHighDateTime << 32) | d.ftLastWriteTime.dwLowDateTime : 0;
+        const ULONGLONG t = ((ULONGLONG)now.dwHighDateTime << 32) | now.dwLowDateTime;
+        if (!at || t - at > 7ull * 24 * 3600 * 10000000ull) have_saved = 0;
+    }
     int ok = 0;
     for (int attempt = 0; attempt < (have_saved ? 1 : TRIES) && !ok; attempt++) {
         if (attempt) {
-            status(L"The download server didn't answer (%lu). Trying again in %d s...", g_http_status, waits[attempt - 1]);
+            if (g_http_status) status(L"The download server didn't answer (%lu). Trying again in %d s...", g_http_status, waits[attempt - 1]);
+            else status(L"The download server didn't answer (%ls, Windows error %lu). Trying again in %d s...", net_why(g_http_error),
+                        g_http_error, waits[attempt - 1]);
             Sleep(waits[attempt - 1] * 1000);
             status(L"Looking for the latest Hookshot Builder...");
         }
@@ -782,15 +820,16 @@ static DWORD WINAPI work(LPVOID unused) {
         ok = read_whole(saved_list, &man);
         if (ok) status(L"git.notrexed.dev did not answer: using %ls", saved_list);
     }
+    if (!ok && !g_http_status)
+        fail(L"Could not reach git.notrexed.dev to get the Hookshot Builder: %ls (Windows error %lu).\n\nIf it keeps failing, "
+             L"download the files listed at " MANUAL_PAGE L" with your browser into your Downloads folder (or beside "
+             L"HookshotBuilder.exe), then start HookshotBuilder.exe again: it uses them.", net_why(g_http_error), g_http_error);
     if (!ok)
         fail(g_http_status == 404
                  ? L"The latest Hookshot release has no setup files yet. Download HookshotBuilder.zip from the releases page for now: "
                    L"https://git.notrexed.dev/Hookshot/Hookshot/releases/latest"
-             : g_http_status ? L"The download server is failing right now (an error 500 or above, tried 8 times over 3 minutes). "
-                               L"This is on the server's side: try again in a few minutes, or later today."
-                             : L"Could not reach git.notrexed.dev to get the Hookshot Builder.\n\nIf it keeps failing, download the "
-                               L"files listed at " MANUAL_PAGE L" with your browser into your Downloads folder (or beside "
-                               L"HookshotBuilder.exe), then start HookshotBuilder.exe again: it uses them.");
+                 : L"The download server is failing right now (an error 500 or above, tried 8 times over 3 minutes). "
+                   L"This is on the server's side: try again in a few minutes, or later today.");
 
     char tag[128] = "", run[260] = "";
     Part parts[MAX_PARTS];
@@ -866,8 +905,12 @@ static DWORD WINAPI work(LPVOID unused) {
                 int got = 0;
                 for (int attempt = 0; attempt < TRIES && !got; attempt++) {   /* (a server error or a dropped connection: again) */
                     if (attempt) {
-                        status(L"Part %d of %d: the download server didn't answer (%lu). Trying again in %d s...", i + 1, nparts, g_http_status,
-                               waits[attempt - 1]);
+                        if (g_http_status)
+                            status(L"Part %d of %d: the download server didn't answer (%lu). Trying again in %d s...", i + 1, nparts,
+                                   g_http_status, waits[attempt - 1]);
+                        else
+                            status(L"Part %d of %d: the download server didn't answer (%ls, Windows error %lu). Trying again in %d s...",
+                                   i + 1, nparts, net_why(g_http_error), g_http_error, waits[attempt - 1]);
                         Sleep(waits[attempt - 1] * 1000);
                     }
                     status(L"Downloading part %d of %d (%llu MB)...", i + 1, nparts, p->size >> 20);
@@ -894,6 +937,12 @@ static DWORD WINAPI work(LPVOID unused) {
                     /* (a download cut off half way answered 200 and stopped the tries at once: only a definite no stops them) */
                     if (!got && !retryable(g_http_status)) break;
                 }
+                /* (no answer at all, status 0: the connection, not the server; why, in Windows' words) */
+                if (!got && !g_http_status)
+                    DeleteFileW(part), fail(L"Downloading part %d of %d failed: %ls (Windows error %lu).\n\nIf it keeps failing, download "
+                                            L"the files listed at " MANUAL_PAGE L" with your browser into your Downloads folder, then "
+                                            L"start HookshotBuilder.exe again: it uses them. The parts already downloaded are kept.",
+                                            i + 1, nparts, net_why(g_http_error), g_http_error);
                 if (!got) DeleteFileW(part), fail(retryable(g_http_status)
                     ? L"Downloading part %d of %d failed: the download server is failing right now (tried 8 times over 3 "
                       L"minutes). This is on the server's side. The parts already downloaded are kept: run HookshotBuilder.exe again in a "

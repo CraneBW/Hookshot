@@ -27,13 +27,16 @@ def main():
                  "CompareFileTime(&d.ftLastWriteTime, &best) > 0", 'L"%ls\\\\%ls"'):
         assert need in find, "browser_file: " + need
     assert '#define MANUAL_PAGE L"https://hookshot.notrexed.dev/manual"' in src
-    assert 'const int have_saved = browser_file("hookshot-setup.txt", saved_list);' in src
+    assert 'int have_saved = browser_file("hookshot-setup.txt", saved_list);' in src and '7ull * 24 * 3600 * 10000000ull) have_saved = 0;' in src
     assert "attempt < (have_saved ? 1 : TRIES)" in src
     assert "if (!ok && have_saved) {" in src and "ok = read_whole(saved_list, &man);" in src
     part = src[src.index("/* (a part the player saved with a browser"):]
     part = part[:part.index("wchar_t part[MAX_PATH];")]
     assert "browser_file(link_name(p->url), saved) && file_sha256(saved, saved_sha) && !strcmp(saved_sha, p->sha)" in part
-    assert src.count("L\" with your browser into your Downloads folder") == 2 and src.count("\" MANUAL_PAGE L\"") == 2
+    assert src.count("L\" with your browser into your Downloads folder") == 3 and src.count("\" MANUAL_PAGE L\"") == 3
+    # (and a failure with no answer at all says why, in Windows' words and number: net_why; IPv4 tried at once when IPv6 hangs)
+    assert src.count("net_why(g_http_error), g_http_error);") == 2
+    assert "WinHttpSetOption(s, WINHTTP_OPTION_IPV6_FAST_FALLBACK, &fast, sizeof fast);" in src
     print("PASS: the setup takes a list and parts the player saved with a browser, the newest copy, parts checked by SHA-256")
 
 
