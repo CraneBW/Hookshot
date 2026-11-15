@@ -82,7 +82,8 @@ These queries do not change bindings, load a mapping file, or change which contr
 ## Switches for testing and debugging
 
 The running game reads its switches from the environment or from `hookshot_env.txt` beside `image.bin` (one
-`NAME=VALUE` a line, `#` for notes; `HOS_ENV_FILE=<path>` reads that file instead). The environment goes first: a name
+`NAME=VALUE` a line, `#` for notes; `HOS_ENV_FILE=<path>` reads that file instead; `HOS_OPTIONS_FILE=<path>`, from the
+environment only, does the same for the settings, `hookshot_options.ini`, so a scripted run leaves the player's as they are). The environment goes first: a name
 already set when the game starts keeps its value and the file's line for it is left out (the log says so). A switch
 that stands in for a menu row lasts for its run; the options file keeps the player's value (`env_override` in
 `gpu/vk/vk_menu.cpp`). Switches the shader translation reads are part of the program cache's stamp
@@ -125,6 +126,16 @@ frame in the Market on an RTX 3090, for a few more objects left out).
 `RX_VK_OCC_LOG` (set) logs every ~5,000 reports how many read 0, how many were left visible and why, how late they
 were written and what the reading cost;
 `RX_VK_OCC_DRY` (set, a test) makes and reads the queries but leaves the reports at 4096, to time the queries alone.
+With Intel's Windows driver on a discrete GPU (Arc) the counts are read from a copy: at the end of each recording the
+GPU copies the results of the queries it ran into a buffer in host memory (`vkCmdCopyQueryPoolResults`), and the reads
+are plain memory reads. Read from the query pool (`vkGetQueryPoolResults`), each query cost ~3.4 µs on an Arc B580
+(driver 101.9154): 7.4 ms of the render thread's 28.8 ms frame in the Market, where the copy made it 45.8 fps from 34.8
+on average (3 interleaved runs each, the median), for ~2 ms more GPU time a frame (12.2 ms from 10.2: ~1,400 queries
+copied a frame). A query the copy found not done, or one whose recording ended without a copy, is read from the pool once
+its submission is done, as before. Elsewhere the pool is read, as before: an iGPU is mostly held back by the GPU, where
+the copies' GPU time would cost frames, and other drivers' pool reads were not measured. `RX_VK_OCC_COPY=1` copies on
+any GPU, `RX_VK_OCC_COPY=0` reads from the pool; a device without coherent host memory and the parallel replay
+(`RX_VK_PARALLEL`) read from the pool.
 
 A CPU read of GPU results waits for the write-back of the submission that writes them (`invalidate`, `vk_replay.cpp`).
 `RX_VK_READBACK_LATE=<rule>[,<rule>...]` names the ranges read without that wait, which then hold the frame before's
@@ -792,7 +803,7 @@ Players send theirs to issue #2034 with **Save my pipeline list** (the menu's De
 `vk_menu.cpp` `share_pipeline_list`; the builders: `nx2/pipeline_share.py`, which the Linux builder imports and the Windows
 one runs with `--json`). It checks the list as `pipeline_states.py --check` does and writes
 `hookshot-pipelines-<date>.zip` to the Downloads folder with exactly two files, the list and `hookshot_pipeline_report.txt`
-(the issue's template filled in from the run or from the game folder's log and `hookshot_options.ini`), then copies the
+(the issue's template filled in from the run or from the game folder's log and the `hookshot_options.ini` that log names), then copies the
 template, shows the folder and opens the issue; never with `HOS_HEADLESS`. The list is zipped as the game wrote it, compute
 records included (the report's `Pipelines` line counts them); `pipeline_states.py --check` and `add` take a sent list only
 when it is exactly a list (`read_sent`). `tests/test_pipeline_share.py` checks the zip,
@@ -883,7 +894,12 @@ route, with a counting renderer (`RX_VK_PGO=gen`): each game's counters, from co
 A new row on the Graphics, Audio, Gameplay or Controls tab needs a line in the README's option table too, in the
 menu's order, with its choices and default: `tests/test_readme_menu_rows.py` fails without it.
 
-`hookshot_options.ini`, in the game folder, holds the Insert menu's rows as `<key>=<number>`: the row's name in lower
+`hookshot_options.ini` is in the user folder the game is given, with the saves, so every build the launcher starts reads the
+same one (`host/options_path.c`: `HOS_OPTIONS_FILE`, else `--user`'s folder, the launcher's `%APPDATA%\Hookshot` on Windows,
+else beside the game, as before: RecompLauncher sets its rows there and updates in place). The host chooses it at the start and
+gives the renderer its path (`MkwVkHost.options_path`; `gpu/vk/vk_paths.h` `options_path`); the log's `options: the settings
+file is <path>` says which. A game folder's file from a build before this is copied there once, when the user folder has none.
+Only `compile_shaders=`, the build's choice, stays in the game folder's file, where `make_game.py` writes it. The file holds the Insert menu's rows as `<key>=<number>`: the row's name in lower
 case with `_` for spaces (`frame_generation=2`, `invert_camera_x=1`), except Output resolution, which is `output_res`.
 `gpu/vk/vk_menu.cpp` writes the whole file at every change (`save`), with `options_version=5`,
 `microphone_device=<name>` when a microphone is chosen by name, and the controls (`pad_<button>` and `key_<button>`:
