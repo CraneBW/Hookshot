@@ -44,8 +44,8 @@ static void AcquireSRWLockShared(SRWLOCK *p) { (void)p; }
 static void ReleaseSRWLockShared(SRWLOCK *p) { (void)p; }
 static int pad_bind[HOS_KEY_N][2];   /* (the ocarina note layer reads it; hos_oc_wait stays 0, so nothing is consumed) */
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
-static uint64_t pad_after_menu, pad_raw_game;   /* (pad_raw_now stays 0 here: no pad input waits after the menu) */
-static uint64_t bound_pad_buttons(uint64_t raw) { (void)raw; CHECK(!"a pad input waited after the menu"); return 0; }
+static uint64_t pad_after_menu, pad_raw_game;   /* (pad_raw_now's bit 0: the pad's B, held) */
+static uint64_t bound_pad_buttons(uint64_t raw) { return raw & 1 ? 1ULL << B_B : 0; }   /* (the inputs not waiting) */
 static LONG oc_consumed_keys[256];
 static uint64_t oc_consumed_pads;
 volatile uint64_t hos_oc_note_bits; volatile int hos_oc_wait; volatile int hos_oc_last_kind; volatile unsigned hos_oc_beat;
@@ -103,7 +103,7 @@ void pads_read(uint64_t *buttons, int32_t stick[4]) {
     /* The physical backend boundary is a spy; actual routing merges its result with the script below. */
     if (controls_case) { *buttons |= physical_buttons; return; }
     pad_merges++;
-    pad_raw_now = !pads_up;   /* (pads_up: the pad let go, nothing held) */
+    pad_raw_now = !pads_up, pad_raw_game = (uint64_t)pad_raw_now;   /* (pads_up: the pad let go, nothing held) */
     if (!pads_up) *buttons |= 1ULL << B_B, stick[0] = -12000, stick[2] = 8000;
 }
 void binds_load(void) {
@@ -386,7 +386,7 @@ int main(int argc, char **argv) {
         packet(0, 0, 0, 0);   /* the pad's B and sticks are the menu's */
         CHECK(pad_merges > 0);   /* (read all the same, so the letting go is seen) */
         insert_open = 0;
-        packet(0, 0, 0, 0);   /* the menu closed, B still held: not yet */
+        packet(0, -12000, 0, 8000);   /* the menu closed, B still held: not yet; the sticks count at once */
         pads_up = 1;
         packet(0, 0, 0, 0);
         pads_up = 0;

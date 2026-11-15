@@ -81,7 +81,7 @@ class FinishOutputTests(unittest.TestCase):
 
     def assert_no_staging_files(self):
         self.assertEqual(sorted(path.name for path in self.out.iterdir() if path.name != make_game.INSTALLED_NOTE),
-                         ["image.bin", "hookshot.exe"])
+                         ["hookshot.exe", "image.bin"])   # (sorted: the game's name before image.bin)
 
     def stopped_output(self):
         output = io.StringIO()

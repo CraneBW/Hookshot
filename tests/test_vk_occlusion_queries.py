@@ -804,7 +804,7 @@ def check_wiring(replay, draw):
     assert "occ_collect();" in block(replay, "Recording& begin_recording(uint64_t value)")
     # RX_VK_OCC_COPY: a recording's queries copied after its end barrier (its draws done), before it is submitted; every
     # recording's end forgets them, so none is copied by a later recording than its own
-    for marker, c in (("void maybe_split(VkCommandBuffer& cmd) {", "cmd"), ("void finish_recording(uint64_t value) {", "r.cmd")):
+    for marker, c in (("void split_part(VkCommandBuffer& cmd) {", "cmd"), ("void finish_recording(uint64_t value) {", "r.cmd")):   # (a part's end: split_part, which maybe_split calls)
         body = block(replay, marker)
         end = body.index('full_barrier(%s, "barrier (recording end)");' % c)
         assert end < body.index("occ_copy_part(%s);" % c) < body.index("submit_recording("), marker

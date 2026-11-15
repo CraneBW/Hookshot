@@ -79,6 +79,8 @@ VkResult vkCreateCommandPool(VkDevice, const VkCommandPoolCreateInfo*, const voi
 VkResult vkAllocateCommandBuffers(VkDevice, const VkCommandBufferAllocateInfo*, VkCommandBuffer* c) { *c = &the_cmd; return VK_SUCCESS; }
 VkResult vkCreateFence(VkDevice, const VkFenceCreateInfo*, const void*, VkFence* f) { *f = &the_fence; return VK_SUCCESS; }
 VkResult vkResetCommandPool(VkDevice, VkCommandPool, uint32_t) { return VK_SUCCESS; }
+void vkDestroyCommandPool(VkDevice, VkCommandPool, const void*) {}   // (readback_begin lets a half-made pool go: not here)
+template <class F> void reap(F&& f) { f(); }   // (the reaper thread's queue: at once here)
 VkResult vkBeginCommandBuffer(VkCommandBuffer, const VkCommandBufferBeginInfo*) { return VK_SUCCESS; }
 void vkCmdPipelineBarrier2(VkCommandBuffer, const VkDependencyInfo*) {}
 VkResult vkEndCommandBuffer(VkCommandBuffer) { return VK_SUCCESS; }

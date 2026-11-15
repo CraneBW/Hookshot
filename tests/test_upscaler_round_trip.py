@@ -126,7 +126,6 @@ std::string gpu_saved_card;
 bool gpu_card_missing = false;
 ::auto_settings::Choice auto_choice{};
 ::auto_settings::Tuning auto_tuning{};
-void logf(const char*, ...) {}
 /* SAVE */
 void restart() {
     opts = Options{};
@@ -150,7 +149,6 @@ void temporal_reset_failure() {}
 void prompts_at_once(const Row&) {}
 /* STOPS */
 void apply_auto();
-void logf(const char*, ...) {}
 /* PRESET */
 /* APPLY_AUTO */
 /* SET_ROW */

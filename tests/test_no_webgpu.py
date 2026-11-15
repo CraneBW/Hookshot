@@ -53,12 +53,16 @@ def main():
     for header in ("rx.h", "rx_nvn.h", "nvn_api.h"):   # (host/display.c, host/nvn_native.c, gpu/vk/vk_api.h)
         check("gpu/render/%s is gone: the host or the Vulkan back end includes it" % header, (ROOT / "gpu" / "render" / header).is_file())
 
-    lock = read("tools.lock")
-    check("tools.lock still has wgpu-native", not re.search(r"^tool wgpu-native ", lock, re.M))
-    spec = importlib.util.spec_from_file_location("tools_under_test", ROOT / "scripts" / "tools.py")
-    tools = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(tools)
-    check("scripts/tools.py still requires wgpu-native", all("wgpu-native" not in need for need in tools.REQUIRED.values()))
+    if (ROOT / "tools.lock").is_file():   # (Hookshot has no tools.lock: its builders carry their tools)
+        lock = read("tools.lock")
+        check("tools.lock still has wgpu-native", not re.search(r"^tool wgpu-native ", lock, re.M))
+    if (ROOT / "scripts" / "tools.py").is_file():
+        spec = importlib.util.spec_from_file_location("tools_under_test", ROOT / "scripts" / "tools.py")
+        tools = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tools)
+        check("scripts/tools.py still requires wgpu-native", all("wgpu-native" not in need for need in tools.REQUIRED.values()))
+    check("the Python builder still points WGPU_NATIVE at a tools folder",
+          "WGPU_NATIVE" not in read("builder", "py", "hookshot_builder", "core.py"))
     check("the builder still points WGPU_NATIVE at a tools folder", "WGPU_NATIVE" not in read("builder", "HookshotBuilder", "Runner.cs"))
     beside = next(line for line in read("nx2", "make_game.py").splitlines() if line.startswith("BESIDE = "))
     check("make_game.py still copies wgpu_native.dll into the game folder", "wgpu_native" not in beside)

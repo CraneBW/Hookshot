@@ -298,6 +298,7 @@ int rx_option(int id, int otherwise) { (void)id; return otherwise; }
 void hos_mods_init(const char *image_path);
 int hos_mods_romfs(const char *rel, char *out, size_t cap);
 const char *hos_romfs_dir;
+const char *hos_options_file(void) { return ""; }   /* (prompts.c reads the settings file: none here) */
 int main(int argc, char **argv) {
     hos_romfs_dir = getenv("TEST_ROMFS");
     hos_mods_init(NULL);

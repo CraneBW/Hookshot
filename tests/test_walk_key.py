@@ -136,7 +136,8 @@ void hos_oot_autoload_input(void) {}   /* (host/oot_autoload.c: Skip title scree
 int hos_control_input(uint64_t *buttons, int32_t stick[4]) { (void)buttons; (void)stick; return 0; }   /* (host/control.c: off) */
 static int game_in_front(void) { return front; }
 static volatile LONG pad_raw_now;
-static int pad_after_menu;   /* (main shares this state with the ocarina note word) */
+static uint64_t pad_after_menu, pad_raw_game;   /* (each pad input the Insert menu had, waiting: none here) */
+static uint64_t bound_pad_buttons(uint64_t raw) { (void)raw; return 0; }
 static void player_used(void) {}
 """
 
@@ -156,8 +157,7 @@ static int mouse_stick(int32_t *x, int32_t *y, int pointing) {
     *x = mouse_right[0], *y = mouse_right[1];
     return 1;
 }
-/* (the Skip title screen row's presses, host/oot_autoload.c: none; Hookshot's Auto run: Link the player's to move) */
-void hos_oot_autoload_input(void) {}
+/* (Hookshot's Auto run: Link the player's to move) */
 int hos_oot_player_free(void) { return 1; }
 """
 

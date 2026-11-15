@@ -77,7 +77,7 @@ def build_env(tools, workers=None, ngx_sdk=None):
         env["HOOKSHOT_NGX_SDK"] = ngx_sdk
     else:
         env.pop("HOOKSHOT_NGX_SDK", None)
-    for name, folder in (("EMSDK", "emsdk"), ("RX_CPM", "cpm"), ("WGPU_NATIVE", "wgpu-native")):
+    for name, folder in (("EMSDK", "emsdk"), ("RX_CPM", "cpm")):   # (no WebGPU renderer any more: no wgpu-native)
         p = os.path.join(tools.root, folder)
         if os.path.isdir(p):
             env[name] = p

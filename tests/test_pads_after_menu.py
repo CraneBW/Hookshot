@@ -131,8 +131,8 @@ def main():
     a = p.parse_args()
     hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
     api = (ROOT / "gpu" / "vk" / "vk_api.h").read_text(encoding="utf-8")
-    read = block(hid, "static void read_input(")
-    pads = block(read, "{   /* (hookshot) while the Insert menu is open the pads are its own")
+    # (pads_merge: read_input's pads, in front and behind other windows alike, each input the menu had waiting until let go)
+    merge = block(hid, "static int pads_merge(")
     state = hid[hid.index("static volatile LONG pad_raw_now;"):hid.index("uint32_t hos_pad_raw(")]
     code = "\n".join((
         block(api, "enum { HOS_SW_A") + ";", block(api, "enum { HOS_PAD_SOUTH") + ";",
@@ -143,7 +143,7 @@ def main():
         block(hid, "void hos_filter_stick("),
         re.search(r"^static volatile int xinput_pads_now;.*$", hid, re.M).group(0),
         block(hid, "static void pads_read("),
-        "static void game_pads(uint64_t *buttons, int32_t stick[4]) " + pads,
+        merge, "static void game_pads(uint64_t *buttons, int32_t stick[4]) { (void)pads_merge(buttons, stick); }",
         MAIN))
     with tempfile.TemporaryDirectory(prefix="hookshot-pads-after-menu-") as tmp:
         src = Path(tmp) / "t.c"

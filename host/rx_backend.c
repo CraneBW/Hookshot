@@ -394,6 +394,7 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     if (!m) {
 #ifdef _WIN32
         const DWORD err = GetLastError();
+        hos_log("rx: %s did not load (%lu): nothing is drawn", path, err);
         /* (hookshot) Two of a player's logs: hookshot_vk.dll "did not load (126)" and no SDL either, the game started
            from a folder without them (the libraries are in bin\ since the launcher), and a window that stayed black for good
            with nothing on screen to say why. Said in plain words, and in a box (not while shaders are prepared) */

@@ -2782,7 +2782,13 @@ def main(a=None):
     # an update with nothing changed links the same 460 MB exe again, and its copy and swap were 4-8 s of the finish on the
     # lab, more where an antivirus reads each new exe. A file that differs is staged and swapped as before)
     installed = read_installed(out)
-    staged = [(src, dst) for src, dst in staged if not installed_already(src, dst, out, installed)]
+    # (a loop, not a comprehension: tests/test_linux_update.py runs this part of main with out among exec's locals, which a
+    # comprehension's own scope does not see before Python 3.12)
+    fresh = []
+    for src, dst in staged:
+        if not installed_already(src, dst, out, installed):
+            fresh.append((src, dst))
+    staged = fresh
     for src, dst in staged:
         try:
             if os.path.exists(dst + ".new"):
