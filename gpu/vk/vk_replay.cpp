@@ -5381,8 +5381,16 @@ static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk) {
         invalidate_lost_surface(res);
         return false;
     }
+    {   // (every 600 presents: how they ended; a window shot is taken before the present, so a black window shows only here)
+        static int64_t n_ok, n_subopt, n_old, n_other;
+        (res == VK_SUCCESS ? n_ok : res == VK_SUBOPTIMAL_KHR ? n_subopt : res == VK_ERROR_OUT_OF_DATE_KHR ? n_old : n_other)++;
+        if ((n_ok + n_subopt + n_old + n_other) % 600 == 0)
+            logf("vk: presents%s: %lld shown, %lld suboptimal, %lld out of date, %lld failed", dev.present_queue ? " (own queue)" : "",
+                 (long long)n_ok, (long long)n_subopt, (long long)n_old, (long long)n_other);
+    }
     present_finish(res, false);
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
+        logf("vk: present result %d: the swapchain is made again", (int)res);
         if (!qk.owns_lock()) qk.lock();
         create_swapchain(dev.swap_extent.width, dev.swap_extent.height);
     }
