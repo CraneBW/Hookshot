@@ -31,6 +31,7 @@
 
 #include "vk_paths.h"
 #include "vk_menu.h"
+#include "intel_compiles.h"
 #include "vk_menu_hit.h"
 #include "vk_fps.h"    // (the FPS counter's levels and numbers)
 #include "vk_draw.h"   // (pipeline_cache_save: Restart now keeps what was built)
@@ -1111,16 +1112,18 @@ const char* hn_astc_rgba8(int, int variant) {
     return variant <= 0 && getenv("RX_VK_ASTC_RGBA8") ? "Set by RX_VK_ASTC_RGBA8 (hookshot_env.txt or the environment): remove that line to choose here."
                                        : nullptr;
 }
-const char* tx_intel_compiles(int v) { return v ? "Side by side" : "One at a time"; }
+const char* tx_intel_compiles(int v) { return v == 1 ? "Side by side" : v == 2 ? "One at a time" : "Auto"; }
 /// (the Intel shader compiles row's line: RX_VK_NO_INTEL_SERIAL holds it, as RX_VK_ASTC_RGBA8 the ASTC row)
 const char* hn_intel_compiles(int v, int variant) {
     if (variant <= 0 && getenv("RX_VK_NO_INTEL_SERIAL"))
         return "Set by RX_VK_NO_INTEL_SERIAL (hookshot_env.txt or the environment): remove that line to choose here.";
-    static const char* const t[] = {"The safe choice, and the best on a CPU with 4 cores or fewer: a shader Intel's compiler "
-                                    "faults on is left out instead of closing the game.",
+    static const char* const t[] = {"Side by side on the Arc B-series (driver 101.9154 or newer), where it was measured; one at "
+                                    "a time on other Intel graphics.",
                                     "Shaders are built faster on a CPU with many cores, but Intel's driver can crash the game "
-                                    "while it builds them."};
-    return hint_in(t, 2, 0, v, variant);
+                                    "while it builds them.",
+                                    "The safe choice, and the best on a CPU with 4 cores or fewer: a shader Intel's compiler "
+                                    "faults on is left out instead of closing the game."};
+    return hint_in(t, 3, 0, v, variant);
 }
 MENU_HINTS(hn_robust, 0, "On, on every card.", "Can be faster on some NVIDIA cards.", "Always on.")
 MENU_HINTS(hn_fps, 0, nullptr, "The frame rate. With frame generation on, the game's own rate too.",
@@ -1486,7 +1489,7 @@ Row rows[] = {
      "Big ASTC textures kept as decoded RGBA8 instead of re-encoded to BC3: a workaround for texture artifacts seen on some AMD "
      "cards (issues 57 and 1006). Takes far more video memory. Applies after restart.", hn_astc_rgba8, true, true},
     // (hookshot, Intel graphics on Windows only: row_shown) IntelDriverGate, vk_internal.h
-    {TAB_DEBUG, "Intel shader compiles", &opts.intel_compiles, 0, 1, 1, tx_intel_compiles,
+    {TAB_DEBUG, "Intel shader compiles", &opts.intel_compiles, 0, 2, 1, tx_intel_compiles,
      "Intel graphics: how many shaders Intel's compiler is given at once. Applies after a restart.", hn_intel_compiles, true, true},
     // (hookshot, Intel graphics on Windows only: row_shown) vk_draw.cpp compute_optimize
     {TAB_DEBUG, "Intel quick compute builds", &opts.intel_quick, 0, 1, 1, tx_onoff,
@@ -2172,7 +2175,7 @@ void weak_laptop_apply() {
     opts.upscale = 0, opts.sharpness = 0;   // (the plain window scale: as Auto's lightest tier, RX_VK_LOW_SPEC)
     for (int* v : {&opts.framegen, &opts.intel_compiles, &opts.intel_quick}) env_release(v);
     opts.framegen = 0;
-    opts.intel_compiles = 0, opts.intel_quick = 1;
+    opts.intel_compiles = 2, opts.intel_quick = 1;   // (2: one at a time, whatever the row's Auto is on this GPU)
     opts.preset = 0;   // (Custom, Minimum's mip trimming kept: opts.budget)
     samplers_changed();   // (the upscalers' texture LOD bias follows the 3D's share)
     laptop_applied = true;
@@ -4589,7 +4592,7 @@ void menu_init() {
     if (const char* e = getenv("HOS_SKIP_OPENING")) env_override(&opts.skip_opening, !env_value_off(e));
     // (vk_texture.cpp reads RX_VK_ASTC_RGBA8 over the row: the row shows it, fixed (row_fixed), and the ini keeps the player's)
     if (const char* e = getenv("RX_VK_ASTC_RGBA8")) env_override(&opts.astc_rgba8, !env_value_off(e));
-    if (const char* e = getenv("RX_VK_NO_INTEL_SERIAL")) env_override(&opts.intel_compiles, !env_value_off(e));
+    if (const char* e = getenv("RX_VK_NO_INTEL_SERIAL")) env_override(&opts.intel_compiles, env_value_off(e) ? 2 : 1);
     if (const char* e = getenv("RX_VK_COMPUTE_QUICK_FIRST")) env_override(&opts.intel_quick, !env_value_off(e));
     if (const char* e = getenv("HOS_OUTPUT_RES")) {
         player_custom_output = custom_output;   // (parse_output replaces the player's own size with the environment's)
@@ -4689,7 +4692,9 @@ bool menu_threaded_rendering() {
     }();
     return on;
 }
-bool intel_compiles_side_by_side() { return opts.intel_compiles != 0; }   // (RX_VK_NO_INTEL_SERIAL in it: menu_init)
+bool intel_compiles_side_by_side() {   // (RX_VK_NO_INTEL_SERIAL in the row: menu_init. Asked once the device is made)
+    return intel_side_by_side_chosen(opts.intel_compiles, dev.props.deviceID, dev.props.driverVersion);
+}
 // (Intel's Windows driver only, where the row shows: Mesa's ANV ignores DISABLE_OPTIMIZATION, same instructions, spills and
 // compile time on an Iris Xe, its slow part register allocation at SIMD32)
 bool intel_quick_compute() { return opts.intel_quick != 0 && intel_compiler_row(); }   // (RX_VK_COMPUTE_QUICK_FIRST in it: menu_init)

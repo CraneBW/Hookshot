@@ -101,7 +101,7 @@ def main():
                       ("opts.resolution = ur::snap_render(upscaler(), 6);", "Render resolution 33%"),
                       ("opts.upscale = 0, opts.sharpness = 0;", "the plain window scale"),
                       ("opts.framegen = 0;", "frame generation off"),
-                      ("opts.intel_compiles = 0, opts.intel_quick = 1;", "Intel's shaders one at a time, quick compute builds"),
+                      ("opts.intel_compiles = 2, opts.intel_quick = 1;", "Intel's shaders one at a time, quick compute builds"),
                       ("opts.preset = 0;", "the Quality preset left on Minimum"),
                       ("restart_state.note(now);", "the restart asked for"),
                       ("save();", "saved")):
