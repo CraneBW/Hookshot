@@ -231,7 +231,10 @@ python -I -B tests/run_all.py
 
 It runs every `tests/test_*.py` and `nx2/test_*.py` in its own process, the C++ unit tests under `gpu/vk/tests` and a
 byte-compile of every tracked Python file, keeps going after a failure, and ends with a table and every failure's
-output. Name part of a path to run only matching checks (`tests/run_all.py ub_`). A check whose tool is missing (a
+output. Name part of a path to run only matching checks (`tests/run_all.py ub_`). While you work, `--changed [BASE]`
+runs only the checks that read a file your branch changed since it left `main` (committed, uncommitted or untracked:
+by path, by name or as a module they import; every check when the runner or a shared test file changed). Before a pull
+request the whole run is still the one that counts. A check whose tool is missing (a
 compiler, `spirv-val`, the SPIR-V or Vulkan headers, `zstandard`) is skipped and says so; `--strict` fails it instead.
 Checks that can't run everywhere say so in their own file (`RUN_ALL_SKIP`); `--no-skip` runs them anyway.
 
