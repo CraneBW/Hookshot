@@ -90,6 +90,7 @@ static DWORD GetModuleFileNameA(void *m, char *b, DWORD n) { (void)m; return (DW
 #define hos_game_path_a(b,n) GetModuleFileNameA(0,b,n)
 static int held[256];
 static int key(int vk) { return held[vk & 255]; }
+static int kpos(int us) { return key(us); }   /* (nn_hid.c: a key by its place; here the US key itself) */
 static int oc_menu, oc_front = 1, oc_background;   /* (oc_pad_word shares read_input's gates: the Insert menu, the pads held
                                                       after it, the window, and the pads behind it: Controller in background) */
 int rx_option(int id, int otherwise) { return id == 1 ? oc_menu : id == 4 ? oc_background : otherwise; }

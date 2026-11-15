@@ -1093,7 +1093,6 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
     if (exclusive < 0) exclusive = env_on("HOS_INPUT_EXCLUSIVE");
     if (exclusive && npresses > 0 && script_elapsed_ms(hos_now_ns()) < script_end_ms + 5000)
         return;
-    }
     /* (hookshot, issue 389) A scripted press (HOS_INPUT_SCRIPT, HOS_INPUT_LIVE) is the test's own, not the
        player's: it counts with the game's window behind another one, so a test run can drive the game on one
        monitor while the player works in the front window. HOS_INPUT_BACKGROUND still decides the pads. */

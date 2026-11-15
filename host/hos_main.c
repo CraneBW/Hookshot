@@ -492,8 +492,6 @@ static void load_hookshot_env(void) {
         snprintf(hookshot_env_note, sizeof hookshot_env_note, "env: no hookshot_env.txt beside the game (none read)");
         return;
     }
-    FILE *f = fopen(path, "r");
-    if (!f) return;
     /* The environment the game was started with wins over the file: a switch set for one launch (HOS_FULLSCREEN=0 in a
        shell, a script's RX_VK_PACE=1) beats the same name saved in the file. The file's own later lines still replace its
        earlier ones: the names it set are kept here (for the whole run: a second read sets them again), so they are not taken

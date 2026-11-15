@@ -821,7 +821,6 @@ uint32_t stage_handle_eval(const NvnState& s, const Stage& st, uint32_t program,
         .value_or(0U);
 }
 } // namespace
-} // namespace
 
 void stage_handles(const NvnState& s, const Stage& st, uint32_t program, uint32_t count, uint32_t* out) {
     if (program >= st.info.handle_programs.size()) {

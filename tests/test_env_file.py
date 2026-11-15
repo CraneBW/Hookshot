@@ -23,7 +23,8 @@ def main():
     p.add_argument("--cc", default="gcc")
     a = p.parse_args()
     main_c = (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
-    fn = block(main_c, "static int env_line_allowed(") + "\n" + block(main_c, "static void load_hookshot_env(void) {")
+    fn = "static char hookshot_env_note[1024];   /* (hos_main.c: the log line of what the file gave) */\n" + \
+         block(main_c, "static int env_line_allowed(") + "\n" + block(main_c, "static void load_hookshot_env(void) {")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)

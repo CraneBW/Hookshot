@@ -100,7 +100,7 @@ static void region_count(int64_t *what, int64_t by) { __atomic_fetch_add(what, b
 static void region_note(void) {
     static int on = -1;
     static int64_t last;
-    if (on < 0) on = getenv("HOS_REGION_LOG") != NULL;
+    if (on < 0) on = env_on("HOS_REGION_LOG");
     if (!on) return;
     int64_t before = __atomic_load_n(&last, __ATOMIC_RELAXED);
     const int64_t now = hos_now_ns();
@@ -348,7 +348,7 @@ HLE(_ZN2nn2os21AllocateAddressRegionEPmm) {
        HOS_REGION_COMMIT=1: committed whole, as before */
     static int whole = -1;
     if (whole < 0) {
-        whole = getenv("HOS_REGION_COMMIT") != NULL;
+        whole = env_on("HOS_REGION_COMMIT");
         hos_log("mem: the game's address regions are committed %s", whole ? "whole (HOS_REGION_COMMIT)" : "as the game maps their pages");
     }
     G64(ARG(0)) = region_alloc(ARG(1), 0x10000, whole);

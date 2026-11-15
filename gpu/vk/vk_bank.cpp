@@ -7,9 +7,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
-#include <deque>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #define NOMINMAX
@@ -17,7 +15,6 @@
 #include <windows.h>
 
 #include "vk_internal.h"
-#include "vk_texture.h"
 #include "vk_state.h"
 #ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "hookshot_env.h"
@@ -39,14 +36,9 @@ struct SampReg {
     bool ok = false;
 };
 std::mutex reg_mu;
-std::unordered_map<uint64_t, uint64_t> first_reg_frame;   // (hookshot, diagnostic: texture_first_registered below)
 std::vector<TexReg> tex_regs;
 std::vector<SampReg> samp_regs;
 std::unordered_map<uint64_t, std::vector<int>> regs_by_serial;
-// (hookshot) textures made ahead of their first draw (vk_texture.cpp texture_prefetch_some): each texture object the game
-// registers for the first time (a new serial) is queued; its image is made a few at a time between frames
-std::deque<nvn_tex> prefetch_q;
-std::unordered_set<uint64_t> prefetch_seen;
 std::atomic<uint64_t> reg_gen{1};   // (bumped by every texture registration: resolved handles go stale)
 std::atomic<uint64_t> samp_gen{1};  // (bumped when a sampler registration's contents change: sampler_for's cache, vk_draw.cpp)
 // (and a version a slot: caches of what a slot resolves to check theirs, not every registration's)
@@ -188,38 +180,8 @@ void register_texture_copy(int id, const nvn_tex& tex, const nvn_view* v) {
     r.ok = true;
     r.released = false;
     regs_by_serial[t->serial].push_back(id);
-    static const bool prefetch = getenv("RX_VK_PREFETCH") && atoi(getenv("RX_VK_PREFETCH")) > 0;   // (off by default: vk_texture.cpp)
-    if (prefetch) {
-        if (prefetch_seen.size() > (1u << 20)) prefetch_seen.clear();
-        if (prefetch_seen.insert(t->serial).second && prefetch_q.size() < 16384) prefetch_q.push_back(*t);
-    }
-    if (first_reg_frame.size() < (1u << 20)) first_reg_frame.try_emplace(t->gpu, texture_frame_no());
     slot_versions[id].fetch_add(1, std::memory_order_acq_rel);
     reg_gen++;
-}
-// (hookshot, diagnostic) the frame each texture storage was first registered in (by GPU address): how long before its
-// first draw the game made a texture known, i.e. whether its image could be made ahead (vk_texture.cpp logs it at bursts)
-/// (vk_texture.cpp) the next texture queued for making ahead that the game still has registered, false when none is left
-bool texture_prefetch_pop(nvn_tex* out) {
-    std::lock_guard lk(reg_mu);
-    while (!prefetch_q.empty()) {
-        const nvn_tex t = prefetch_q.front();
-        prefetch_q.pop_front();
-        auto it = regs_by_serial.find(t.serial);
-        if (it == regs_by_serial.end()) continue;
-        bool live = false;
-        for (int id : it->second)
-            if ((size_t)id < tex_regs.size() && tex_regs[id].ok && !tex_regs[id].released && tex_regs[id].t.serial == t.serial) live = true;
-        if (!live) continue;
-        *out = t;
-        return true;
-    }
-    return false;
-}
-uint64_t texture_first_registered(uint64_t gpu) {
-    std::lock_guard lk(reg_mu);
-    auto it = first_reg_frame.find(gpu);
-    return it == first_reg_frame.end() ? ~0ull : it->second;
 }
 uint32_t texture_slot_version(int id) {
     return id >= 0 && id < kSlotVersions ? slot_versions[id].load(std::memory_order_acquire) : 0;

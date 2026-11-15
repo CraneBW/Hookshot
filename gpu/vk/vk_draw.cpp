@@ -7465,10 +7465,9 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             cp = program_for(s, d.mesh ? ProgramKind::Mesh : ProgramKind::Graphics, types);
         }
         if (!cp) SKIP_HERE();
-        if (!cp->ready.load(std::memory_order_acquire)) {
-            if (may_skip) return void(st_pending_skips++);
+        if (!cp->ready.load(std::memory_order_acquire)) {   // (waited for as the first pick's: Hookshot's rules above)
+            if (legacy_translation_skip && targets_persistent(at)) return use.skipped(), void(st_pending_skips++);
             wait_for(cp->ready);
-            if (left_out) return void(st_pending_skips++);
         }
     }
     if (exposure_log_on() && cp) exposure_note(s, *cp);

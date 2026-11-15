@@ -93,6 +93,7 @@ static DWORD GetModuleFileNameA(void *m, char *b, DWORD n) { (void)m; return (DW
 #define hos_game_path_a(b,n) GetModuleFileNameA(0,b,n)
 static int held[256];
 static int key(int vk) { return held[vk & 255]; }
+static int kpos(int us) { return key(us); }   /* (nn_hid.c: a key by its place; here the US key itself) */
 """
 
 MAIN = r"""

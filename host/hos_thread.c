@@ -1793,7 +1793,7 @@ static void vc_grant(int c) {
 static struct { char name[48]; int64_t ns; int n; } vc_by[96];
 static int vc_waits_on(void) {
     static int on = -1;
-    if (on < 0) on = getenv("HOS_VCORE_WAITS") != NULL;
+    if (on < 0) on = env_on("HOS_VCORE_WAITS");
     return on;
 }
 static void vc_note_wait(const HosThread *t, int64_t ns) {

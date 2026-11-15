@@ -379,7 +379,7 @@ static void key_messages(UINT msg, WPARAM wp, LPARAM lp) {
    whose keyboard state answers nothing, from the window's messages alone (a test) */
 int hos_key_down(int vk) {
     static int only = -1;
-    if (only < 0) only = getenv("HOS_KEY_MESSAGES") != NULL;
+    if (only < 0) only = env_on("HOS_KEY_MESSAGES");
     if (!only && (GetAsyncKeyState(vk) & 0x8000)) return 1;
     return (only || key_state_deaf()) && key_msg[vk & 255];
 }
@@ -597,7 +597,7 @@ static DWORD WINAPI display_main(void *p) {
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hIcon = LoadIconA(wc.hInstance, MAKEINTRESOURCEA(1));   /* (nx2/make_icon.py; none in a build without the picture) */
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    wc.lpszClassName = "ProjectHookshot";
+    wc.lpszClassName = "Hookshot";
     RegisterClassA(&wc);
     dpi_aware_thread();
     extern float hos_aspect_ratio;
