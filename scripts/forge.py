@@ -2,7 +2,7 @@
 Standard library only (Windows and Linux), so any agent can use it; people may prefer fj, the Forgejo CLI
 (docs/forge.md has both).
 
-    python -I scripts/forge.py login [--no-browser] [--again]      sign in, set up git
+    python -I scripts/forge.py login [--no-browser] [--again] [--token]   sign in, set up git
     python -I scripts/forge.py fork                                 set up pushing: your fork and its remote
     python -I scripts/forge.py whoami
     python -I scripts/forge.py logout
@@ -29,6 +29,10 @@ login is the team's one sign-in (magicbean_login.py: Sign in with Discord once, 
 it is skipped when a git sign-in is saved already (--again redoes it). Then it:
   - makes this script git's credential helper for https://git.magicbean.dev (global git config, that host only), so
     git push, git fetch and jj git push sign in by themselves, the token renewed when it runs out;
+  - with --token, it takes an access token of your own instead of the browser (made on git.magicbean.dev: Settings,
+    Applications, with write:repository, write:issue and read:user; typed at the prompt or piped in, never an
+    argument). Use it on more than one device: Forgejo keeps one browser sign-in per account, so renewing it on one
+    device signs the others out; a token per device never runs out and is never renewed;
   - adds the remote "forge" for MagicBeanDev/Hookshot to the repository you run it in, unless one already points there
     (fetch from it; its main takes reviewed pull requests only, nobody pushes to it).
 That is all reading, testing and test requests need. To send changes, fork sets up pushing: it makes your fork,
@@ -65,6 +69,7 @@ missing file and an attach: with no file of its name are refused before anything
 there, with no retry: the error names the comment, what went up and what didn't, and the comment shows those that did.
 """
 import argparse
+import getpass
 import json
 import os
 import re
@@ -232,9 +237,22 @@ def cmd_login(args):
     why = auth.cannot_save()
     if why:
         raise ForgeError("cannot sign in here: %s (run it outside the sandbox)" % why)
-    state = None if args.again else auth.forge_session()
+    state = None if args.again or args.token else auth.forge_session()
     if state:
         print("Signed in to %s as %s (--again to sign in anew)." % (HOST, state["login"]))
+    elif args.token:
+        print("Access token (git.magicbean.dev: Settings, Applications; write:repository, write:issue, read:user):",
+              file=sys.stderr)
+        try:
+            state = auth.token_sign_in(getpass.getpass("") if sys.stdin.isatty() else sys.stdin.readline())
+        except auth.LoginError as e:
+            raise ForgeError(str(e))
+        import team_chat   # (the chat's session from the token, as the browser sign-in does; a failure keeps git's)
+        try:
+            chat = auth.matrix_from_forge(chat=team_chat.this_module())
+        except (auth.LoginError, team_chat.ChatError) as e:
+            chat = "no (%s)" % e
+        print("Signed in as %s with your token (the team chat too: %s)." % (state["login"], chat))
     else:
         try:
             done = auth.sign_in(no_browser=args.no_browser)
@@ -935,6 +953,8 @@ def main(argv=None):
     s.add_argument("--upstream", default="forge", help="remote name for MagicBeanDev/Hookshot (default forge)")
     s.add_argument("--no-browser", action="store_true", help="print the link only")
     s.add_argument("--again", action="store_true", help="sign in anew even when signed in")
+    s.add_argument("--token", action="store_true",
+                   help="sign in with an access token of your own (prompted, or piped in) instead of the browser")
     s = sub.add_parser("fork", help="set up pushing: your fork of Hookshot and its remote")
     s.add_argument("--remote", default="forge-fork", help="remote name for your fork (default forge-fork)")
     sub.add_parser("whoami")

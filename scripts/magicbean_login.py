@@ -153,11 +153,11 @@ def cannot_save():
 
 def forge_session():
     """The saved git sign-in with an access token good for at least a minute (renewed with the refresh token, which
-    Forgejo replaces each time), or None."""
+    Forgejo replaces each time), or None. A token of your own (token_sign_in) never runs out and is never renewed."""
     state = forge_load()
     if not state:
         return None
-    if state["expires_at"] - 60 >= time.time():
+    if state.get("expires_at") is None or state["expires_at"] - 60 >= time.time():
         return state
     # (renewed only where the new token can be saved: a renewal Forgejo answers but this can't save is lost, and with
     # it, on a server that takes each refresh token once, the sign-in)
@@ -268,6 +268,20 @@ def browser_trip(no_browser=False, out=print):
     state = forge_tokens({"grant_type": "authorization_code", "code": reply["code"], "code_verifier": verifier,
                           "redirect_uri": redirect})
     state["login"] = forge_request("GET", FORGE + "/api/v1/user", token=state["access_token"])["login"]
+    write_private(forge_path(), state)
+    return state
+
+
+def token_sign_in(token):
+    """An access token of your own, made on git.magicbean.dev (Settings, Applications), instead of the browser trip.
+    Forgejo keeps one browser sign-in per account: renewing it on one device makes every other device's refresh token
+    stale ("token was already used"), so each is signed out within the hour. A token per device never runs out and
+    isn't renewed, so no device signs another out. Checked, saved; returns the saved state."""
+    token = token.strip()
+    if not token:
+        raise LoginError("no token given")
+    login = forge_request("GET", FORGE + "/api/v1/user", token=token)["login"]
+    state = {"access_token": token, "refresh_token": None, "expires_at": None, "login": login}
     write_private(forge_path(), state)
     return state
 

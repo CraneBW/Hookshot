@@ -25,6 +25,12 @@ It prints a link and opens it: click **Sign in with Discord** and approve. Then 
 The sign-in is saved in your config folder (Linux `~/.config/hookshot/`, Windows `%APPDATA%\Hookshot\`), readable by
 you only, never in the repository. `python -I scripts/forge.py whoami` shows who is signed in, and `logout` undoes it.
 
+**More than one device?** Forgejo keeps one browser sign-in per account, so renewing it on one device signs the
+others out within the hour ("token was already used"). Make an access token per device instead: on git.magicbean.dev,
+Settings, Applications, Generate new token, with `write:repository`, `write:issue` and `read:user`. Then run
+`python -I scripts/forge.py login --token` and paste it at the prompt. It never runs out and is never renewed; delete it
+there to sign that device out.
+
 ## Set up pushing
 
 Reading, building and testing need only the sign-in. When you have something to send:
@@ -161,6 +167,7 @@ Hookshot.
 
 ## If something goes wrong
 
-- `not signed in`, or git asks for a password: run `python -I scripts/forge.py login --again`.
+- `not signed in`, or git asks for a password: run `python -I scripts/forge.py login --again`. If it happens again
+  after signing in on another device, use `login --token` (Set up once).
 - `no branch ... on <you>/Hookshot`: push the branch to `forge-fork` first.
 - A push to `forge` is refused: that is Hookshot itself. Push to `forge-fork` and open a pull request.
