@@ -332,7 +332,9 @@ int run(const std::string& name) {
             // prepare record is not written as done)
             CHECK(!pcache_saved_now() && cache_files() == before);
         } else {
-            CHECK(cache_reads == 17 && merges == 16);
+            // (Hookshot merges each of the 16 play files twice, into the cache and into the copy that is written back
+            // compacted (vk_draw.cpp pcache_init's `together`), and the session's cache once more at the save with play on)
+            CHECK(cache_reads == 17 && merges == (play_off ? 32 : 33));
             CHECK(cache_data_writes == (play_off ? 1 : 2) && cache_publications == (play_off ? 1 : 2));
             CHECK(play_seq == (play_off ? 16u : 17u));
             CHECK((play_cache.load() != nullptr) == !play_off);
