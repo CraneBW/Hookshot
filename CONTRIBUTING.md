@@ -62,6 +62,14 @@ Five minutes, then a first build.
    Hookshot), the team chat and [test requests](docs/test-requests.md). The first time creates your account.
    [Tooling's docs/forge.md](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/docs/forge.md) has the details and the other commands.
 
+   **Using Claude Code?** Install the team's plugin once per PC, for the skills (`/magicbean:team-updates`,
+   `/magicbean:release`, `/magicbean:batch-review`) in every MagicBeanDev repository:
+
+   ```
+   /plugin marketplace add https://git.magicbean.dev/MagicBeanDev/Tooling.git
+   /plugin install magicbean@magicbean
+   ```
+
 3. **Check the game-free tests run** (no game needed):
 
    ```

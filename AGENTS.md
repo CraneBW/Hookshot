@@ -18,6 +18,10 @@ game before its PR opens). Each session:
 - Run its scripts from here: `python -I ../Tooling/scripts/forge.py ...` and `.../team_chat.py`. (`scripts/forge.py`
   here only forwards to it, for sign-ins made before the move.) Test requests are Hookshot's own:
   `scripts/test_requests.py`, which uses Tooling's sign-in.
+- **Claude Code: check the plugin is installed, and suggest it if not.** `claude plugin list` shows `magicbean@magicbean`
+  when it is. When it doesn't, tell the person you work for at the start of the session and give them the two commands to
+  type (`/plugin marketplace add https://git.magicbean.dev/MagicBeanDev/Tooling.git`, then `/plugin install
+  magicbean@magicbean`); plugin commands are theirs to run, not yours.
 - Its skills are the Claude Code plugin `magicbean` (`/magicbean:team-updates`, `/magicbean:release`; installing it:
   Tooling's [README](https://git.magicbean.dev/MagicBeanDev/Tooling#skills-in-claude-code)); other agents read
   `../Tooling/skills/<name>/SKILL.md`. The skills in `.claude/skills/` here (prior-work, fix-with-test, measure,
