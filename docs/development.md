@@ -815,7 +815,11 @@ cd squashfs-root/usr/share/hookshot
 `AppRun --cli` installs the build tools first, then runs `make_game.py`. To read the log:
 
 - **Build tools:** from the start to the `@@stage read` line.
-- **Read, lift, compile and finish:** the `where the time went:` table that ends the build.
+- **Read, lift, compile and finish:** the `where the time went:` table that ends the build. The finish has its parts
+  under it (copying the new files in, the shader list, the button prompts, the clean-up); `build_times.json` in the work
+  folder keeps them with each build. A file the last build copied into the game folder, still as it left it and with the
+  same bytes as the new one (the same exe linked again by an update with nothing changed), is not copied again: the
+  folder's `.hookshot_installed.json` has each file's hash and stat.
 - **Shader preparation:** from `@@stage shaders` to `@@done`. Its `prepared <n> shader programs ... in <s> s` line
   gives the programs' share.
 
