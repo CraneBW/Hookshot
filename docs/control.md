@@ -49,7 +49,8 @@ it. The default waits until the bridge answers, then prints the socket's path. S
     RID of 1000 or more, an account this PC can look up, and a user, not a group. Everyone, Authenticated Users,
     Users, Administrators and other well-known SIDs (an SDDL alias like `WD` too) are refused. A refused value is
     logged (`control: HOS_CONTROL_PEER_SID refused: ...`), and the pipe stays the current user's alone. Unset, nothing
-    changes.
+    changes. It is taken from the environment only: `hookshot_env.txt`, a file players pass around, can't set it (the
+    line is left out and logged), so a shared file can't let another user of the PC into the pipe.
 
   Linux has neither addition: a sandbox there (the farm's bwrap) runs the game as the same user, which
   `SO_PEERCRED` already lets in. `FILE_FLAG_FIRST_PIPE_INSTANCE` keeps another process from owning the name first.
