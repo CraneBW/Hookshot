@@ -17,6 +17,9 @@ gamefile/
 bench-runs/
 *.nsz
 *.xcz
+# (saves: only the scrubbed ones in assets/saves, CONTRIBUTING.md)
+*.sav
+!/assets/saves/**/*.sav
 
 # ---- build output and caches ----
 build/
