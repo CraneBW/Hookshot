@@ -5490,7 +5490,16 @@ bool intel_compiles_side_by_side() {   // (RX_VK_NO_INTEL_SERIAL in the row: men
 bool intel_quick_compute() { return opts.intel_quick != 0 && intel_compiler_row(); }   // (RX_VK_COMPUTE_QUICK_FIRST in it: menu_init)
 bool resolution_auto() { return opts.resolution == 0; }
 int resolution_scale() {
-    const float s = upscaler_rows::percent(ur::snap_render(upscaler(), opts.resolution)) / 100.0f;
+    const int drawn = ur::snap_render(upscaler(), opts.resolution);
+    {   // (said when it changes: the choice kept and what the Upscaler shown draws at, e.g. 58% kept, 50% drawn by the game's own)
+        static int said = -1;
+        if (said != drawn * 16 + opts.resolution) {
+            said = drawn * 16 + opts.resolution;
+            logf("vk: Render resolution: %d%% chosen, drawn at %d%% with Upscaler %d", upscaler_rows::percent(opts.resolution),
+                 upscaler_rows::percent(drawn), upscaler());
+        }
+    }
+    const float s = upscaler_rows::percent(drawn) / 100.0f;
     return s > 0 ? (int)(twelfths(s) * 10000.0f / 12.0f + 0.5f) : 0;   // (the twelfth game_size labels)
 }
 
