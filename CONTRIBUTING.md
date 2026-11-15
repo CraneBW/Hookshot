@@ -278,6 +278,9 @@ for scripted input, screenshots, frame dumps and profiles are in the development
 
 - Match the file you're editing: there is no formatter, so follow the indentation, comments and naming around you. Don't
   reformat unrelated code in the same change.
+- A function that keeps a rule written in the docs says where, in a comment just above it: `// doc: docs/<file>.md#<heading
+  anchor>` (`# doc:` in Python), with the rule's number or a few words after it. `tests/test_doc_anchors.py` fails on an
+  anchor whose file or heading is gone, so a renamed heading is fixed in the same change.
 - Keep game-specific code in new files where possible. `nx2/`, `host/` and `gpu/` stay close to mkw-recomp so upstream
   fixes apply as a patch; each sync names its mkw-recomp base commit in the commit message.
 - Don't modify `third_party/`: its parts are upstream copies with their notices in `PROVENANCE.md` (a64-kit's note lists
