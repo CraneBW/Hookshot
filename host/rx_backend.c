@@ -292,10 +292,9 @@ static int host_take_text(int focus, uint32_t *out, int max) {
     return n;
 }
 
+
 /* (hookshot) the game's freed address space inside [lo, hi), decommitted (hos_mem.c): the back end's ranges no import holds */
 uint64_t hos_region_release_gaps(uint64_t lo, uint64_t hi);
-static uint64_t host_region_release_gaps(uint64_t lo, uint64_t hi) { return hos_region_release_gaps(lo, hi); }
-
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -306,7 +305,7 @@ static const MkwVkHost vk_host = {
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
     hos_wide_cover,
     host_take_text,
-    host_region_release_gaps,
+    hos_region_release_gaps,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
