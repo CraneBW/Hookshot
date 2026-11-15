@@ -80,7 +80,8 @@ problem with a log outranks an NVIDIA one of the same severity.
    a claim out loud when you stop.
 3. **Fix.** A branch from current `main`, one topic. Find the cause before the fix: a log, a trace, a measurement.
 4. **Test.**
-   - A game-free test that fails without the change (see AGENTS.md: tests read the source).
+   - A game-free test that fails without the change (see AGENTS.md: tests read the source; agents: the
+     [fix-with-test skill](../.claude/skills/fix-with-test/SKILL.md)).
    - `python -I -B tests/run_all.py`, all of it.
    - In the game, on your hardware: what you did and what you saw, with numbers from `hookshot_log.txt` for performance.
    - Add one self-contained file under `docs/tested/` for each new run you measured, following

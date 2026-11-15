@@ -11,6 +11,8 @@ Read the guide for each task you perform:
   otherwise, and read the [team-updates skill](.claude/skills/team-updates/SKILL.md) before claiming.
 - **Building, running or changing code:** [docs/development.md](docs/development.md) has the layout, commands and
   switches.
+- **Fixing a bug:** follow the [fix-with-test skill](.claude/skills/fix-with-test/SKILL.md): a game-free test that
+  fails on `main`, then the fix, and the checks a passing test doesn't do.
 - **Changing the GPU replay:** [docs/design.md](docs/design.md) has the architecture and its rules.
 - **Signing in, setting up a fork or using Forgejo:** [docs/forge.md](docs/forge.md) covers one-time setup, pushing
   and the command line.
