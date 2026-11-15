@@ -274,6 +274,10 @@ for scripted input, screenshots, frame dumps and profiles are in the development
   ```
 
   `{name}` is a tool the runner finds (`cxx`, `vulkan_headers`, `spirv_headers`, `spirv_val`, `glslang`, `dotnet`).
+- A check that cuts a function or a block out of a source file by its text uses `tests/srccut.py`: `block(text,
+  marker)` from the marker to the brace that closes it (braces in strings, comments and preprocessor lines not
+  counted), `between(text, start, end)`. A marker that is missing or appears twice stops the check with one message
+  naming the source and the marker, so a renamed function is one clear failure, not a wrong cut.
 - Keep it fast, and make it pass on Linux and Windows where it can.
 - For a renderer or runtime fix, say what you saw before and after, on which GPU and driver, and where in the game.
 
