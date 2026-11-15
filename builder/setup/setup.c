@@ -186,6 +186,56 @@ static int file_sink(void *u, const void *d, DWORD n) {
     return BCryptHashData(s->h, (PUCHAR)d, n, 0) == 0;
 }
 
+/* ---- (2026-11-15) Files the player downloaded with a browser. Players whose setup could not reach git.notrexed.dev (their
+   network, a VPN, an antivirus or proxy in the way) could still open its links in a browser, which has their proxy and VPN
+   settings, resumes a dropped download and answers Cloudflare's checks. hookshot.notrexed.dev/manual lists the latest
+   release's links: hookshot-setup.txt and each part. A file of that name in the player's Downloads folder, or beside this
+   setup, is taken in place of the download: the list only when the server did not answer, a part only when its SHA-256 is
+   the list's ---- */
+#define MANUAL_PAGE L"https://hookshot.notrexed.dev/manual"
+static int browser_file(const char *name, wchar_t *out) {
+    static const GUID downloads_id = {0x374DE290, 0x123F, 0x4565, {0x91, 0x64, 0x39, 0xC4, 0x92, 0x5E, 0x46, 0x7B}};
+    wchar_t wname[260], dirs[2][MAX_PATH];
+    MultiByteToWideChar(CP_UTF8, 0, name, -1, wname, 260);
+    int n = 0;
+    PWSTR dl = NULL;
+    if (SHGetKnownFolderPath(&downloads_id, 0, NULL, &dl) == S_OK && dl && wcslen(dl) < MAX_PATH) wcscpy(dirs[n++], dl);
+    if (dl) CoTaskMemFree(dl);
+    const DWORD len = GetModuleFileNameW(NULL, dirs[n], MAX_PATH);
+    if (len && len < MAX_PATH) {
+        wchar_t *slash = wcsrchr(dirs[n], L'\\');
+        if (slash) *slash = 0, n++;
+    }
+    /* (the newest of them: an old copy left in Downloads from an earlier install is not taken over a fresh one) */
+    int found = 0;
+    FILETIME best = {0, 0};
+    for (int i = 0; i < n; i++) {
+        wchar_t p[MAX_PATH];
+        if (_snwprintf(p, MAX_PATH, L"%ls\\%ls", dirs[i], wname) >= MAX_PATH) continue;
+        p[MAX_PATH - 1] = 0;
+        WIN32_FILE_ATTRIBUTE_DATA d;
+        if (!GetFileAttributesExW(p, GetFileExInfoStandard, &d) || (d.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (!found || CompareFileTime(&d.ftLastWriteTime, &best) > 0) wcscpy(out, p), best = d.ftLastWriteTime, found = 1;
+    }
+    return found;
+}
+/* the last part of a link: the name a browser saves it under */
+static const char *link_name(const char *url) {
+    const char *q = strrchr(url, '/');
+    return q ? q + 1 : url;
+}
+/* a whole small file (the list) into m */
+static int read_whole(const wchar_t *path, Mem *m) {
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return 0;
+    char buf[1 << 14];
+    DWORD n;
+    int ok = 1;
+    while (ok && ReadFile(f, buf, sizeof buf, &n, NULL) && n) ok = mem_sink(m, buf, n);
+    CloseHandle(f);
+    return ok && m->p;
+}
+
 static void hex(const unsigned char *d, int n, char *out) {
     for (int i = 0; i < n; i++) sprintf(out + 2 * i, "%02x", d[i]);
 }
@@ -702,8 +752,11 @@ static DWORD WINAPI work(LPVOID unused) {
        over ~3 minutes now, alternating the release link and the API's) */
     static const int waits[] = {3, 6, 12, 20, 30, 45, 60};
     enum { TRIES = 8 };
+    /* (a list the player saved with a browser: the server is asked once, and the saved one is taken when it does not answer) */
+    wchar_t saved_list[MAX_PATH];
+    const int have_saved = browser_file("hookshot-setup.txt", saved_list);
     int ok = 0;
-    for (int attempt = 0; attempt < TRIES && !ok; attempt++) {
+    for (int attempt = 0; attempt < (have_saved ? 1 : TRIES) && !ok; attempt++) {
         if (attempt) {
             status(L"The download server didn't answer (%lu). Trying again in %d s...", g_http_status, waits[attempt - 1]);
             Sleep(waits[attempt - 1] * 1000);
@@ -723,13 +776,21 @@ static DWORD WINAPI work(LPVOID unused) {
         }
         if (!ok && !retryable(g_http_status)) break;   /* (404 and the like: trying again changes nothing) */
     }
+    if (!ok && have_saved) {
+        free(man.p);
+        man = (Mem){0};
+        ok = read_whole(saved_list, &man);
+        if (ok) status(L"git.notrexed.dev did not answer: using %ls", saved_list);
+    }
     if (!ok)
         fail(g_http_status == 404
                  ? L"The latest Hookshot release has no setup files yet. Download HookshotBuilder.zip from the releases page for now: "
                    L"https://git.notrexed.dev/Hookshot/Hookshot/releases/latest"
              : g_http_status ? L"The download server is failing right now (an error 500 or above, tried 8 times over 3 minutes). "
                                L"This is on the server's side: try again in a few minutes, or later today."
-                             : L"Could not reach git.notrexed.dev to get the Hookshot Builder. Check your internet connection and try again.");
+                             : L"Could not reach git.notrexed.dev to get the Hookshot Builder.\n\nIf it keeps failing, download the "
+                               L"files listed at " MANUAL_PAGE L" with your browser into your Downloads folder (or beside "
+                               L"HookshotBuilder.exe), then start HookshotBuilder.exe again: it uses them.");
 
     char tag[128] = "", run[260] = "";
     Part parts[MAX_PARTS];
@@ -789,7 +850,17 @@ static DWORD WINAPI work(LPVOID unused) {
                 continue;
             }
             char have[65] = "";
+            /* (a part the player saved with a browser, under its link's name: copied in when its SHA-256 is the list's) */
             if (!(GetFileAttributesW(zip) != INVALID_FILE_ATTRIBUTES && file_sha256(zip, have) && !strcmp(have, p->sha))) {
+                wchar_t saved[MAX_PATH];
+                char saved_sha[65] = "";
+                if (browser_file(link_name(p->url), saved) && file_sha256(saved, saved_sha) && !strcmp(saved_sha, p->sha) &&
+                    CopyFileW(saved, zip, FALSE)) {
+                    status(L"Part %d of %d: using %ls", i + 1, nparts, saved);
+                    strcpy(have, saved_sha);
+                }
+            }
+            if (!(GetFileAttributesW(zip) != INVALID_FILE_ATTRIBUTES && (have[0] || file_sha256(zip, have)) && !strcmp(have, p->sha))) {
                 wchar_t part[MAX_PATH];
                 home_path(part, L"%ls.part", zip);
                 int got = 0;
@@ -827,7 +898,9 @@ static DWORD WINAPI work(LPVOID unused) {
                     ? L"Downloading part %d of %d failed: the download server is failing right now (tried 8 times over 3 "
                       L"minutes). This is on the server's side. The parts already downloaded are kept: run HookshotBuilder.exe again in a "
                       L"few minutes and it carries on from here."
-                    : L"Downloading part %d of %d failed. Check your connection and free space, then try again.", i + 1, nparts);
+                    : L"Downloading part %d of %d failed. Check your connection and free space, then try again.\n\nIf it keeps "
+                      L"failing, download the files listed at " MANUAL_PAGE L" with your browser into your Downloads folder, then start "
+                      L"HookshotBuilder.exe again: it uses them.", i + 1, nparts);
                 if (strcmp(have, p->sha)) DeleteFileW(part), fail(L"Part %d of %d did not download correctly (its checksum differs). Try again.", i + 1, nparts);
                 /* (the checked file or nothing: an old <sha>.zip that could not be removed is never unpacked instead) */
                 if (!MoveFileExW(part, zip, MOVEFILE_REPLACE_EXISTING)) {
