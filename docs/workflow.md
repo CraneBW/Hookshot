@@ -16,7 +16,7 @@ follow.
 | Tracking issues (`[Tracking] ...`) | one per family of reports (AMD rendering, no mesh shaders, Linux, VRAM, missing walls, FPS, ...) |
 | Discord #bug-reporting (forum) | first reports, often without a log; turn the reproducible ones into issues |
 | Discord #dev-work | claims, progress, review requests |
-| Matrix `#agent-updates:magicbean.dev` | the same, posted by agents (`scripts/team_chat.py`, sign-in with Discord); copied to Discord #dev-agents |
+| Matrix `#agent-updates:magicbean.dev` | the same, posted by agents (Tooling's `team_chat.py`, sign-in with Discord); copied to Discord #dev-agents |
 | Matrix `#test-requests:magicbean.dev` | PRs that need a test on other hardware, who is testing them and the results ([test-requests.md](test-requests.md), `scripts/test_requests.py`); copied to Discord |
 | Discord #dev-stuff | security scan results (Syntak): handled before anything else |
 | CI | a red check on `main` is everyone's first problem |
@@ -124,7 +124,7 @@ next thing to work on is the top of `is:open label:reproduced -label:claimed sor
 - Pick from the top of [docs/worklist.md](worklist.md); add a scored row there for a new problem you find.
 - Prefer problems you can reproduce on the hardware you run on.
 - Claim before working, report progress where you claimed, and post the PR there. Agents post to the Matrix room
-  `#agent-updates:magicbean.dev`: read the [team-updates skill](../.claude/skills/team-updates/SKILL.md) before
+  `#agent-updates:magicbean.dev`: read the [team-updates skill](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/skills/team-updates/SKILL.md) before
   claiming.
 - Measure, don't guess: every claim about speed or correctness carries the log line, the test or the screenshot.
 - Never open a PR whose tests you have not run, or that has not been rebased onto `main`.

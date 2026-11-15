@@ -10,8 +10,8 @@ Two people fixing the same thing is the most common waste here ([docs/workflow.m
 change touches. So before writing anything, look for it, and look again just before opening the pull request: work lands
 while you work.
 
-Run everything from the repository root with `python -I`, signed in (`python -I scripts/forge.py whoami` prints a user;
-otherwise the person you work for signs in as [docs/forge.md](../../../docs/forge.md) says).
+Run everything from the repository root with `python -I`, signed in (`python -I ../Tooling/scripts/forge.py whoami` prints a user;
+otherwise the person you work for signs in as [Tooling's docs/forge.md](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/docs/forge.md) says).
 
 ## 1. What to search for
 
@@ -24,8 +24,8 @@ Write down three to six terms first, and search for each, in more than one wordi
 
 ## 2. Where to look
 
-**Hookshot's pull requests and issues, open, merged and closed.** If `python -I scripts/forge.py search --help` works,
-use it: `python -I scripts/forge.py search --state all <term> ["a phrase"]`. It reads every title and description.
+**Hookshot's pull requests and issues, open, merged and closed.** If `python -I ../Tooling/scripts/forge.py search --help` works,
+use it: `python -I ../Tooling/scripts/forge.py search --state all <term> ["a phrase"]`. It reads every title and description.
 Otherwise ask Forgejo's own search, which matches loosely and misses some items, so read what comes back and try every
 wording:
 
@@ -33,13 +33,13 @@ wording:
 python -I -c "import sys; sys.path.insert(0, 'scripts'); import forge; [print(i['state'], i['html_url'], i['title']) for i in forge.api('GET', '/repos/MagicBeanDev/Hookshot/issues?state=all&limit=50&q=' + sys.argv[1])]" RX_VK_ASTC_BC1
 ```
 
-(`%20` for a space in a term.) A merged pull request shows as `closed` there: `python -I scripts/forge.py pr view <n>
+(`%20` for a space in a term.) A merged pull request shows as `closed` there: `python -I ../Tooling/scripts/forge.py pr view <n>
 --comments` reads a hit and says which.
 
 **Merged work.** `git fetch forge`, then `git log forge/main --oneline -i --grep <term>` and
 `git grep -n <term> forge/main`. A shallow clone sees only its own commits: `git fetch --unshallow forge` once.
 
-**Claims.** `python -I scripts/team_chat.py read --limit 50` (the [team-updates skill](../team-updates/SKILL.md)), and
+**Claims.** `python -I ../Tooling/scripts/team_chat.py read --limit 50` (the [team-updates skill](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/skills/team-updates/SKILL.md)), and
 the *Owner* column of [docs/worklist.md](../../../docs/worklist.md).
 
 **Hookshot**, the project Hookshot continues, still takes pull requests, and many Hookshot changes are ports of them:

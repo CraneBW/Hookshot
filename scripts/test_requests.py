@@ -11,7 +11,8 @@
     python -I scripts/test_requests.py done T-7KQ2 --result pass|fail|mixed --comment <URL of your comment on the PR>
     python -I scripts/test_requests.py cancel T-7KQ2
 
-It uses the sign-in of scripts/team_chat.py (run `team_chat.py login` once). Every message is one line that starts
+It uses the team chat's sign-in, MagicBeanDev/Tooling's team_chat.py (cloned beside this checkout, scripts/tooling.py;
+run `python -I ../Tooling/scripts/forge.py login` once). Every message is one line that starts
 with the request's ID and the action, so people can read it and type it by hand in Element:
 
     🧪 T-7KQ2 request: Keep 8 GB cards inside their memory budget
@@ -54,7 +55,10 @@ import urllib.request
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import magicbean_login  # noqa: E402  (same folder; python -I does not add it to the path)
+import tooling  # noqa: E402  (same folder; python -I does not add it to the path)
+
+tooling.scripts()   # (the sign-in and the team chat are MagicBeanDev/Tooling's, cloned beside this checkout)
+import magicbean_login  # noqa: E402
 import team_chat  # noqa: E402
 
 ROOM = "#test-requests:magicbean.dev"

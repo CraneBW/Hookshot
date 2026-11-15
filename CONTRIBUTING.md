@@ -47,16 +47,20 @@ Five minutes, then a first build.
    `git blame` past your clone, a version name from the tags (a shallow build calls itself by its commit, `2331f46`),
    and cutting a release (`scripts/release.py`). For those, `git fetch --unshallow --tags` once.
 
-2. **Sign in:**
+2. **Get the team's tooling and sign in.** The sign-in, `forge.py` (forks, pull requests, issues), the team chat and
+   test requests live in [MagicBeanDev/Tooling](https://git.magicbean.dev/MagicBeanDev/Tooling), shared by every
+   MagicBeanDev repository. Clone it beside this checkout, keep it current (`git -C ../Tooling pull --ff-only`), and
+   run its scripts from here:
 
    ```
-   python -I scripts/forge.py login
+   git clone https://git.magicbean.dev/MagicBeanDev/Tooling.git ../Tooling
+   python -I ../Tooling/scripts/forge.py login
    ```
 
    Click **Sign in with Discord** (or sign in with the email account you made on git.magicbean.dev) and approve. That
    one sign-in covers git.magicbean.dev (git signs in by itself from then on, and the remote `forge` points at
    Hookshot), the team chat and [test requests](docs/test-requests.md). The first time creates your account.
-   [docs/forge.md](docs/forge.md) has the details and the other commands.
+   [Tooling's docs/forge.md](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/docs/forge.md) has the details and the other commands.
 
 3. **Check the game-free tests run** (no game needed):
 
@@ -301,7 +305,7 @@ Every pull request uses the [pull request template](.forgejo/pull_request_templa
 description, its checklist stays whole, and `forge.py pr ready` checks it before review.
 
 Hookshot's `main` takes reviewed pull requests only. You work on a branch, push it to your fork and open the pull
-request from there. Set up pushing once: `python -I scripts/forge.py fork` makes your fork and the remote
+request from there. Set up pushing once: `python -I ../Tooling/scripts/forge.py fork` makes your fork and the remote
 `forge-fork` (`pr create` does it too if you haven't).
 
 ```
@@ -309,7 +313,7 @@ git fetch forge && git switch -c fix/arc-walls forge/main        jj: jj git fetc
 ... change, build, test, commit ...
 git push forge-fork fix/arc-walls                                 jj: jj bookmark create fix/arc-walls -r @;
                                                                       jj git push --remote forge-fork -b fix/arc-walls
-python -I scripts/forge.py pr create fix/arc-walls --title "fix(vk): walls missing on Intel Arc" --body-file pr.md
+python -I ../Tooling/scripts/forge.py pr create fix/arc-walls --title "fix(vk): walls missing on Intel Arc" --body-file pr.md
 ```
 
 1. Name the branch for the change: `fix/...`, `linux/...`, `builder/...`, `docs/...`. One topic per pull request: a fix
@@ -342,7 +346,10 @@ python -I scripts/forge.py pr create fix/arc-walls --title "fix(vk): walls missi
      stays unticked with the reason beside it, and the PR stays WIP.
      Every box is the author's to settle: work it out from the diff, the tests and the runs, and ask the person you
      work for only about what you can't settle yourself.
-4. **A pull request is work in progress until it is measured and ready for review.** On Forgejo that is a title
+4. **A change the game runs opens as a pull request only once it has run in the game**, at least once where it
+   matters: `forge.py pr create --tested-in-game "where it ran and what you saw"` (the PR's first comment). It refuses
+   a branch that touches `gpu/`, `host/`, `nx2/`, `assets/` or `third_party/` without it; `--force` opens it anyway.
+   **A pull request is work in progress until it is measured and ready for review.** On Forgejo that is a title
    starting with `WIP:` (or `[WIP]`). `pr create` opens it so (`--ready` when the description is complete already);
    `pr ready <n>` marks it ready once the Measurements have real numbers and every *Everyone* box is ticked, and
    refuses until then (the same check runs on every pull request: `scripts/check_pr_description.py`). Reviewers
@@ -357,7 +364,7 @@ python -I scripts/forge.py pr create fix/arc-walls --title "fix(vk): walls missi
    your branch; measure again, or say in the comment why the numbers still hold.
 
 A maintainer reviews and squash-merges it. `forge.py pr status <n>`, `pr list --mine` and `pr view <n> --comments`
-follow up from the command line ([docs/forge.md](docs/forge.md)).
+follow up from the command line ([Tooling's docs/forge.md](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/docs/forge.md)).
 
 ### Measurements
 
@@ -476,7 +483,7 @@ the game (the README's Intel XeSS section).
 - **Discord:** https://discord.gg/rexed. Claim work and discuss pull requests in `#dev-work`; `#prs` shows every
   open pull request, kept up to date.
 - **Issues:** [the forms on git.magicbean.dev](https://git.notrexed.dev/Hookshot/Hookshot/issues/new/choose).
-- **Agents:** [AGENTS.md](AGENTS.md); they post progress to the team chat (`scripts/team_chat.py`).
+- **Agents:** [AGENTS.md](AGENTS.md); they post progress to the team chat (Tooling's `team_chat.py`).
 
 Thanks for testing, reporting and sending fixes. Every report from a different GPU and every area played further than
 before moves the port forward.

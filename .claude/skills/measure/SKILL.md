@@ -77,7 +77,7 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-change my-change
 - One file under `docs/tested/` for each measured run, named with your public handle, then
   `python -I -B tests/test_tested_configurations.py`. Commit them on their own.
 - Rebased onto a newer `main` afterwards: measure again, or say in the comment why the numbers still hold.
-- `python -I scripts/forge.py pr update <n> --body-file <file> --comment "..."` with what was measured.
+- `python -I ../Tooling/scripts/forge.py pr update <n> --body-file <file> --comment "..."` with what was measured.
 
 ## 6. Stop and ask the person you work for
 
