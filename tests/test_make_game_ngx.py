@@ -211,13 +211,14 @@ class LinuxBuilderDlssTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.root)}):
             sdk = str(self.root / "hookshot-builder" / "ngx-sdk")   # (the builder's cache folder, not the game's data folder)
             self.assertEqual(self.builder.ngx_sdk_dir(), sdk)
-            env_off = self.builder.make_game_env(False, {"HOOKSHOT_NGX_SDK": "/stale", "HOOKSHOT_VK_PREBUILT": "/app/hookshot_vk.so"})
+            # (every build compiles the Vulkan back end: no prebuilt one for the environment to pick or drop)
+            env_off = self.builder.make_game_env(False, {"HOOKSHOT_NGX_SDK": "/stale", "PATH": "/usr/bin"})
             self.assertNotIn("HOOKSHOT_NGX_SDK", env_off)
-            self.assertEqual(env_off["HOOKSHOT_VK_PREBUILT"], "/app/hookshot_vk.so")
+            self.assertEqual(env_off["PATH"], "/usr/bin")
             self.assertEqual(self.builder.dlss_args(False), [])
-            env_on = self.builder.make_game_env(True, {"HOOKSHOT_VK_PREBUILT": "/app/hookshot_vk.so"})
+            env_on = self.builder.make_game_env(True, {"PATH": "/usr/bin"})
             self.assertEqual(env_on["HOOKSHOT_NGX_SDK"], sdk)
-            self.assertNotIn("HOOKSHOT_VK_PREBUILT", env_on)
+            self.assertEqual(env_on["PATH"], "/usr/bin")
             self.assertEqual(self.builder.dlss_args(True), ["--fetch-ngx-sdk", "--accept-nvidia-license"])
 
     def test_declining_license_turns_dlss_back_off(self):

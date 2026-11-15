@@ -353,6 +353,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Texture detail | Auto, Full, Medium, Low | Auto |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
+| | Threaded rendering | Auto, On, Off (after a restart). Auto is On with 12 or more processor threads for the game | Auto |
 | | VRAM budget | Auto, 3.6, 4.8, 6, 7.5, 9, 11 GB (2.2 GB only from the Minimum (4GB) preset); a quality preset sets it | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
@@ -421,6 +422,11 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   second card for Lossless Scaling). Auto prefers a dedicated one, and only cards with Vulkan 1.3 are listed.
   `hookshot_log.txt` lists every card as `vk: device <n>`; `RX_VK_DEVICE=<n>` chooses one for a single run and wins
   over the menu.
+- **Threaded rendering:** On draws the picture on threads of its own (a render thread and a recorder thread) while
+  the game goes on to its next frame, for a higher frame rate on a processor with threads to spare; it is still being
+  tested and can show flashes. Off draws it on the game's own thread, as before. Auto chooses by the processor
+  (On with 12 or more threads for the game, Off with fewer, and Off wherever the mode is not safe). It applies after
+  a restart. `RX_VK_ASYNC` and `RX_VK_RECORDER`, when set, choose for one run.
 - **Frame generation** makes extra frames between the game's own. It adds a little input delay, and fast motion can
   show artifacts. The renderer's own interpolation makes the frames; at 2x, AMD FSR 3.1's frame interpolation can make
   it instead with `RX_VK_FSR_FG=1` (below: it moves the HUD with the scene, so it is not the default). **Frame pacing** shows frames at an even interval: less stutter, up to one frame of delay. It paces

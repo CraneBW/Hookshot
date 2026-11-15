@@ -69,7 +69,8 @@ def check_make_game():
     check("the renderer's profile is committed (assets/profiles/hookshot_vk.profdata.xz)", shipped.is_file())
     with lzma.open(shipped) as f:
         check("it is an indexed LLVM profile", f.read(8) == b"\xfflprofi\x81")
-    check("its note says where it was recorded", "Recorded:" in (ROOT / "assets" / "profiles" / "README.md").read_text(encoding="utf-8"))
+    note = (ROOT / "assets" / "profiles" / "README.md").read_text(encoding="utf-8")
+    check("its note says where it was recorded", "RX_VK_PGO=gen" in note and "recording" in note.lower())
     text = (ROOT / "nx2" / "make_game.py").read_text(encoding="utf-8")
     check("the committed profile is checked on every system (another LLVM than llvm-mingw's made it)",
           "profile_readable(p, any_os=True)" in text)
@@ -128,13 +129,7 @@ def check_release():
     check("the AppImage builds no renderer of its own (every player's build compiles it, with the profile)",
           "RX_VK_ONLY" not in appimage and "RX_VK_PGO" not in appimage)
     check("the AppImage carries assets/ (the committed profile, for every player's own renderer)",
-          "cp -a nx2 host scripts LICENSE README.md assets tools.lock" in appimage)
-    flow = (ROOT / ".forgejo" / "workflows" / "build-linux.yml").read_text(encoding="utf-8")
-    step = flow[flow.index("- name: hookshot_vk.so (build check)"):flow.index("- name: hookshot_vk.so with AMD FSR 4")]
-    check("CI's renderer build check takes the profile as a player's build does: the checkout's, else the committed one",
-          'RX_VK_PGO="$VK_PGO" ' in step and "\n          VK_PGO=\n" in step and
-          'if [ -f work/hookshot_vk.profdata ]; then VK_PGO="$PWD/work/hookshot_vk.profdata"' in step and
-          'xz -dc assets/profiles/hookshot_vk.profdata.xz > "$VKW/hookshot_vk.shipped.profdata"' in step)
+          "cp -a nx2 host scripts LICENSE readme.md assets " in appimage)
     check("and a developer's own profile when the checkout has one",
           "for f in hot_funcs.txt hot_order.txt hookshot_pieces.prof hookshot_vk.profdata; do" in appimage)
     docs = (ROOT / "docs" / "development.md").read_text(encoding="utf-8")

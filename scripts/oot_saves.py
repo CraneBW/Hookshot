@@ -431,6 +431,8 @@ def swap_in(dst, incoming, new, old, backup):
 
 REPO_SAVES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "saves")
 REPO_SAVE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
+MAX_SAVE_FILE = 4 << 20   # (a save file is a few kilobytes: anything larger is not one)
+SLOT = re.compile(r"slot_\d{2,3}$")
 PROFILE_DIR = "_profile"   # (an old layout's shared account.sav and option.sav: refused)
 GAME_MADE = ("account.sav", "option.sav")
 # (what each file may weigh in the repository: a few times what the game writes, so a save that is something else, or
@@ -836,6 +838,16 @@ def lstat_plain(path):
     if is_link(path):
         return None
     return "dir" if stat.S_ISDIR(st.st_mode) else "file" if stat.S_ISREG(st.st_mode) else None
+
+
+def is_link(p):
+    # (any reparse point on Windows: a junction is not a symbolic link, and os.path.isjunction is only in 3.12 and newer;
+    # copytree walks into a junction as into a folder)
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return False
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
 
 
 def read_capped(path, cap, name):

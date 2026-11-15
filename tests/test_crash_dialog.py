@@ -12,7 +12,7 @@
   not known) and the stage (the start, the shaders' preparation, play).
 - The log's redaction is the Insert menu's Bug report's (gpu/vk/vk_bug_report.cpp redact, compiled beside it: the same
   output for the same lines); a setting's value is shown only when it is a number, a size or on/off.
-- The issue link: the game-problem form (.forgejo/ISSUE_TEMPLATE/1-game-problem.yml, which has the fields it fills), at
+- The issue link: the game-problem form (.github/ISSUE_TEMPLATE/1-game-problem.yml, which has the fields it fills), at
   most 2000 characters.
 - The wiring in the source: main() hands a helper's command line over first, the helper starts after the crash record and
   before the guest and the renderer, a quit is noted first in rx_close_asked, HOS_CRASH_TEST is not taken from
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     const char *cmd = argv[1];
     if (!strcmp(cmd, "args")) {
         HosCrashArgs a;
-        const int m = hos_crash_args(argc - 1, argv + 1, &a);
+        const int m = hos_crash_args(argc - 2, argv + 2, &a);   /* (argv[2] on: the helper's own command line, its program name first) */
         printf("%d|%llu|%s|%s|%s|%s\n", m, (unsigned long long)a.pid, a.run_id, a.record ? a.record : "", a.dir ? a.dir : "",
                a.log ? a.log : "NULL");
     } else if (!strcmp(cmd, "wanted")) {   /* headless off pgo gamescope run [args...] */
@@ -387,7 +387,7 @@ def source_checks():
         assert forbidden not in code, "the helper starts nothing of the game's: " + forbidden
     for word in ("HOS_CRASH_WATCH", "HOS_CRASH_TEST", "--crash-watch"):
         assert word in (ROOT / "docs/development.md").read_text(encoding="utf-8"), word + " is documented"
-    template = (ROOT / ".forgejo/ISSUE_TEMPLATE/1-game-problem.yml").read_text(encoding="utf-8")
+    template = (ROOT / ".github/ISSUE_TEMPLATE/1-game-problem.yml").read_text(encoding="utf-8")
     for field in ("version", "gpu", "system", "what", "log"):
         assert re.search(r"^\s+id: " + field + r"$", template, re.M), "the form has the field " + field
     menu = (ROOT / "gpu/vk/vk_bug_report.cpp").read_text(encoding="utf-8")
@@ -619,7 +619,7 @@ def logic_checks(exe, menu, tmp, form):
               "Hookshot closed unexpectedly during the start. An unexpected error.").strip()
     assert url.startswith(form + "&") and len(url) <= 2000, url
     q = parse_qs(urlsplit(url).query)
-    assert q["template"] == [".forgejo/ISSUE_TEMPLATE/1-game-problem.yml"]
+    assert q["template"] == [".github/ISSUE_TEMPLATE/1-game-problem.yml"]
     assert (ROOT / q["template"][0]).is_file()
     assert q["field:version"] == ["v3.1.0 (source 1234abcd)"] and q["field:gpu"] == ["NVIDIA GeForce RTX 3090, NVIDIA 580.95.05"]
     assert q["title"] == ["Game: Hookshot closed unexpectedly during the start"] and "field:what" in q and "field:system" in q
@@ -637,6 +637,11 @@ def entries(out):
 
 
 def behaviour(cc, tmp):
+    # (the driver and the helper are C: the C compiler of the --cxx given, as g++ builds a .c as C++ whatever -x says)
+    if cc.endswith("clang++"):
+        cc = cc[:-2]
+    elif cc.endswith("g++"):
+        cc = cc[:-3] + "gcc"
     exe = tmp / "driver"
     (tmp / "driver.c").write_text(DRIVER, encoding="utf-8")
     subprocess.run([cc, "-x", "c", "-std=gnu11", "-O1", "-Wall", "-Wextra", "-DHOS_CRASH_DIALOG_TEST", "-I", str(ROOT / "host"),
