@@ -254,6 +254,8 @@ lists its files' checksums in `SHA256SUMS`. A copy from anywhere else may not be
 If the problem continues, [report it](https://git.notrexed.dev/Hookshot/Hookshot/issues/new/choose) with the version, where
 you were in the game, your graphics card, `hookshot_log.txt` and a screenshot or video. Never send game files. The
 in-game menu's **Gameplay → Bug report** gathers all of it in one press ([In-game menu](#in-game-menu)).
+If the game runs slowly or stutters, [report slow performance](docs/performance-report.md) shows how to have it measure
+itself first.
 
 #### Low FPS or stutter
 
