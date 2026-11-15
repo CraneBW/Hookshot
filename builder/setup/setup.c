@@ -136,14 +136,14 @@ static int home_path(wchar_t *out, const wchar_t *format, ...) {
 /* ---- HTTPS GET into a sink, following redirects (GitHub's release links go to its download host) ---- */
 typedef int (*Sink)(void *user, const void *data, DWORD n);
 
-static int http_get(const char *url8, Sink sink, void *user, unsigned long long expect, const wchar_t *accept) {
+static int http_get_once(const char *url8, Sink sink, void *user, unsigned long long expect, const wchar_t *accept) {
     wchar_t url[1024];
     MultiByteToWideChar(CP_UTF8, 0, url8, -1, url, 1024);
     URL_COMPONENTS uc = {sizeof uc};
     wchar_t host[256], path[1024];
     uc.lpszHostName = host, uc.dwHostNameLength = 256;
     uc.lpszUrlPath = path, uc.dwUrlPathLength = 1024;
-    g_http_error = 0;
+    g_http_error = 0, g_http_status = 0;   /* (this request's own: a status from the one before is not this one's) */
     if (!WinHttpCrackUrl(url, 0, 0, &uc)) return 0;
     HINTERNET s = WinHttpOpen(L"HookshotBuilder-Setup/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
     if (!s) s = WinHttpOpen(L"HookshotBuilder-Setup/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
@@ -188,6 +188,32 @@ static int http_get(const char *url8, Sink sink, void *user, unsigned long long 
     if (c) WinHttpCloseHandle(c);
     WinHttpCloseHandle(s);
     return ok;
+}
+
+/* (2026-11-15) The server's own address, not through Cloudflare and not under notrexed.dev: what the setup downloads from when
+   git.notrexed.dev gives no answer at all. Players saw "The download server didn't answer (0)" through WARP and VPNs too: an
+   antivirus's web filter (BitDefender flags the domain) or a provider blocking notrexed.dev, which a VPN does not get round
+   from inside the PC. The VPS serves the release files, the latest links and the API's latest release there itself (its
+   Caddyfile), and the setup list's part links are git.notrexed.dev's, so each request is the same path on the other host.
+   Once git.notrexed.dev gave no answer, the rest of this run asks the other host first; if that gives none either, the next
+   try goes back to git.notrexed.dev. An answer with an error status (a 404, a 5xx) is git.notrexed.dev's own: not switched */
+static const char kMainHost[] = "https://git.notrexed.dev/";
+static const char kFallbackHost[] = "https://git.13.140.227.35.sslip.io/";
+static int g_fallback;   /* (git.notrexed.dev gave no answer: its requests go to kFallbackHost first) */
+
+static int http_get(const char *url8, Sink sink, void *user, unsigned long long expect, const wchar_t *accept) {
+    const size_t main_n = sizeof kMainHost - 1;
+    if (strncmp(url8, kMainHost, main_n)) return http_get_once(url8, sink, user, expect, accept);
+    char other[2048];
+    snprintf(other, sizeof other, "%s%s", kFallbackHost, url8 + main_n);
+    for (int k = 0; k < 2; k++) {
+        const int fallback = g_fallback;
+        const int ok = http_get_once(fallback ? other : url8, sink, user, expect, accept);
+        if (ok || g_http_status) return ok;   /* (an answer, even an error: not a block) */
+        g_fallback = !fallback;   /* (no answer at all: the other host, now and for the rest of this run) */
+        if (!fallback) status(L"git.notrexed.dev did not answer: trying the server's own address");
+    }
+    return 0;
 }
 
 typedef struct { char *p; size_t n, cap; } Mem;
