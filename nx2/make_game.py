@@ -38,6 +38,7 @@ import queue
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import threading
 import time
@@ -54,6 +55,7 @@ import toolchain as _toolchain
 import disk as _disk
 import object_store as _object_store
 import lift_store as _lift_store
+import game_title
 # (hookshot) RX_TARGET=windows on Linux: the Windows game, with llvm-mingw's Linux release (HOOKSHOT_MINGW, or llvm-mingw
 # beside the builder), to run under Proton or copy to a Windows PC
 LINUX, CROSS = not _toolchain.windows(), _toolchain.windows() and os.name != "nt"
@@ -1557,6 +1559,27 @@ def vk_profile_for(work, environ, readable=None, root=ROOT):
     return prof if (readable or (lambda p: profile_readable(p, any_os=True)))(prof) else None
 
 
+def game_name(out, work, nup=None):
+    """The game's own name and icon (nx2/game_title.py): read from the .nup when there is one and kept in the folder, then, on
+    Windows, made into the exe's icon and the name Windows shows for it (work/hookshot_game.res, linked by nx2/build.py). A
+    folder built from an unpacked dump has neither: the game stays "Hookshot". Nothing here stops a build"""
+    if nup:
+        try:
+            got = game_title.from_nup(nup)
+        except (OSError, SystemExit, ValueError, struct.error) as e:
+            got = None
+            print("the game's name and icon could not be read from the .nup (%s): the game is named Hookshot" % e, flush=True)
+        if got:
+            game_title.keep(out, *got)
+    title, icon = game_title.kept(out)
+    print("the game's name: %s, its icon: %s" % (title or "none (Hookshot)", "yes" if icon else "none"), flush=True)
+    if not LINUX:
+        try:
+            game_title.write_res(out, os.path.join(work, game_title.RES_FILE))
+        except OSError as e:
+            print("the exe's icon and name were not made (%s): it is named Hookshot" % e, flush=True)
+
+
 def copy_writable(src, dst):
     """src's bytes at dst, writable whatever src's mode: copy2 took the mode along, and from a read-only install (a Nix
     store, a packaged tools folder) the copies in the work folder were read-only, so lift.py could not write chunks.txt
@@ -2337,6 +2360,7 @@ def main(a=None):
         shutil.rmtree(kept, ignore_errors=True)
         shutil.copytree(exefs, kept)
     check_supported_build(exefs)
+    game_name(out, work, None if a.update else a.nup)
 
     # (made once on the development PC: lists of addresses and counts, no game code)
     # (hookshot_vk.profdata: the renderer's own profile, counts over Hookshot's own code)
@@ -2593,7 +2617,7 @@ def main(a=None):
         print("the button prompts of other controllers were not made: the game shows its own", flush=True)
         shutil.rmtree(prompts, ignore_errors=True)
     icon = os.path.join(ROOT, "assets", "hookshot.png")
-    if LINUX and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c)
+    if LINUX and not game_title.write_png(out, os.path.join(out, "hookshot.png")) and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c; the game's own when its .nup had one)
         copy_writable(icon, os.path.join(out, "hookshot.png"))   # (a second build overwrites the first's)
     seed_pipelines(out)
     ship_state_list(out)

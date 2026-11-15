@@ -17,6 +17,7 @@ void hos_input_clear_toggles(void);
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "hos_paths.h"   /* (hos_game_title: the game's own name, from its folder) */
 #include "../gpu/render/rx.h"
 void rx_close_asked(void);   /* host/rx_backend.c */
 #include "../gpu/vk/vk_api.h"
@@ -540,6 +541,11 @@ static DWORD WINAPI display_main(void *p) {
         RECT s = {0, 0, (LONG)(win_w * dpi / 96), (LONG)(win_h * dpi / 96)};
         AdjustWindowRect(&s, WS_OVERLAPPEDWINDOW, FALSE);
         SetWindowPos(hwnd, NULL, 0, 0, s.right - s.left, s.bottom - s.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    {   /* the game's own name for the window (host/hos_paths.h hos_game_title), as Unicode: the class is an ANSI one */
+        wchar_t title[256];
+        if (MultiByteToWideChar(CP_UTF8, 0, hos_game_title(HOS_GAME_TITLE), -1, title, 256))
+            DefWindowProcW(hwnd, WM_SETTEXT, 0, (LPARAM)title);
     }
     /* (no activate: shown at the bottom of the z-order, so a game in front keeps its focus) */
     if (noactivate)

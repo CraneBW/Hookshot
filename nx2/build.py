@@ -166,6 +166,16 @@ WGPU = os.environ.get("WGPU_NATIVE", os.path.join(os.path.expanduser("~"), "Desk
                                                   "wgpu-native"))
 
 
+def exe_resources():
+    """(Windows) the .res with the exe's icon (and the name Windows shows for it) to link: the game's own, which the builder made
+    from its .nup (work/hookshot_game.res, nx2/game_title.py), else a developer's picture (work/hookshot.res, nx2/make_icon.py),
+    else none. Only one: both are icon 1"""
+    for name in ("hookshot_game.res", "hookshot.res"):
+        if os.path.exists(os.path.join(kit.WORK, name)):
+            return [os.path.join(kit.WORK, name)]
+    return []
+
+
 def gpu_sources():
     """The renderer (gpu/render, TOTKPort's, NVN replayed with WebGPU) and what it builds on, from suyu
     (gpu/third_party/suyu): the shader recompiler (Maxwell frontend, IR passes, the WGSL backend; the Ampere
@@ -1472,7 +1482,7 @@ def main():
         r = subprocess.run([cc] + toolchain.native_target() + toolchain.native_link() +
                            ["-o", exe] + linker("/map:" + exe[:-4] + ".map") + [toolchain.link_opt("/stack:8388608"), "@" + rsp] + HOT_ORDER() + HOST_LIBS +
                            ([toolchain.link_opt("/nodefaultlib:clang_rt.profile.lib")] if PGO == "gen" else []) +
-                           ([os.path.join(kit.WORK, "hookshot.res")] if os.path.exists(os.path.join(kit.WORK, "hookshot.res")) else []) +   # (nx2/make_icon.py)
+                           exe_resources() +   # (the exe's icon and name: nx2/game_title.py, nx2/make_icon.py)
                            [win_manifest.write(os.path.join(out, "hookshot_manifest.res"))] +   # (UTF-8 paths: nx2/win_manifest.py)
                            ([toolchain.link_opt("/subsystem:windows"), toolchain.link_opt("/entry:mainCRTStartup")] if os.environ.get("RX_RELEASE") == "1" else []) +   # (no console window)
                            ([os.path.join(WGPU, "lib", "wgpu_native.dll.lib")] if wgpu else []) +
