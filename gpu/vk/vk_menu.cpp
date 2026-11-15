@@ -1318,7 +1318,7 @@ Row rows[] = {
      "the scene's depth and motion. Changes at once.", hn_framegen_by, false, true},
     {TAB_GRAPHICS, "Frame pacing", &opts.pace, 0, 1, 1, tx_onoff, "When each frame is shown.", hn_pace},
     {TAB_GRAPHICS, "Game frame rate cap", &opts.fps_cap, 0, 7, 1, tx_fps_cap,
-     "Limits frames rendered by the game. Generated frames are additional. Takes a restart. "
+     "Limits frames rendered by the game. Generated frames are additional. Changes at once. "
      "30 reduces rendering work and keeps real time even with Game speed set to Per frame. Past 60 is experimental: some "
      "cutscenes and bosses can misbehave (Gohma, the intro's narration). 60 is the safe choice. "
      "Uncapped: as fast as the PC can, still at real time; with V-Sync on, the display's "
