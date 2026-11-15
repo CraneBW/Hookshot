@@ -772,11 +772,15 @@ def requested_jobs(value):
 
 
 def default_jobs():
-    """(issue 418) One compiler per CPU thread: nx2/build.py starts each one only when the memory free holds it (MemoryGate), so the
-    count no longer has to fit the biggest files in the memory free at the start. HOOKSHOT_JOBS or --jobs choose"""
+    """(issue 418) One compiler per CPU thread but one: nx2/build.py starts each one only when the memory free holds it (MemoryGate),
+    so the count no longer has to fit the biggest files in the memory free at the start. The thread left over keeps the PC usable
+    while it builds (the desktop, a browser, the launcher's own window), as the launcher's Automatic does (SystemInfo.AutomaticWorkers).
+    HOOKSHOT_JOBS or --jobs choose"""
     cpus = os.cpu_count() or 2
-    print("build: up to %d compilers at once (one per CPU thread), as the memory allows; HOOKSHOT_JOBS=<n> to change" % cpus, flush=True)
-    return cpus
+    jobs = max(1, cpus - 1)
+    print("build: up to %d compilers at once (one per CPU thread but one), as the memory allows; HOOKSHOT_JOBS=<n> to change" % jobs,
+          flush=True)
+    return jobs
 
 
 def chosen_jobs(given):
