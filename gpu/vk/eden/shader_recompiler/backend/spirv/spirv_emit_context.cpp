@@ -1408,6 +1408,17 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
     }};
     // (hookshot) the helpers below are DontInline: inlined at each of a culling program's hundreds of global accesses, with EvilOOT's
     // fuller buffer search, NVIDIA's compiler took 41 s on 53caac5f and the driver reset. Lichii PR 408 found the same (161 s for 68 programs)
+    // (hookshot, after Fritchii 151c77c85, which found them ~2.6 fps faster inlined in Hyrule Field) EDEN_NX2_INLINE_GLOBALS=1: the
+    // graphics stages inline them (the forest's geometry passes call them in their mesh stages, per vertex), compute keeps
+    // DontInline; =2: inlined everywhere. Off by default: tried as the default (hs349), the driver compiled the house's pipelines
+    // for 28.5 + 9.8 + 7.1 s at their first draws after the preparation, and the house's GPU time went up (8.9 -> 9.4 ms)
+    static const int gm_inline{[] {
+        const char* e{std::getenv("EDEN_NX2_INLINE_GLOBALS")};
+        return e ? std::atoi(e) : 0;
+    }()};
+    const spv::FunctionControlMask gm_ctl{gm_inline >= 2 || (gm_inline == 1 && stage != Stage::Compute)
+                                              ? spv::FunctionControlMask::MaskNone
+                                              : spv::FunctionControlMask::DontInline};
     const auto define_load{[&](DefPtr ssbo_member, Id element_pointer, Id type, u32 shift) {
         const Id function_type{TypeFunction(type, U64)};
         // (#994, the floating trees) the task and mesh stages' load helpers are inlined (EDEN_NX2_GM_INLINE=0: not; an EDEN_
@@ -1436,7 +1447,7 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
     }};
     const auto define_write{[&](DefPtr ssbo_member, Id element_pointer, Id type, u32 shift) {
         const Id function_type{TypeFunction(void_id, U64, type)};
-        const Id func_id{OpFunction(void_id, spv::FunctionControlMask::DontInline, function_type)};
+        const Id func_id{OpFunction(void_id, gm_ctl, function_type)};
         const Id addr{OpFunctionParameter(U64)};
         const Id data{OpFunctionParameter(type)};
         define_body(ssbo_member, addr, element_pointer, shift, [&](Id ssbo_pointer) {

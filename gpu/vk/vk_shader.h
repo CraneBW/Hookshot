@@ -36,6 +36,7 @@ uint32_t stage_handle(const NvnState& s, const Stage& st, uint32_t program, uint
 /// The handles of elements 0 .. count-1 of such a table (one shadow map per light, say), into out: stage_handle for each,
 /// with the constant words and storage buffer addresses the program reads read once
 void stage_handles(const NvnState& s, const Stage& st, uint32_t program, uint32_t count, uint32_t* out);
+void handle_memo_next();   // (hookshot) a new draw or dispatch on this thread: the handles kept for the last one go
 
 /// A translated program variant: its stages, in descriptor order. The pipeline layout and pipelines made for it live
 /// in vk_pipeline.cpp (keyed by key).
@@ -109,6 +110,10 @@ std::string program_textures(const NvnState& s, const Program& p);   // (hooksho
 std::string program_code_keys(const NvnState& s);   // (hookshot) " stage:key" for each of the bound program's codes
 const Program* program_pick(const NvnState& s, ProgramKind kind, const uint8_t color_types[8]);   // (program_for without its cache)
 void program_wait(const Program* p);
+/// (hookshot) draw() sets it around its pick: a pick there hands a cached program's read to the workers and gets a stand-in
+void program_load_async_here(bool on);
+/// (hookshot) a cached program's stand-in: once ready (and failed), its records are read and the draw picks again
+bool program_is_stand_in(const Program* p);
 uint64_t program_cache_stamp();   // (what the kept programs and pipelines are good for)
 size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const std::function<void(Program&)>& fn,
                                bool computes = true, bool fallbacks = false);   // (computes: and every kept compute program)

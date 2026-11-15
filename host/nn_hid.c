@@ -54,8 +54,40 @@ static XInputGetStateFn xinput_get;
 static int64_t sampling;
 
 int rx_option(int id, int otherwise);
-/* (the Insert menu takes the keyboard while it is open) */
-static int key(int vk) { return !rx_option(1, 0) && (GetAsyncKeyState(vk) & 0x8000) != 0; }
+/* (the Insert menu takes the keyboard while it is open. hos_key_down: Windows' state of the keyboard, or the window's own
+   key messages on a PC where that state answers nothing, display.c) */
+int hos_key_down(int vk);
+static int key(int vk) { return !rx_option(1, 0) && hos_key_down(vk); }
+/* (hookshot) Letter and digit keys by their place on the keyboard, not their label: the bindings are a US keyboard's
+   (WASD, Q, E, Z...), and on a French AZERTY one 'W' 'A' 'S' 'D' by label put the left stick on W A S D, a scattered
+   cross. A US key's scan code is looked up in the layout of the window in front: Z Q S D on AZERTY, W A S D on QWERTY. */
+static int pos(int us) {
+#ifndef _WIN32
+    /* SDL reports physical scancodes and display_sdl.c maps those to the US
+       virtual-key positions already, independent of the active layout. */
+    return us;
+#else
+    static const unsigned char letters[26] = {0x1E, 0x30, 0x2E, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32,
+                                              0x31, 0x18, 0x19, 0x10, 0x13, 0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C};
+    unsigned scan = us >= 'A' && us <= 'Z' ? letters[us - 'A'] : us >= '1' && us <= '9' ? 0x02u + (unsigned)(us - '1')
+                  : us == '0' ? 0x0Bu : us == VK_OEM_MINUS ? 0x0Cu : us == VK_OEM_PLUS ? 0x0Du : 0u;
+    if (!scan) return us;
+    static HKL cached_for;
+    static int vk_of[128];
+    HKL hkl = GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), NULL));
+    if (!hkl) hkl = GetKeyboardLayout(0);
+    if (hkl != cached_for) {
+        cached_for = hkl;
+        memset(vk_of, 0, sizeof vk_of);
+    }
+    if (!vk_of[scan]) {
+        const UINT vk = MapVirtualKeyExW(scan, MAPVK_VSC_TO_VK, hkl);
+        vk_of[scan] = vk ? (int)vk : us;
+    }
+    return vk_of[scan];
+#endif
+}
+static int kpos(int us) { return key(pos(us)); }
 
 int hos_mouse_take(int32_t *dx, int32_t *dy);   /* display.c */
 
@@ -865,7 +897,7 @@ static int bound_down(int i, int mouse) {
         if (vk <= 0) continue;
         if (oc_consumed_keys[vk]) continue;   /* (drives an ocarina note this frame, not this control: oc_notes) */
         const int m = mouse_vk_slot(vk);
-        if (m >= 0 ? mouse && mouse_armed[m] && key(vk) : kmap_down(key_bind[i][k], key)) return 1;
+        if (m >= 0 ? mouse && mouse_armed[m] && key(vk) : kmap_down(key_bind[i][k], kpos)) return 1;   /* (hookshot) keys by their place: ZQSD on AZERTY where WASD is bound */
     }
     return 0;
 }
@@ -1061,6 +1093,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
     if (exclusive < 0) exclusive = env_on("HOS_INPUT_EXCLUSIVE");
     if (exclusive && npresses > 0 && script_elapsed_ms(hos_now_ns()) < script_end_ms + 5000)
         return;
+    }
     /* (hookshot, issue 389) A scripted press (HOS_INPUT_SCRIPT, HOS_INPUT_LIVE) is the test's own, not the
        player's: it counts with the game's window behind another one, so a test run can drive the game on one
        monitor while the player works in the front window. HOS_INPUT_BACKGROUND still decides the pads. */

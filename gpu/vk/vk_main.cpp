@@ -352,8 +352,11 @@ bool create_device() {
     // (hookshot) on by default: with a marker before each draw and dispatch the device has not been lost (five
     // runs); without them it was, every run, shortly after OoT's first gameplay frames (nvlddmkm event 153; the
     // extension alone, RX_VK_CHECKPOINTS=ext, did not keep it). The race they hide is not found yet.
-    // RX_VK_CHECKPOINTS=0: off
-    if (!getenv("RX_VK_CHECKPOINTS") || strcmp(getenv("RX_VK_CHECKPOINTS"), "0") != 0)
+    // RX_VK_CHECKPOINTS=0: off. RX_VK_CHECKPOINTS=marker: VK_AMD_buffer_marker's markers instead, where the driver has them
+    // (NVIDIA's does): written into system memory as the GPU passes them, they are still there after a reset, where an RTX
+    // 5070 Ti that hung gave back no NV checkpoint at all (issue 7: "0 checkpoints (17925724 markers set)")
+    const bool want_markers = getenv("RX_VK_CHECKPOINTS") && !strcmp(getenv("RX_VK_CHECKPOINTS"), "marker");
+    if (!want_markers && (!getenv("RX_VK_CHECKPOINTS") || strcmp(getenv("RX_VK_CHECKPOINTS"), "0") != 0))
         optional(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME, dev.checkpoints);
     // (asked for only: a marker written twice a draw, where the NV ones are not there to hide a race)
     if (const char* c = getenv("RX_VK_CHECKPOINTS"); !dev.checkpoints && c && strcmp(c, "0") != 0 && strcmp(c, "ext") != 0)
@@ -1308,7 +1311,7 @@ bool started_up() {
             printf("@@progress %.3f\n", at / 1000.0);
             fflush(stdout);
         };
-        printf("@@stage shaders Preparing shaders\n");
+        printf("@@stage shaders Getting the game ready\n");
         fflush(stdout);
         {
             size_t guess[3];
@@ -1385,7 +1388,7 @@ bool started_up() {
             }
             if (!console) return;
             char line[80];
-            const int n = snprintf(line, sizeof line, "%cPreparing shaders: %zu of %zu (%zu%%)   ", 13, done, total, done * 100 / total);
+            const int n = snprintf(line, sizeof line, "%cGetting the game ready: %zu of %zu (%zu%%)   ", 13, done, total, done * 100 / total);
             DWORD wrote = 0;
             WriteFile(console, line, (DWORD)n, &wrote, nullptr);
         };

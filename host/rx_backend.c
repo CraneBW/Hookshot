@@ -212,6 +212,7 @@ static float host_wide_menus(uint32_t keep_mask) {   /* (MkwVkHost.wide_menus) *
 }
 float hos_wide_cover(void);   /* hos_main.c */
 int hos_mouse_pointer(MkwVkPointer *out);   /* display.c, posix/display_sdl.c */
+int hos_key_down(int vk);                   /* display.c, posix/display_sdl.c */
 int hos_sdl_gyro_status(void);   /* pad_sdl.c */
 extern const char *hos_romfs_dir;   /* nn_fs.c, set by hos_main.c */
 static const char *host_romfs_dir(void) { return hos_romfs_dir; }
@@ -221,7 +222,13 @@ static unsigned char menu_key_press[256];
 void hos_vk_note_key_press(unsigned key) {
     if (key < sizeof menu_key_press) __atomic_store_n(&menu_key_press[key], 1, __ATOMIC_RELAXED);
 }
+/* (hookshot, issue 3) With MKWVK_KEY_HELD added to the key code, the same call answers another question: whether that key is
+   down now (hos_key_down: Windows' state of the keyboard or, on a PC where it says nothing, the window's own key messages).
+   The Insert menu asks it for the key a control is given. A question of its own in the host's table would change vk_api.h,
+   which is part of the program cache's stamp: every player's 7 GB of prepared shaders made again for one more function. */
+#define MKWVK_KEY_HELD 0x10000
 int hos_vk_take_key_press(int key) {
+    if (key & MKWVK_KEY_HELD) return hos_key_down(key & 0xFF);
     return (unsigned)key < sizeof menu_key_press &&
            __atomic_exchange_n(&menu_key_press[key], 0, __ATOMIC_RELAXED);
 }
@@ -285,6 +292,10 @@ static int host_take_text(int focus, uint32_t *out, int max) {
     return n;
 }
 
+/* (hookshot) the game's freed address space inside [lo, hi), decommitted (hos_mem.c): the back end's ranges no import holds */
+uint64_t hos_region_release_gaps(uint64_t lo, uint64_t hi);
+static uint64_t host_region_release_gaps(uint64_t lo, uint64_t hi) { return hos_region_release_gaps(lo, hi); }
+
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -295,6 +306,7 @@ static const MkwVkHost vk_host = {
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
     hos_wide_cover,
     host_take_text,
+    host_region_release_gaps,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
@@ -588,6 +600,11 @@ int rx_guest_imported(uint64_t lo, uint64_t hi) {
     const int r = vk && vk->guest_imported ? vk->guest_imported(lo, hi) : 0;
     if (away) hos_vcore_back();
     return r;
+}
+/* (hookshot, hos_mem.c: the game freed the address region [lo, hi)) the back end takes the range and, at its next
+   submission, has the host decommit what no import holds of it (a short list lock: no wait on the replay) */
+void rx_guest_release(uint64_t lo, uint64_t hi) {
+    if (vk && vk->guest_release) vk->guest_release(lo, hi);
 }
 /* (nvn_native.c: the CPU set an event's value) in order with the submits, for the GPU's waits on it */
 int rx_option(int id, int otherwise) { return vk && vk->option ? vk->option(id) : otherwise; }

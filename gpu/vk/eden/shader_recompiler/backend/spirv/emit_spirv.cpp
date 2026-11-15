@@ -400,6 +400,16 @@ void DefineEntryPoint(const IR::Program& program, EmitContext& ctx, Id main) {
     default:
         throw NotImplementedException("Stage {}", program.stage);
     }
+    // (hookshot) EDEN_NX2_MAXRECONV=1: a program with subgroup operations reconverges where its structure says
+    // (SPV_KHR_maximal_reconvergence), so a ballot or shuffle after a divergent loop sees every lane still running.
+    // A test for the culling's ballots (ground plants); off by default
+    const Info& sg_info{program.info};
+    if (ctx.profile.support_maximal_reconvergence &&
+        (sg_info.uses_subgroup_vote || sg_info.uses_subgroup_mask || sg_info.uses_subgroup_shuffles ||
+         sg_info.uses_fswzadd || sg_info.uses_subgroup_invocation_id)) {
+        ctx.AddExtension("SPV_KHR_maximal_reconvergence");
+        ctx.AddExecutionMode(main, static_cast<spv::ExecutionMode>(6023));   // (MaximallyReconvergesKHR)
+    }
     ctx.AddEntryPoint(execution_model, main, "main", interfaces);
 }
 

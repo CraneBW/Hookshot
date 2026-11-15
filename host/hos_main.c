@@ -75,6 +75,22 @@ static void no_power_throttling(void) {
 }
 #endif
 
+/* (hookshot) HOS_PROCESS_PRIORITY=0 normal, 1 above normal (default), 2 high: the process's own priority class while it runs (Windows puts
+   it back when it exits). The game's threads run at the normal level, as the foreground window's threads do, and Windows raises
+   those for a while on their window's events: on the terrace the 40-90 ms stalls came with another app's interface busy
+   (its renderer 53 % of a core in the seconds with a stall against 6 % otherwise, hs205), the game's threads waiting, its
+   render thread pinned to one core */
+#ifdef _WIN32
+static void process_priority(void) {
+    const char *e = getenv("HOS_PROCESS_PRIORITY");
+    const int level = e ? atoi(e) : 1;   /* (above normal by default since hs206-hs209, the same route alternated: frames >= 40 ms
+                                             6 and 7 against 17 and 10, gaps >= 28 ms 23 and 21 against 34 and 27, the terrace's
+                                             repeats 0.51 and 0.36 a second against 0.65 and 0.55) */
+    const DWORD cls = level >= 2 ? HIGH_PRIORITY_CLASS : level == 1 ? ABOVE_NORMAL_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS;
+    if (level > 0 && SetPriorityClass(GetCurrentProcess(), cls)) hos_log("process priority class: %s", level >= 2 ? "high" : "above normal");
+}
+#endif
+
 int hos_game_is_mkw(void) { return !strcmp(hos_main_build_id, "d00e4f399e411d0613aa8d26b1c02fef"); }
 
 /* gen/hos_image.c (build.py lift) */
@@ -454,15 +470,27 @@ static int env_line_allowed(const char *name, const char *value) {
     const int drive = ((value[0] | 0x20) >= 'a' && (value[0] | 0x20) <= 'z' && value[1] == ':');
     return !strpbrk(value, "/\\") && !drive && value[0] != '~' && strcmp(value, ".") && strcmp(value, "..");
 }
+/* (hookshot) what the file gave, for the log's second line: a player could not tell whether the file was read
+   ("idk if it's doing something or not"). Kept here: the log is opened after the file is read */
+static char hookshot_env_note[1024];
 static void load_hookshot_env(void) {
     char path[MAX_PATH + 32];
     const char *other = getenv("HOS_ENV_FILE");
+    FILE *f = NULL;
     if (other && *other) {
         snprintf(path, sizeof path, "%s", other);
+        f = fopen(path, "r");
     } else {
         DWORD n = hos_game_path_a(path, MAX_PATH);
         while (n && path[n - 1] != 92 && path[n - 1] != 47) n--;
-        memcpy(path + n, "hookshot_env.txt", 17);
+        memcpy(path + n, "hookshot_env.txt", sizeof "hookshot_env.txt");
+        f = fopen(path, "r");
+        /* (Notepad with the extensions hidden saves "hookshot_env.txt" as hookshot_env.txt.txt: taken too) */
+        if (!f) memcpy(path + n, "hookshot_env.txt.txt", sizeof "hookshot_env.txt.txt"), f = fopen(path, "r");
+    }
+    if (!f) {
+        snprintf(hookshot_env_note, sizeof hookshot_env_note, "env: no hookshot_env.txt beside the game (none read)");
+        return;
     }
     FILE *f = fopen(path, "r");
     if (!f) return;
@@ -473,6 +501,9 @@ static void load_hookshot_env(void) {
     static char from_file[256][128];   /* (names of up to 127 characters; a file with more names than this has its later
                                           lines for the names past it taken as the environment's, logged as left out) */
     static int from_file_n;
+    const char *base = path + strlen(path);
+    while (base > path && base[-1] != 92 && base[-1] != 47) base--;
+    int used = snprintf(hookshot_env_note, sizeof hookshot_env_note, "env: %s read:", base), count = 0;
     char line[512];
     while (fgets(line, sizeof line, f)) {
         char *s = line;
@@ -496,6 +527,9 @@ static void load_hookshot_env(void) {
         }
         if (!ours && from_file_n < (int)(sizeof from_file / sizeof *from_file) && strlen(s) < sizeof from_file[0])
             strcpy(from_file[from_file_n++], s);
+        if (used > 0 && used < (int)sizeof hookshot_env_note - 1)
+            used += snprintf(hookshot_env_note + used, sizeof hookshot_env_note - (size_t)used, " %s", s);
+        count++;
 #ifdef _WIN32
         *eq = '=';
         _putenv(s);
@@ -504,6 +538,7 @@ static void load_hookshot_env(void) {
 #endif
     }
     fclose(f);
+    if (!count) snprintf(hookshot_env_note + used, sizeof hookshot_env_note - (size_t)used, " no NAME=VALUE line");
 }
 
 /* Switches this build no longer reads, still set (in the environment or hookshot_env.txt, as older issues told players):
@@ -1817,7 +1852,7 @@ static int game_main(int argc, char **argv) {
     }
 #ifdef _WIN32
     {   // (the whole process, not only the window's thread: the renderer asks the window's size from its own, and on a 4K screen at 150%
-        // Windows answered such a thread 2560 x 1440: the picture was that size, in the corner of the window. Hookshot issues 15, 18, 20)
+        // Windows answered such a thread 2560 x 1440: the picture was that size, in the corner of the window)
         typedef BOOL(WINAPI * SetAware)(void *);
         SetAware set = (SetAware)(void *)GetProcAddress(GetModuleHandleA("user32.dll"), "SetProcessDpiAwarenessContext");
         if (set && !env_on("HOS_DPI_UNAWARE")) set((void *)(intptr_t)-4);
@@ -1876,6 +1911,7 @@ static int game_main(int argc, char **argv) {
        the guest, the renderer, the sound and the input; none for --prepare-shaders, HOS_HEADLESS or HOS_CRASH_WATCH=0 */
     void hos_crash_watch_start(int argc, char **argv);
     hos_crash_watch_start(argc, argv);
+    if (hookshot_env_note[0]) hos_log("%s", hookshot_env_note);   /* (what hookshot_env.txt gave) */
     const char *image = NULL;
     /* (hookshot) --compile-shaders all or most: what a preparation of this run builds (gpu/vk/vk_draw.cpp compile_all), over
        compile_shaders= in hookshot_options.ini; as RX_VK_COMPILE_SHADERS, set before --prepare-shaders runs, wherever it stands */
@@ -2066,6 +2102,7 @@ static int game_main(int argc, char **argv) {
 #ifdef _WIN32
     timeBeginPeriod(1);   /* 1 ms timer resolution: the 60 Hz vsync and the game's frame pacing sleep in short steps */
     no_power_throttling();
+    process_priority();
 #endif
     void hos_display_start(void);
     hos_display_start();  /* the game's window; HOS_HEADLESS=1 for none */
