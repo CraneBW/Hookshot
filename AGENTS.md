@@ -9,6 +9,8 @@ Read the guide for each task you perform:
 - **Choosing or claiming work:** [docs/workflow.md](docs/workflow.md) covers priorities, hardware tiers and the steps
   from claim to release. Pick from the top of [docs/worklist.md](docs/worklist.md) unless the person you work for says
   otherwise, and read the [team-updates skill](.claude/skills/team-updates/SKILL.md) before claiming.
+- **Before starting or claiming a change:** follow the [prior-work skill](.claude/skills/prior-work/SKILL.md) to find
+  the pull requests, issues, claims and Hookshot changes that already do it.
 - **Building, running or changing code:** [docs/development.md](docs/development.md) has the layout, commands and
   switches.
 - **Fixing a bug:** follow the [fix-with-test skill](.claude/skills/fix-with-test/SKILL.md): a game-free test that
