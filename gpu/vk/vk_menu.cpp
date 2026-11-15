@@ -1184,12 +1184,13 @@ const char* hn_intel_compiles(int v, int variant) {
 }
 MENU_HINTS(hn_robust, 0, "On, on every card.", "Can be faster on some NVIDIA cards.", "Always on.")
 MENU_HINTS(hn_fps, 0, nullptr, "The frame rate. With frame generation on, the game's own rate too.",
-           "And the game's frame time, with its 1% low: the rate of its slowest 1% of frames over the last 10 seconds.",
+           "And the game's frame time, with its 1% low: the mean time of its slowest 1% of frames over the last 10 seconds.",
            "And a graph of the last 4 seconds' frame times, with a line at the Game frame rate cap's.",
-           "And where each frame's time goes: the game, the renderer, waiting for the GPU, waiting for its turn (frame pacing, "
-           "vsync); the GPU's own time; red marks where shaders were built or draws left out.",
-           "And the renderer's own numbers, for debugging: video memory, textures, draws, dispatches and render passes a "
-           "frame, draws skipped, texture uploads and pipelines built.")
+           "And where each frame's time goes, as colours in the graph: the game, the renderer, its waits on the render thread "
+           "and the GPU, pacing (frame rate cap, vsync); with threaded rendering, a lane for the render thread's time; the "
+           "GPU's own time; red marks where shaders were built or draws left out.",
+           "And, for debugging, the CPU, GPU and driver, and the renderer's own numbers: video memory, textures, draws, "
+           "dispatches and render passes a frame, draws skipped, texture uploads and pipelines built.")
 MENU_HINTS(hn_menu_size, 1, "Smaller, for a desk.", "The usual size.", "Larger, for a TV across the room.")
 MENU_HINTS(hn_speed, 0, "A step each frame: the game slows down whenever it runs below 60 fps.",
            "Normal speed down to 15 fps, by taking longer steps.")
@@ -2909,10 +2910,13 @@ char fps_sub[96] = "";   // (UTF-8: a translation's line can be three bytes a ch
 // (the FPS counter's levels past the number, written every half second by menu_tick: the frame time and its 1% low; the
 // Breakdown's parts, the GPU's time, the shaders built and draws left out over the graph's 4 s)
 char fps_ms_text[24] = "", fps_low_text[24] = "";
-double fps_ms_now = 0, fps_parts_now[fps_stats::kParts];   // (the frame time and the parts, for their colour and the bar)
+double fps_ms_now = 0;   // (the frame time, for its colour)
 double fps_rate_now = 0;   // (the number's rate, the game's own with frame generation: its colour)
 char fps_part_text[fps_stats::kParts][24];
 char fps_gpu_text[24] = "";
+char fps_rt_text[fps_stats::kRtParts][24];   // (the render thread's parts, fps_texts)
+char fps_gpu_busy_text[24] = "";              // (the GPU's share of the frame)
+bool fps_rt_on = false;                       // (a render thread was measured)
 char fps_built_text[16] = "", fps_left_text[16] = "";
 char fps_dev_text[fps_stats::kDevLines][32];   // (the Dev level's values, fps_texts)
 bool fps_vram_over = false;                    // (the VRAM line in red: past what the driver allows)
@@ -4226,14 +4230,46 @@ struct Tab {
     }
 };
 
+/// The processor's name without its marks, clock and core count: "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz" is "Intel Core
+/// i7-8700K", "AMD Ryzen 5 5600X 6-Core Processor" is "AMD Ryzen 5 5600X"
+static std::string hardware_cpu_name(std::string t) {
+    for (const char* mark : {"(R)", "(TM)", "(tm)"})
+        for (size_t at; (at = t.find(mark)) != std::string::npos;) t.erase(at, strlen(mark));
+    if (const size_t at = t.find(" @ "); at != std::string::npos) t.erase(at);
+    while (!t.empty() && t.back() == ' ') t.pop_back();
+    const auto drop_end = [&](const char* w) {
+        const size_t n = strlen(w);
+        if (t.size() > n && t.compare(t.size() - n, n, w) == 0) t.erase(t.size() - n);
+    };
+    drop_end(" Processor");
+    drop_end(" CPU");
+    if (const size_t sp = t.rfind(' '); sp != std::string::npos && t.size() > 5 && t.compare(t.size() - 5, 5, "-Core") == 0) t.erase(sp);
+    std::string out;
+    for (char ch : t)
+        if (ch != ' ' || (!out.empty() && out.back() != ' ')) out += ch;
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
+/// The GPU's name without its marks and the driver's note in brackets at its end, which the driver line says:
+/// "AMD Radeon RX 6750 XT (RADV NAVI22)" is "AMD Radeon RX 6750 XT", "Intel(R) Arc(tm) A770 Graphics (DG2)" "Intel Arc A770 Graphics"
+static std::string hardware_gpu_name(std::string t) {
+    for (const char* mark : {"(R)", "(TM)", "(tm)"})
+        for (size_t at; (at = t.find(mark)) != std::string::npos;) t.erase(at, strlen(mark));
+    while (!t.empty() && t.back() == ' ') t.pop_back();
+    if (const size_t open = t.rfind(" ("); open != std::string::npos && open > 0 && !t.empty() && t.back() == ')') t.erase(open);
+    return t;
+}
+
 /// The FPS counter, in the corner the FPS counter position row chooses (the safe area's; under the banner at the top right
 /// while the menu is open, unless it fits beside the menu's column on a very wide window). The number as it always looked:
 /// green outlined bold, "FPS" small beside it, the frame generation line under them, no plate (#1957, v2.0.14's paint_fps).
 /// Past FPS (the row's levels, fps_stats.h), a tidy column under it, aligned to the same edge, with the same soft-shadowed
 /// text and no plate either: the frame time (green, amber or red against the cap's) and the 1% low; the graph of the last
 /// 4 s, a thin line over a soft fill, one column a frame span with its slowest frame (a stutter never falls between two), a
-/// faint dashed line at the cap's frame time, red ticks over frames past twice it; the Breakdown's bar of where the time
-/// goes, its legend with the values, the GPU's time and the stutters' causes (their columns get a red tick too).
+/// faint dashed line at the cap's frame time, red ticks over frames past twice it; the Breakdown, where the time goes
+/// stacked in the graph's columns, its legend with the values, the GPU's time and the stutters' causes (their columns get a
+/// red tick too). Dev adds the CPU, GPU and driver under the frame time, and the renderer's own numbers.
 void draw_fps(ui::Ctx& c, bool under_banner) {
     namespace fs = fps_stats;
     int level = fs::level_of(opts.show_fps);
@@ -4242,7 +4278,7 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     const Tab num(c.f.strong, big), tab(c.f.strong, small), lab(c.f.strong, label);
     const float nw = num.width(fps_text), lw = ui::size_of(c.f.strong, small, "FPS").x;
     const float sw = fps_sub[0] ? tab.width(fps_sub) : 0;
-    const float gw = 208 * s;   // (the column's width from the graph on)
+    const float gw = (fs::level_of(opts.show_fps) >= fs::kBreakdown ? 280 : 208) * s;   // (the column's width from the graph on; wider with the lanes)
     // (while the menu is open: the top right under the banner, the number and the frame time only, unless the window is so much
     // wider than 16:9 that the column fits beside the menu's, in its own corner)
     const bool beside = menu_ox >= (level >= fs::kGraph ? gw : nw + lw) + 2 * c.safe + 8 * s;
@@ -4253,8 +4289,10 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     const float row = 17 * s, gh = 50 * s, lh = 16 * s;
     float h = 32 * s + (fps_sub[0] ? row : 0);
     if (level >= fs::kFrameTime && fps_ms_text[0]) h += row;
+    if (level >= fs::kDev) h += 3 * lh;
     if (level >= fs::kGraph) h += 8 * s + gh + 4 * s;
-    if (level >= fs::kBreakdown) h += 10 * s + 6 * s + 4 * lh + 6 * s + 3 * lh;
+    const bool rt_lane = fps_render_thread_on();   // (no render thread, threaded rendering off: no lane, no legend section)
+    if (level >= fs::kBreakdown) h += (rt_lane ? 36 * s + 6 * lh : 0) + 10 * s + 10 * lh + 12 * s;   // (the render lane, the legend's rows)
     if (level >= fs::kDev) h += 6 * s + fs::kDevLines * lh;
     const float edge = left ? c.safe : c.w - c.safe;
     const float top = bottom ? c.h - c.safe - h : under_banner && !tune_mode && page != 5 && !beside ? banner_h(c) + 10 * s : c.safe;
@@ -4292,8 +4330,7 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     }
     float y = top + 32 * s;
     if (fps_sub[0]) tab.draw(c.d, at(sw), y, soft, fps_sub, s), y += row;
-    if (level < fs::kFrameTime) return;
-    if (fps_ms_text[0]) {   // ("16.7 ms" in the colour of its distance from the cap's frame time, "1% low 58" beside it)
+    if (level >= fs::kFrameTime && fps_ms_text[0]) {   // ("16.7 ms" coloured by its distance from the cap's frame time, "1% low 20.1 ms" beside it)
         const ImU32 ms_col = grade_col[fps_ms_now > 0 ? fs::rate_grade(1000.0 / fps_ms_now, target) : 0];
         const float mw = tab.width(fps_ms_text), gap = 10 * s, low_w = tab.width(fps_low_text);
         const float x = at(mw + gap + low_w);
@@ -4301,23 +4338,46 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
         tab.draw(c.d, x + mw + gap, y, soft, fps_low_text, s);
         y += row;
     }
+    if (level >= fs::kDev) {   // (Dev: the CPU, the GPU, its driver. A line too long for the column's width loses its end)
+        static std::string cpu, gpu, drv, fit[3];
+        static float fit_w = 0;
+        if (gpu.empty()) cpu = hardware_cpu_name(bug_report::cpu_name()), gpu = hardware_gpu_name(device_name_text()), drv = driver_text(), fit_w = 0;
+        if (fit_w != gw) {
+            fit_w = gw;
+            const auto shorten = [&](std::string t, float room) {
+                if (lab.width(t.c_str()) <= room) return t;
+                while (!t.empty() && lab.width((t + "...").c_str()) > room) {
+                    t.pop_back();
+                    while (!t.empty() && ((unsigned char)t.back() & 0xC0) == 0x80) t.pop_back();
+                }
+                while (!t.empty() && t.back() == ' ') t.pop_back();
+                return t + "...";
+            };
+            fit[0] = shorten(cpu.empty() ? "-" : cpu, gw);
+            fit[1] = shorten(gpu.empty() ? "-" : gpu, gw);
+            fit[2] = shorten(drv.empty() ? "-" : drv, gw);
+        }
+        for (const std::string& t : fit) lab.draw(c.d, at(lab.width(t.c_str())), y + 1 * s, soft, t.c_str(), s), y += lh;
+    }
     if (level < fs::kGraph) return;
     // (the graph)
-    constexpr int kCols = 104;
+    constexpr int kCols = 64;   // (wider columns, the lanes' parts readable)
     static fs::Frame col[kCols];
     static bool mark[kCols];
     // (the columns from the ring at most 60 times a second: at the cap Uncapped's 1000 fps, 4 s of frames each present cost
     // more than the drawing; a 4 s graph moves a column every 40 ms)
-    static double topms = 0;
+    static double topms = 0, scroll = 0;
     static int64_t graph_at = 0;
     if (const int64_t now = fps_clock(); now - graph_at >= fs::kSecond / 60 || now < graph_at) {
         graph_at = now;
-        (void)fps_graph(now, kCols, col, mark);
+        (void)fps_graph(now, kCols, col, mark, &scroll);   // (fixed slots, scrolled by how far into the newest one now is)
         static float ms[kCols];   // (the scale from the usual frame, not the slowest: a spike past the top is drawn at it, and marked)
         int k = 0;
         for (int i = 0; i < kCols; i++)
             if (col[i].ms > 0) ms[k++] = col[i].ms;
-        topms = fs::graph_top(target, fs::typical_ms(ms, k));
+        // (up at once, down slowly, so the whole graph does not rescale with each frame that scrolls out)
+        const double want = fs::graph_top(target, fs::typical_ms(ms, k));
+        topms = want >= topms ? want : std::max(want, topms * 0.995);
     }
     const bool parts = level >= fs::kBreakdown;
     const float x0 = at(gw), x1 = x0 + gw, gy0 = y + 8 * s, gy1 = gy0 + gh;
@@ -4340,14 +4400,41 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
         lab.draw(c.d, left ? x1 + 5 * s : x0 - 5 * s - lab.width(t), gy0 - label * 0.55f, ui::rgba(200, 200, 200), t, s);
     }
     // (the soft fill: a column each, fading down; then the line over it, broken where a column had no frame, a faint dark line
-    // under it for the bright scenes)
+    // under it for the bright scenes. with the Breakdown, each column its frame's parts stacked instead of the fill, and
+    // with a render thread a lane under the graph on the same time axis, the render thread's frame)
     static ImVec2 pts[kCols];
     const auto yv = [&](float ms) { return std::max(gy0, gy1 - ms * py); };
+    const auto cx_of = [&](int i) { return x0 + (i + 0.5f - (float)scroll) * cw; };   // (scrolled smoothly)
+    // (the parts' colours, one meaning in every lane: blue the game's work, red the waits for the GPU, purple the render thread,
+    // grey the pacing and idle; the lighter shade of a family its smaller part)
+    static const ImU32 part_col[fs::kParts] = {ui::rgba(96, 160, 232), ui::rgba(160, 200, 245), ui::rgba(246, 150, 130),
+                                                ui::rgba(120, 120, 120), ui::rgba(168, 132, 230), ui::rgba(232, 72, 60)};
+    static const char* const names[fs::kParts] = {"Game", "Renderer", "GPU present", "Pacing", "Render thread", "GPU fence"};
+    static const bool part_waits[fs::kParts] = {false, false, true, false, true, true};   // (under the legend's "Waiting on")
+    static const int order[fs::kParts] = {fs::kGame, fs::kRender, fs::kWaitRender, fs::kWaitGpu, fs::kGpuWait, fs::kPace};
+    static const ImU32 rt_col[fs::kRtParts] = {ui::rgba(168, 132, 230), ui::rgba(210, 190, 245), ui::rgba(232, 72, 60),
+                                                ui::rgba(110, 110, 110)};
+    static const char* const rt_names[fs::kRtParts] = {"Recording", "Workers", "GPU slot", "Idle"};
+    const auto alpha = [](ImU32 c, int a) { return (c & 0x00FFFFFF) | ((ImU32)a << 24); };
+    c.d->PushClipRect(ImVec2(x0, gy0 - 8 * s), ImVec2(x1, gy1 + 1), true);
+    if (parts)
+        for (int i = 0; i < kCols; i++) {
+            if (col[i].ms <= 0) continue;
+            const float l = cx_of(i) - cw * 0.5f + 0.5f, r = l + cw - 0.5f;   // (a hairline between columns)
+            float yb = gy1;
+            for (int o = 0; o < fs::kParts && yb > gy0; o++) {
+                const float hgt = col[i].part[order[o]] * py;
+                if (hgt <= 0) continue;
+                const float yt = std::max(gy0, yb - hgt);
+                c.d->AddRectFilled(ImVec2(l, yt), ImVec2(r, yb), alpha(part_col[order[o]], 190));
+                yb = yt;
+            }
+        }
     // (the columns with a frame, joined across those without: a slow stretch has fewer frames than columns)
     int n = 0;
     for (int i = 0; i < kCols; i++)
-        if (col[i].ms > 0) pts[n++] = ImVec2(x0 + (i + 0.5f) * cw, yv(col[i].ms));
-    if (n >= 2) {   // (the fill: a quad under each segment, its colour at the line fading to nothing at the floor)
+        if (col[i].ms > 0) pts[n++] = ImVec2(cx_of(i), yv(col[i].ms));
+    if (n >= 2 && !parts) {   // (the fill: a quad under each segment, its colour at the line fading to nothing at the floor)
         const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
         c.d->PrimReserve((n - 1) * 6, (n - 1) * 4);
         for (int k = 0; k + 1 < n; k++) {
@@ -4378,57 +4465,110 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     }
     for (int i = 0; i < kCols; i++)
         if ((col[i].ms > 2 * target && col[i].ms > 1.5f * usual) || col[i].ms > topms || (parts && mark[i])) {   // (no target: past half again the usual)
-            const float cx = x0 + (i + 0.5f) * cw;
+            const float cx = cx_of(i);
             c.d->AddCircleFilled(ImVec2(cx, gy0 - 3 * s), 2.2f * s, ui::rgba(0, 0, 0, 120));
             c.d->AddCircleFilled(ImVec2(cx, gy0 - 3 * s), 1.6f * s, ui::rgba(240, 100, 85));
         }
+    c.d->PopClipRect();
     if (!parts) return;
-    // (the Breakdown: where the half second's frame time went, as a bar, then a legend with the values, then the rest)
-    static const ImU32 part_col[fs::kParts] = {ui::rgba(110, 170, 230), ui::rgba(180, 140, 225), ui::rgba(226, 160, 80),
-                                                ui::rgba(130, 128, 118)};
-    static const char* const names[fs::kParts] = {"Game", "Renderer", "GPU wait", "Pacing"};
-    float by = gy1 + 10 * s;
-    {
-        const float bh = 6 * s, r = 3 * s;
-        double sum = 0;
-        for (double v : fps_parts_now) sum += v;
-        c.d->AddRectFilled(ImVec2(x0 - 1, by - 1), ImVec2(x1 + 1, by + bh + 1), ui::rgba(0, 0, 0, 90), r);
-        float x = x0;
-        for (int p = 0; p < fs::kParts && sum > 0; p++) {
-            const float w = (float)(gw * fps_parts_now[p] / sum);
-            if (w <= 0) continue;
-            const ImDrawFlags round = (x <= x0 + 0.5f ? ImDrawFlags_RoundCornersLeft : 0) |
-                                      (x + w >= x1 - 0.5f ? ImDrawFlags_RoundCornersRight : 0);
-            c.d->AddRectFilled(ImVec2(x, by), ImVec2(std::min(x + w, x1), by + bh), part_col[p], round ? r : 0, round ? round : ImDrawFlags_RoundCornersNone);
-            x += w;
+    // (hookshot) the render thread's lane: its frame in ms on the frame graph's scale (its own height), the work and the waits
+    // stacked and idle left empty, so a column's height is what the render thread spent of the frame; the cap's line and the
+    // top's value beside it, as the frame graph's
+    const float lane_gap = 6 * s, rh = rt_lane ? 30 * s : 0;
+    const float ry0 = gy1 + (rt_lane ? lane_gap : 0), ry1 = ry0 + rh, rpy = (float)(rh / topms);
+    if (rt_lane) {
+        const auto scale_label = [&](const char* t, float ty, ImU32 col_) {
+            lab.draw(c.d, left ? x1 + 5 * s : x0 - 5 * s - lab.width(t), ty - label * 0.55f, col_, t, s);
+        };
+        c.d->AddLine(ImVec2(x0, std::floor(ry1) + 0.5f), ImVec2(x1, std::floor(ry1) + 0.5f), ui::rgba(255, 255, 255, 60), std::max(1.0f, s));
+        {
+            char t[16];
+            if (target > 0) {
+                const float ty = std::floor(ry1 - (float)target * rpy) + 0.5f, dash = 4 * s, gap = 3 * s;
+                for (float x = x0; x < x1; x += dash + gap)
+                    c.d->AddLine(ImVec2(x, ty), ImVec2(std::min(x + dash, x1), ty), ui::rgba(255, 255, 255, 110), std::max(1.0f, s));
+                snprintf(t, sizeof t, "%.1f", target);
+                scale_label(t, ty, ui::rgba(235, 235, 235));
+            }
+            snprintf(t, sizeof t, topms < 10 ? "%.1f" : "%.0f", topms);
+            scale_label(t, ry0, ui::rgba(200, 200, 200));
         }
-        by += bh + 6 * s;
+        c.d->PushClipRect(ImVec2(x0, ry0), ImVec2(x1, ry1 + 1), true);
+        for (int i = 0; i < kCols && fps_rt_on; i++) {
+            if (col[i].ms <= 0) continue;
+            const float l = cx_of(i) - cw * 0.5f + 0.5f, r = l + cw - 0.5f;
+            float yb = ry1;
+            for (int k = 0; k < fs::kRtParts && yb > ry0; k++) {
+                if (k == fs::kRtIdle) continue;   // (idle: the space above)
+                const float hgt = col[i].rt[k] * rpy;
+                if (hgt <= 0) continue;
+                const float yt = std::max(ry0, yb - hgt);
+                c.d->AddRectFilled(ImVec2(l, yt), ImVec2(r, yb), alpha(rt_col[k], 190));
+                yb = yt;
+            }
+        }
+        c.d->PopClipRect();
     }
-    const auto line = [&](ImU32 dot, const char* name, const char* value, ImU32 value_col) {
-        float nx = x0;
-        if (dot) {
-            c.d->AddCircleFilled(ImVec2(x0 + 4 * s, by + lh * 0.5f), 3.2f * s, ui::rgba(0, 0, 0, 110));
-            c.d->AddCircleFilled(ImVec2(x0 + 4 * s, by + lh * 0.5f), 2.6f * s, dot);
-            nx += 12 * s;
-        }
+    // (the legend: the frame's parts first, adding up to the frame time shown under the number, then the render thread's to the same
+    // span on its own clock, the GPU's beside them; the render thread and the GPU run in parallel with the frame, not after it.
+    // The waits under a "Waiting on" sub-heading of their own, which has no value)
+    float by = ry1 + 10 * s;
+    const float half_w = gw * 0.5f;
+    const auto swatch = [&](float sx, ImU32 col) {
+        c.d->AddRectFilled(ImVec2(sx, by + lh * 0.5f - 3 * s), ImVec2(sx + 6 * s, by + lh * 0.5f + 3 * s), col, 1.5f * s);
+    };
+    const auto cell = [&](int column, ImU32 dot, bool indent, const char* name, const char* value, ImU32 value_col) {
+        const float cx0 = column < 0 ? x0 : x0 + column * half_w, cx1 = column < 0 ? x1 : cx0 + half_w - (column ? 0 : 8 * s);   // (-1: the whole width)
+        float nx = cx0 + (indent ? 10 * s : 0);   // (indent: a part under "Waiting on")
+        if (dot) swatch(nx, dot), nx += 10 * s;
         lab.draw(c.d, nx, by + 1 * s, soft, name, s);
-        tab.draw(c.d, x1 - tab.width(value), by, value_col, value, s);
+        tab.draw(c.d, cx1 - tab.width(value), by, value_col, value, s);
+    };
+    const auto header = [&](const char* t, const char* value, ImU32 value_col) {
+        lab.draw(c.d, x0, by + 1 * s, ui::rgba(255, 255, 255, 200), t, s);
+        if (value) tab.draw(c.d, x1 - tab.width(value), by, value_col, value, s);
         by += lh;
     };
-    for (int p = 0; p < fs::kParts; p++) line(part_col[p], names[p], fps_part_text[p], ink);
+    // (a sub-heading over the waits, without a value of its own: the values in the column are the parts, and they add up)
+    const auto waiting_on = [&] {
+        lab.draw(c.d, x0, by + 1 * s, soft, "Waiting on", s);
+        by += lh;
+    };
+    for (int o = 0; o < fs::kParts; o++) {   // (the work first, then the waits under their sub-heading, then the pacing)
+        if (part_waits[order[o]] && (o == 0 || !part_waits[order[o - 1]])) waiting_on();
+        cell(-1, part_col[order[o]], part_waits[order[o]], names[order[o]], fps_part_text[order[o]], ink);
+        by += lh;
+    }
+    if (rt_lane) {
+        header("Render thread", "in parallel", dim);
+        for (int k = 0; k < fs::kRtParts; k++) {
+            const bool waits = k == fs::kRtWorkers || k == fs::kRtGpu;
+            if (k == fs::kRtWorkers) waiting_on();
+            cell(-1, rt_col[k], waits, rt_names[k], fps_rt_text[k], ink);
+            by += lh;
+        }
+    }
+    header("GPU", "in parallel", dim);
+    {
+        char busy[48];
+        snprintf(busy, sizeof busy, "%s  %s", fps_gpu_text, fps_gpu_busy_text);
+        cell(-1, 0, false, "GPU time", busy, ink);
+        by += lh;
+    }
     c.d->AddLine(ImVec2(x0, std::floor(by + 3 * s) + 0.5f), ImVec2(x1, std::floor(by + 3 * s) + 0.5f), ui::rgba(255, 255, 255, 40), std::max(1.0f, s));
     by += 6 * s;
-    line(0, "GPU time", fps_gpu_text, ink);
     const ImU32 red = ui::rgba(240, 100, 85);
-    line(0, "Shaders built (4 s)", fps_built_text, strcmp(fps_built_text, "0") ? red : dim);
-    line(0, "Draws left out (4 s)", fps_left_text, strcmp(fps_left_text, "0") ? red : dim);
+    cell(0, 0, false, "Shaders built (4 s)", fps_built_text, strcmp(fps_built_text, "0") ? red : dim);
+    cell(1, 0, false, "Draws left out (4 s)", fps_left_text, strcmp(fps_left_text, "0") ? red : dim);
+    by += lh;
     if (level < fs::kDev) return;
     // (Dev: the renderer's own numbers, for debugging)
     c.d->AddLine(ImVec2(x0, std::floor(by + 3 * s) + 0.5f), ImVec2(x1, std::floor(by + 3 * s) + 0.5f), ui::rgba(255, 255, 255, 40), std::max(1.0f, s));
     by += 6 * s;
     for (int i = 0; i < fs::kDevLines; i++) {
         const bool alarm = (i == fs::kVram && fps_vram_over) || (i == fs::kSkipped && strcmp(fps_dev_text[i], "0") && strcmp(fps_dev_text[i], "-"));
-        line(0, fs::dev_name(i), fps_dev_text[i], alarm ? red : ink);
+        cell(-1, 0, false, fs::dev_name(i), fps_dev_text[i], alarm ? red : ink);
+        by += lh;
     }
 }
 
@@ -4850,10 +4990,12 @@ void fps_texts(int64_t now) {
     fs::low_text(fps_low_text, sizeof fps_low_text, half.low_fps);
     if (!half.frames) fps_ms_text[0] = 0;
     fps_ms_now = half.avg_ms;
-    for (int p = 0; p < fs::kParts; p++) fps_parts_now[p] = half.part[p];
     if (level < fs::kBreakdown) return;
     for (int p = 0; p < fs::kParts; p++) fs::frame_time_text(fps_part_text[p], sizeof fps_part_text[p], half.part[p]);
     fs::frame_time_text(fps_gpu_text, sizeof fps_gpu_text, half.gpu_ms);
+    for (int k = 0; k < fs::kRtParts; k++) fs::frame_time_text(fps_rt_text[k], sizeof fps_rt_text[k], half.rt[k]);
+    fps_rt_on = half.rt[fs::kRtWork] + half.rt[fs::kRtWorkers] + half.rt[fs::kRtGpu] + half.rt[fs::kRtIdle] > 0;
+    snprintf(fps_gpu_busy_text, sizeof fps_gpu_busy_text, "%.0f%%", half.avg_ms > 0 ? std::min(100.0, 100.0 * half.gpu_ms / half.avg_ms) : 0.0);
     const fs::Summary graph = fps_summary(now, fs::kGraphWindow, 0);
     snprintf(fps_built_text, sizeof fps_built_text, "%d", graph.pipelines);
     snprintf(fps_left_text, sizeof fps_left_text, "%d", graph.left_out);

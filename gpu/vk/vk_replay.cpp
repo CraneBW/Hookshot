@@ -182,6 +182,7 @@ int recording_index = 0;
 /// (a recording slot's last submit done: before it is used again)
 void recording_wait(Recording& r) {
     if (!r.submitted) return;
+    FpsRtWait rt_wait(fps_stats::kRtGpu);   // (the FPS counter's render lane)
     if (r.batch) {
         {
             std::lock_guard lk(dev.present_mu);
@@ -2310,6 +2311,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     for (auto& jp : jobs) {   // (in order, each as soon as it is done)
         Job* j = jp.get();
         {
+            FpsRtWait rt_wait(fps_stats::kRtWorkers);   // (the FPS counter's render lane)
             std::unique_lock l(seg_mu);
             seg_cv.wait(l, [j] { return j->done.load(); });
         }
@@ -2336,6 +2338,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         if (res == VK_ERROR_DEVICE_LOST) device_lost();
     }
     {
+        FpsRtWait rt_wait(fps_stats::kRtWorkers);
         std::unique_lock lk(par_pool.mu);
         par_pool.done.wait(lk, [] { return par_pool.pending == 0; });
     }
@@ -3073,7 +3076,7 @@ static void wait_rec_seq(uint64_t seq, uint64_t timeout_ns, int* ok) {
     wi.pSemaphores = &rec_timeline;
     wi.pValues = &seq;
     {
-        FpsWait fw(fps_stats::kGpuWait);   // (the FPS counter's Breakdown)
+        FpsWait fw(fps_gpu_wait_kind());   // (the FPS counter's Breakdown; in the game's fence wait, its kind)
         *ok = vkWaitSemaphores(dev.device, &wi, timeout_ns) == VK_SUCCESS;
     }
 }
@@ -3104,6 +3107,14 @@ struct GpuWaiter {
 int wait(uint64_t f, uint64_t timeout_ns) {
     gf_waited_ns = gf_now();   // (RX_VK_LOG_READBACK_RANGES: this thread waited for the GPU, or asked whether it was done)
     if (completed() >= f) return 1;
+    // (the FPS counter's Breakdown: this wait's kind, by whether its work was recorded when it began: the renderer behind, or
+    // the GPU)
+    bool recorded = true;
+    if (timeout_ns && fps_breakdown_on()) {
+        std::lock_guard mk(rec_map_mu);
+        recorded = value_rec.count(f) != 0;
+    }
+    FpsFenceWait fence_kind(recorded);
     if (timeout_ns) gate_need_value(f);   // (the render thread's whole frames: this one's submit goes on without its present)
     FpsRender fr;   // (the FPS counter's Breakdown: the replay of stopped work in here is the renderer's, the waits the GPU's)
     queue_flush_for(FR_WAIT);
@@ -3156,7 +3167,7 @@ int wait(uint64_t f, uint64_t timeout_ns) {
     queue_flush_for(FR_WAIT);
     VkResult res;
     {
-        FpsWait fw(fps_stats::kGpuWait);
+        FpsWait fw(fps_gpu_wait_kind());
         res = vkWaitSemaphores(dev.device, &wi, timeout_ns);
     }
     static int logged;
@@ -5653,6 +5664,7 @@ void readback_fell_back(int what) {
 }
 void replay_thread_main() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk replay");
+    fps_render_thread();   // (the FPS counter's render lane is this thread's)
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     // (on the core the host keeps free of the game's threads, hos_reserved_cpus: its last physical one)
     if (host->reserved_cpus) {
@@ -5692,6 +5704,7 @@ void replay_thread_main() {
         bool have = false;
         {
             std::unique_lock lk(q_mu);
+            FpsRtWait rt_idle(fps_stats::kRtIdle);   // (the FPS counter's render lane: waiting for a job)
             // (gate_ready: the oldest job, once its frame's present is handed over or a game's thread waits for it)
             if (present_held)   // (the signal's job, or on without it)
                 q_cv.wait_for(lk, std::chrono::milliseconds(2), [] { return gate_ready(); });
