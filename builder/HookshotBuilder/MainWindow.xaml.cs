@@ -24,6 +24,8 @@ public partial class MainWindow : Window
     readonly DispatcherTimer clock = new() { Interval = TimeSpan.FromSeconds(1) };
     readonly Stopwatch elapsed = new();
     readonly Stopwatch compileClock = new();
+    readonly Stopwatch shaderClock = new();   // (the shaders' step, for its countdown: ShaderStep.Left)
+    readonly Stopwatch shaderSaidAt = new();   // (since the game's last "about N s left")
     readonly Dictionary<string, StepRow> rows = new();
     readonly Dictionary<string, (bool Ok, string Text)?> checks = new(StringComparer.OrdinalIgnoreCase);
     readonly List<Dump> dumps = new();
@@ -41,6 +43,7 @@ public partial class MainWindow : Window
     int filesDone, filesOf;
     int filesChanged = -1, filesCompiled;
     double compileEta = -1;
+    double shaderFraction, shaderSaid = -1;
     long thisCompile, previousTotal = -1;
     string lastFailure = "";
 
@@ -1034,6 +1037,9 @@ public partial class MainWindow : Window
         filesChanged = -1;
         filesCompiled = 0;
         compileEta = -1;
+        shaderFraction = 0;
+        shaderSaid = -1;
+        shaderClock.Reset();
         thisCompile = 0;
         previousTotal = -1;
         shadersBegan = false;
@@ -1067,7 +1073,7 @@ public partial class MainWindow : Window
             current = id;
             if (rows.TryGetValue(id, out var row)) row.Begin();
             if (id == "compile") compileClock.Restart();
-            if (id == ShaderStep.Id) shadersBegan = true;
+            if (id == ShaderStep.Id) { shadersBegan = true; shaderClock.Restart(); }
             if (Weight.TryGetValue(id, out var w)) SetProgress(w.From);
         }
         else if (line.StartsWith("@@progress "))
@@ -1076,6 +1082,7 @@ public partial class MainWindow : Window
                 && Weight.TryGetValue(current, out var w))
             {
                 if (current == "compile") compiled = f;
+                if (current == ShaderStep.Id) shaderFraction = f;
                 SetProgress(w.From + w.Size * Math.Clamp(f, 0, 1));
             }
             return;
@@ -1087,6 +1094,7 @@ public partial class MainWindow : Window
         }
         else if (line.StartsWith("@@done ")) finished = line[7..];
         else if (ShaderStep.Note(line) is { } later) shadersLater = later;
+        else if (ShaderStep.LeftIn(line) is double said && said >= 0) { shaderSaid = said; shaderSaidAt.Restart(); }
         else if (FilesLine.Match(line) is { Success: true } m) filesOf = int.Parse(m.Groups[1].Value);
         else if (FileLine.IsMatch(line)) filesDone++;
         if (current == "compile" && filesChanged < 0 && filesOf > 0 && rows.TryGetValue("compile", out var c))
@@ -1171,7 +1179,15 @@ public partial class MainWindow : Window
             BuildNote.Text = $"Compiling {Clock(compileClock.Elapsed)} · {left}{tail}";
             return;
         }
-        BuildNote.Text = (updating ? "Working…" : "Usually about 45 minutes") + tail;
+        if (current == ShaderStep.Id)
+        {
+            // (the shaders' own countdown: on a slow PC this step alone can take an hour, and the line said "about 45 minutes")
+            var s = ShaderStep.Left(shaderSaid, shaderSaid >= 0 ? shaderSaidAt.Elapsed.TotalSeconds : -1, shaderFraction,
+                                    shaderClock.Elapsed.TotalSeconds);
+            BuildNote.Text = $"Preparing shaders {Clock(shaderClock.Elapsed)} · {(s >= 0 ? TimeLeft(s) : "Estimating…")}{tail}";
+            return;
+        }
+        BuildNote.Text = (updating ? "Working…" : "About 45 minutes on a fast PC, longer on a slower one") + tail;
     }
 
     static string Clock(TimeSpan t) => $"{(int)t.TotalMinutes}:{t.Seconds:00}";

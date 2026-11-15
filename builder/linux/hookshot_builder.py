@@ -131,6 +131,29 @@ def make_game_env(dlss, environ=None):
     return env
 
 
+# (the game's own countdown, every 10 s while it builds pipelines: gpu/vk/vk_draw.cpp prepare_progress_log,
+# "vk: noted pipelines: 18009 of 32713 pipelines in 2447 s, about 1998 s left")
+PIPELINES_LEFT = re.compile(r"vk: [a-z]+ pipelines: \d+ of \d+ pipelines in \d+ s, about (\d+) s left")
+
+
+def pipelines_left_in(line):
+    """The seconds the game's line says are left, or -1 when the line is not one of its countdowns"""
+    m = PIPELINES_LEFT.search(line)
+    return float(m.group(1)) if m else -1.0
+
+
+def shader_left(said, since, fraction, elapsed):
+    """The shaders' time left in seconds, or -1 while it cannot be told yet. (A slow PC took 58 minutes and more here while the
+    window said "Usually about 45 minutes" for the whole build: a player took it for stuck.) The game's own countdown while it
+    is fresh (said: what it said; since: seconds since, under 40), less the time since; else the step's bar so far (fraction
+    done after elapsed seconds), once it has moved enough to go by. As the Windows Builder's ShaderStep.Left"""
+    if said >= 0 and 0 <= since < 40:
+        return max(said - since, 0.0)
+    if 0.03 < fraction < 1 and elapsed >= 20:
+        return elapsed / fraction * (1 - fraction)
+    return -1.0
+
+
 def left_text(seconds):
     """The countdown make_game.py and build.py work out from this PC's earlier builds."""
     if seconds < 45:
@@ -1457,6 +1480,7 @@ class Builder(tk.Tk):
         self.changed, self.compiled_files = -1, 0
         self.eta = None
         self.compile_started = None
+        self.shader_started, self.shader_fraction, self.shader_said, self.shader_said_at = None, 0.0, -1.0, 0.0
         self.times = None
         self.shaders_later = False
         self.built = self.error = None   # (this run's own: what make_game.py says, or Cancel)
@@ -1508,6 +1532,13 @@ class Builder(tk.Tk):
                 text += " · compiling %d:%02d" % (c // 60, c % 60)
             if self.eta is not None:
                 text += " · " + left_text(self.eta)
+            if self.shader_started:
+                # (the shaders' own countdown: on a slow PC this step alone can take an hour)
+                now = time.time()
+                c = int(now - self.shader_started)
+                left = shader_left(self.shader_said, now - self.shader_said_at if self.shader_said >= 0 else -1,
+                                   self.shader_fraction, now - self.shader_started)
+                text += " · preparing shaders %d:%02d · %s" % (c // 60, c % 60, left_text(left) if left >= 0 else "estimating…")
             self.time_text.set(text)
             self.after(1000, self.tick)
 
@@ -1552,10 +1583,14 @@ class Builder(tk.Tk):
             self.bar.configure(mode="determinate", value=0)
             # (the compile's clock and countdown are the compile's: a later step, the minutes-long shaders one, without them)
             self.compile_started = time.time() if stage == "compile" else None
+            self.shader_started = time.time() if stage == "shaders" else None   # (its countdown: shader_left)
+            self.shader_fraction, self.shader_said = 0.0, -1.0
             self.eta = None
         elif line.startswith("@@progress "):
             try:
                 self.bar.configure(value=float(line.split()[1]))
+                if self.shader_started:
+                    self.shader_fraction = float(line.split()[1])
             except ValueError:
                 pass
         elif line.startswith("@@plan "):
@@ -1595,6 +1630,8 @@ class Builder(tk.Tk):
             self.built = line[7:]
         elif line.startswith("@@error "):
             self.error = line[8:]
+        elif pipelines_left_in(line) >= 0:
+            self.shader_said, self.shader_said_at = pipelines_left_in(line), time.time()
         elif line.startswith(make_game.NOT_PREPARED):
             # (left to the first start; or, the GPU driver having stopped responding, each shader to when it is first drawn)
             self.shaders_later = "first start" if line.endswith(make_game.FIRST_START) else "first drawn"

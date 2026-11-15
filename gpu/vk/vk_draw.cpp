@@ -9727,15 +9727,26 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
                     const VkPipeline made = build_graphics(*p, n.s, note_targets(n), (VkPrimitiveTopology)n.topo);
                     pre->graphics_begun = true;
                     if (first.owns_lock()) first.unlock();
-                    std::lock_guard lk(note_mu);
-                    auto it = pipelines.find(n.key);
-                    if (it == pipelines.end()) {
-                        auto e = std::make_unique<PipeEntry>();
-                        e->pipeline = made;
-                        e->prog.store(p, std::memory_order_release);   // (whose pipeline it is: graphics_pipeline)
-                        e->ready.store(true, std::memory_order_release);
-                        pipelines.emplace(n.key, std::move(e));
-                    } else if (made) vkDestroyPipeline(dev.device, made, nullptr);   // (unpublished: play or another note already owns the entry)
+                    // (hookshot, 2026-11-15) The build's preparation run (HOOKSHOT_PREPARE_ONLY) plays nothing: the pipeline is in the
+                    // pipeline cache now, all it was built for there, and is let go at once. Kept, every noted pipeline (32,713) stayed
+                    // alive to the run's end on this path (start mode: GPUs without mesh shaders, or an install the safety net took
+                    // back to it), over 12 GB on its own (a precompile was killed at 23,407 of 35,870 under a 12 GB cap): a 16 GB PC
+                    // paged to disk while it built. The game's first start keeps them ready from the caches, as before.
+                    // RX_VK_PREPARE_KEEP=1: kept, as before (tests/test_prepare_lets_go.py)
+                    static const bool let_go = env_on("HOOKSHOT_PREPARE_ONLY") && !env_on("RX_VK_PREPARE_KEEP");
+                    if (let_go) {
+                        if (made) vkDestroyPipeline(dev.device, made, nullptr);
+                    } else {
+                        std::lock_guard lk(note_mu);
+                        auto it = pipelines.find(n.key);
+                        if (it == pipelines.end()) {
+                            auto e = std::make_unique<PipeEntry>();
+                            e->pipeline = made;
+                            e->prog.store(p, std::memory_order_release);   // (whose pipeline it is: graphics_pipeline)
+                            e->ready.store(true, std::memory_order_release);
+                            pipelines.emplace(n.key, std::move(e));
+                        } else if (made) vkDestroyPipeline(dev.device, made, nullptr);   // (unpublished: play or another note already owns the entry)
+                    }
                 }
             }
             pre->done++;
