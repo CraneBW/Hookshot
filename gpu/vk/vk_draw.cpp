@@ -8465,9 +8465,11 @@ bool precompile_wanted() {
 }
 namespace {
 std::atomic<bool> prepare_halt{false};
+std::atomic<bool> prepare_saving_now{false};   // (precompile_warm: the pipeline cache written out, prepare_saving)
 }
 void prepare_stop() { prepare_halt.store(true); }
 bool prepare_stopped() { return prepare_halt.load(std::memory_order_relaxed); }
+bool prepare_saving() { return prepare_saving_now.load(std::memory_order_relaxed); }
 std::string prepared_path() { return cache_path("hookshot_prepared.bin"); }
 // (hookshot) What the last prepare here was made for, in hookshot_prepared.bin: the translator (program_cache_stamp), and since the
 // seed grows apart from it (4221050d: networks, the movie upscaler, the particle sets, 19 compute programs more) the seed it went
@@ -8977,6 +8979,10 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         list.push_back(&r);
     }
     const size_t total = refs.size();
+    // (the compute pipelines after them, every kept compute program's, counted in the progress from the start: reported as the
+    // notes' total once those were done, the screen read "32,623 / 32,623", 100%, "a few seconds left" while they were built, #714)
+    const std::vector<uint64_t> computes = program_cache_compute_keys();
+    const size_t all_n = total + computes.size();
     std::atomic<size_t> done{0}, built{0}, failed{0}, no_program{0};
     const std::string notes_path = pipe_notes_path();
     auto log_at = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -9001,16 +9007,15 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         no_program += list.size() - std::min(found, list.size());
         done += list.size();
     }, [] { return prepare_stopped(); }, [&](size_t) {
-        if (progress) progress(done.load(), total);
+        if (progress) progress(done.load(), all_n);
         prepare_progress_log("noted pipelines", done.load(), total, t0, log_at);
     });
     // (the compute pipelines too, every kept compute program's: a first start in start mode makes them all, and a load at a
     // create call only asks the caches, so on a new install a first dispatch found none (666 in one first session). Built
-    // into the cache and let go, as the noted ones)
-    const std::vector<uint64_t> computes = done == total && !prepare_stopped() ? program_cache_compute_keys() : std::vector<uint64_t>{};
+    // into the cache and let go, as the noted ones; only once those are all done)
     std::atomic<size_t> computes_done{0}, computes_built{0}, computes_failed{0};
     const auto c0 = std::chrono::steady_clock::now();
-    warm_bounded::run(computes.size(), threads, [&](size_t i) {
+    warm_bounded::run(done == total && !prepare_stopped() ? computes.size() : 0, threads, [&](size_t i) {
         static thread_local bool off = (ub_thread_off(), true);
         (void)off;
         program_cache_borrow(computes[i], [&](Program& p) {
@@ -9028,13 +9033,20 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         });
         computes_done++;
     }, [] { return prepare_stopped(); }, [&](size_t) {
-        if (progress) progress(total, total);
+        if (progress) progress(total + computes_done.load(), all_n);
         prepare_progress_log("compute pipelines", computes_done.load(), computes.size(), c0, log_at);
     });
     const bool all = done == total && computes_done == computes.size();
     static const bool prepare_only = env_on("HOOKSHOT_PREPARE_ONLY");   // (a --prepare-shaders run: vk_main.cpp)
     if (all && !prepare_stopped()) {
+        // (the whole cache written, a GB and more, with every pipeline counted: the start-up screen says so, not "a few seconds
+        // left", #714)
+        const auto s0 = std::chrono::steady_clock::now();
+        prepare_saving_now.store(true, std::memory_order_relaxed);
         pipeline_cache_save(true);   // (in the file before the marker says they are there)
+        prepare_saving_now.store(false, std::memory_order_relaxed);
+        logf("vk: precompile: the pipeline cache written out in %.1f s",
+             std::chrono::duration<double>(std::chrono::steady_clock::now() - s0).count());
         // (not by the preparation's own process: warm_bounded.h leaves_marker)
         if (warm_bounded::leaves_marker(prepare_only, all, prepare_stopped())) precompile_built_write(total);
         remove(warming.c_str());
