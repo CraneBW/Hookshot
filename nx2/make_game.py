@@ -61,7 +61,7 @@ import game_title
 LINUX, CROSS = not _toolchain.windows(), _toolchain.windows() and os.name != "nt"
 # (SDL2.dll is sdl2-compat: it loads SDL3.dll from beside the exe. Left out of bin\ since v2.0.0, it said "Failed loading SDL3
 # library" three times and no controller worked: Discord #bug-reporting, 11-08)
-BESIDE = ["hookshot", "hookshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["hookshot.exe", "hookshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll"]
+BESIDE = ["hookshot", "hookshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["hookshot.exe", "hookshot_vk.dll", "SDL2.dll", "SDL3.dll"]
 LANGUAGES = [("en-US", "English (US)"), ("en-GB", "English (UK)"), ("fr", "French (France)"), ("fr-CA", "French (Canada)"), ("de", "German"),
              ("it", "Italian"), ("es", "Spanish (Spain)"), ("es-419", "Spanish (Latin America)"), ("pt-BR", "Portuguese (Brazil)"), ("nl", "Dutch"),
              ("pl", "Polish"), ("ru", "Russian"), ("ja", "Japanese"), ("ko", "Korean"), ("zh-Hans", "Chinese (Simplified)"),
@@ -2611,6 +2611,13 @@ def main(a=None):
         except PermissionError:
             fail("Could not replace %s. Close any running copy of Hookshot and check that the file and folder are writable, then retry. "
                  "Staged replacements remain beside the installed files; the compiled source remains at %s." % (dst, src))
+    if not LINUX:   # (the WebGPU renderer's library, which builds from before the Vulkan back end was the only renderer left)
+        for d in sorted({game_dir, out}):
+            try:
+                if os.path.isfile(os.path.join(d, "wgpu_native.dll")):
+                    os.remove(os.path.join(d, "wgpu_native.dll"))
+            except OSError:
+                pass
     if launcher:   # (a folder built before the launcher: its libraries left the folder for bin\; hookshot is the launcher now)
         stale = [] if LINUX else sorted(f for f in os.listdir(out) if f.endswith(".dll") and f.startswith(("av", "sw")))
         for n in BESIDE[1:] + stale + ["hookshot.map", "hookshot-game.exe"]:

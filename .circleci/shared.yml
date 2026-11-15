@@ -626,9 +626,9 @@ jobs:
           name: The third-party objects
           command: |
             set -euo pipefail
-            python3 -I scripts/tools.py install /tmp/win-tools --system windows-x64 --only cpm wgpu-native --cache /tmp/tools-cache
+            python3 -I scripts/tools.py install /tmp/win-tools --system windows-x64 --only cpm --cache /tmp/tools-cache
             W="/tmp/win-tools/HookshotBuilder/tools"
-            RX_TARGET=windows HOOKSHOT_MINGW="$LLVM_MINGW" RX_CPM="$W/cpm" WGPU_NATIVE="$W/wgpu-native" \
+            RX_TARGET=windows HOOKSHOT_MINGW="$LLVM_MINGW" RX_CPM="$W/cpm" \
               python3 -I -B nx2/third_party_objects.py make /tmp/third_party_objects --jobs "$(nproc)"
       - run:
           name: Package folder
@@ -1007,9 +1007,9 @@ jobs:
             dotnet publish builder/HookshotBuilder/HookshotBuilder.csproj --configuration Release --runtime win-x64 \
               -p:EnableWindowsTargeting=true -p:Version="$VERSION" -p:NuGetAudit=false --output /tmp/publish
             # the third-party objects a player's build links instead of compiling (build-windows.yml, #629)
-            python3 -I scripts/tools.py install /tmp/win-tools --system windows-x64 --only cpm wgpu-native --cache /tmp/tools-cache
+            python3 -I scripts/tools.py install /tmp/win-tools --system windows-x64 --only cpm --cache /tmp/tools-cache
             W="/tmp/win-tools/HookshotBuilder/tools"
-            RX_TARGET=windows HOOKSHOT_MINGW="$LLVM_MINGW" RX_CPM="$W/cpm" WGPU_NATIVE="$W/wgpu-native" \
+            RX_TARGET=windows HOOKSHOT_MINGW="$LLVM_MINGW" RX_CPM="$W/cpm" \
               python3 -I -B nx2/third_party_objects.py make /tmp/third_party_objects --jobs "$(nproc)"
             python3 -I scripts/builder_package.py package /tmp/package --publish /tmp/publish --setup /tmp/HookshotBuilder-Setup.exe \
               --third-party-objects /tmp/third_party_objects

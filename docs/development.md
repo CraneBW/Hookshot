@@ -223,7 +223,6 @@ format, tone mapper, encoding and luminance changes reset the corresponding hist
 | `RX_VK_DEVICE=<n>` | The graphics card listed as `vk: device <n>` in the log, over the menu's GPU device |
 | `HOS_TRACE=1` | Every Horizon call logged, as `--trace` does |
 | `HOS_CV_SIGNAL_ALWAYS` (set) | SignalConditionVariable takes its lock and wakes even when no thread waits, as before it returned at once for no waiter (`host/nn_os_sync.c`); a control for a hang or a movie stutter |
-| `RX_BACKEND=<name>` | Unset or `vulkan`: `hookshot_vk.dll`; any other value: the WebGPU renderer, when the exe was built with one |
 | `HOS_GPU_ALLOC_RETRY=0` | A model's material-block allocations from a full heap (the OptimizeChangeBank thread's two CPU buffers and two GPU-memory calls in f_804566e0) not tried in the heap's parents, as shipped (`host/oot_heap_retry.c`, issue 1697) |
 | `HOS_GPU_ALLOC_TEST_FAIL=<n>` or `<gpu>,<cpu>` | A test: the first n of those allocations of each kind (or that many of the GPU memory and of the CPU buffers) refused by the heap they name, as a full heap would, so the retry runs |
 | `HOS_MEMINFO_OLD=1` | The used memory the game is told (`QueryMemoryInfo`, svc `GetInfo` 7 and 22) is the program and the system's share alone, as before. By default it adds the heap and the pages the game mapped through `AllocateMemoryPages`, at most the console's total (`hos_used_memory`, `host/hos_mem.c`): told less, the game kept mapping pages for its caches (7.9 GB in a long session). For A/B |
@@ -384,7 +383,7 @@ checks the decisions game-free, and on Linux runs the real helper against real p
 | Switch | What it does |
 |---|---|
 | `HOS_INPUT_SCRIPT=<presses>` | Presses timed from the game's first controller read |
-| `HOS_INPUT_LIVE=<file>` | A file the test appends lines of presses to, read every 30 ms; each line's times count from when it is read. A line `!cheat <n>` sends a Cheats page action, `!synclog` logs the NVN syncs (`!dump`, `!shots`, `!rdoc` and `!flasharm` are the WebGPU renderer's) |
+| `HOS_INPUT_LIVE=<file>` | A file the test appends lines of presses to, read every 30 ms; each line's times count from when it is read. A line `!cheat <n>` sends a Cheats page action, `!synclog` logs the NVN syncs (`!dump`, `!shots`, `!rdoc` and `!flasharm` were the WebGPU renderer's: the build has none, and they only log so) |
 | `HOS_INPUT_FRAME_CLOCK=1` | The script's time runs at 60 game frames a second instead of the wall clock |
 | `HOS_INPUT_EXCLUSIVE`, `HOS_INPUT_BACKGROUND`, `HOS_INPUT_SCRIPT_BACKGROUND` (set) | As above; the last lets every device count while the window is behind another one |
 | `RX_VK_MENU_SCRIPT=<seconds>:<key>,...` | Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `TABL`, `TABR`, the pad's face buttons `PADS`, `PADE`, `PADW`, `PADN`; and for a text field, `TYPE:<text>` (typed as the keyboard would, up to the next comma) and, while it has the keyboard, `HOME`, `END`, `BACK`, `DEL` besides `LEFT`, `RIGHT`, `ENTER`, `ESC` |
@@ -549,7 +548,7 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `HOOKSHOT_THIRD_PARTY_OBJECTS=0` or `=<dir>` | The third-party code's objects a release ships compiled (`nx2/third_party_objects.py`: Eden's shader recompiler, sirit, Dear ImGui, zstd, libopus, and on Windows suyu's code under the WebGPU renderer), which a build copies into its object cache instead of compiling them. Each is taken only by its object key, which holds its source, flags and headers and, for these objects, the compiler's version and what the system headers, the C++ library and the Vulkan, SPIR-V and VMA headers preprocess to: anything else (another compiler, a checkout's edit, a CPU below `x86-64-v3`) compiles as before. Default: the tools' own `third_party_objects/` (the AppImage's and the Windows zip's; a checkout has none). `0` turns it off; a folder uses that set (`python -I nx2/third_party_objects.py make <dir>` makes one with this PC's tools). A player's dry run says how many of them the set holds (`scripts/linux/check_player_build.sh` requires all) |
 | `HOOKSHOT_FORCE_PROMPTS=1` | Regenerates button-prompt assets even when unchanged. Unset, empty, `0`, `false`, `off` and `no` (case-insensitive, surrounding spaces ignored) are off |
 | `HOOKSHOT_MINGW=<dir>`, `HOOKSHOT_MSVC=1` | The llvm-mingw to build with; the Visual Studio route instead |
-| `RX_CPM=<dir>`, `WGPU_NATIVE=<dir>` | The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) and wgpu-native |
+| `RX_CPM=<dir>` | The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) |
 | `RX_TARGET=windows` | On Linux: the Windows game, with llvm-mingw's Linux build in `HOOKSHOT_MINGW` |
 | `RX_RELEASE=1` | A release build (`make_game.py` sets it): no console window, the shaders prepared before the title |
 | `RX_PGO=gen` or `RX_PGO=<file>` | The hot code counting its branches for a profile, or built with one (`make_game.py` passes the shipped profile) |
@@ -1054,7 +1053,7 @@ alone. See [control.md](control.md#security).
 | `nx2/` | the lift pipeline and its tests (mkw-recomp's, made game-neutral; `kit.py` has the paths), and `make_game.py`, which the launcher and the builders run |
 | `host/` | the standalone Horizon runtime (TOTKPort's `hos/` as adapted by mkw-recomp), with the native NVN2 layer `nvn_native.c`; `host/posix` has the Win32 calls on Linux |
 | `gpu/vk/` | the Vulkan back end (`hookshot_vk.dll`, `hookshot_vk.so`), with Eden's shader recompiler and sirit |
-| `gpu/render/`, `gpu/third_party/` | the WebGPU renderer the Windows exe falls back to when it was built with wgpu-native, its op stream (`rx_nvn.h`), suyu's decoders |
+| `gpu/render/`, `gpu/third_party/` | the op stream the host records and the Vulkan back end replays (`rx_nvn.h`, `nvn_api.h`), and suyu's texture decoders; what is left of TOTKPort's WebGPU renderer, which is built no more (suyu's WGSL recompiler stays in `gpu/third_party/suyu`, uncompiled) |
 | `builder/` | Hookshot Builder, command-line only (players use the Hookshot Launcher): the Windows `--cli` program (.NET 8), its setup (also a game folder's `hookshot.exe`), and the Linux AppImage's `AppRun`, tools and game folder scripts |
 | `scripts/` | test runs, the profile and log readers, the save copier (`hookshot_saves.py`), release tooling, `scripts/linux` (dependencies, AppImage) |
 | `tests/` | the game-free checks, all run by `tests/run_all.py` |
