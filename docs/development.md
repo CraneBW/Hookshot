@@ -161,11 +161,35 @@ meter read late is the white flashes the wait is there for. `RX_VK_LOG_READBACK_
 every 3,000 calls (calls, waits and their time, how many had the newest submission as their writer, how many were read
 late), which is how the ranges worth a rule are found on a PC.
 
-`RX_VK_PSYCHOV35_DLSS=1` enables the experimental RGBA16F scene path for DLSS/DLAA and AMD FSR 4 (and its Native AA)
-with Native HDR and PsychoV35. The successful upscale supplies NVIDIA frame generation with depth, camera and actor
+Native HDR PsychoV35 automatically enables the compatible RGBA16F scene path for DLSS/DLAA, AMD FSR 4 (and its Native AA), and FSR 3.1 on the shared chain.
+`RX_VK_PSYCHOV35_DLSS=0` disables that route for troubleshooting; unset, empty or nonzero enables it. The value is read
+once per process, so restart after changing `hookshot_env.txt`. The existing flag name is retained for existing
+configurations. The successful upscale supplies NVIDIA frame generation with depth, camera and actor
 motion as usual. It requires the engine's native-HDR context: DLSS's HDR feature (`RX_VK_DLSS_HDR=0` prevents this
-path) or FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it). FSR 3.1 and TAAU are not enabled by this switch.
-See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-and-fsr-4-opt-in) for validation and shader regeneration.
+path), FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it), or FSR 3.1's already-HDR-capable passes. FSR 3.1 keeps
+Vanilla's existing colour path; its linear HDR path is limited to Native PsychoV35. Its legacy own-input route
+(`RX_VK_FSR3_CHAIN=0`) is not enabled by this switch. Off and the TAAU replacement have independent format support.
+See [the format and history rules](temporal-history.md#psychov35-with-temporal-upscalers) for validation and shader regeneration.
+
+Upscaler Off supports Native HDR PsychoV35 independently of that switch: matching RGBA16F views and a typed output pass bypass
+the game's network at 100% render resolution, or spatially scale its input below 100%. The output pass decodes the
+network input once; it supplies neither temporal anti-aliasing nor the temporal engines' NVIDIA FG input handoff.
+
+The gameplay TAAU replacement supports Native HDR PsychoV35 directly. It is the spatial/FXAA fallback used where the
+game network cannot run, not restored temporal AA. Its RGBA16F shader and history match the scene's format and decode
+the perceptual input once. `RX_VK_TAAU_KEYS=fd029a317a9a4b94` exercises that replacement on hardware that otherwise
+runs the native network; this is a test override, not a requirement for GPUs already using the fallback.
+
+
+
+For **FSR 3.1 frame generation**, use Frame generation **2x** and `RX_VK_FSR_FG=1`. Native HDR PsychoV35
+automatically enables the compatible independent RGBA16F depth/motion input path unless `RX_VK_PSYCHOV35_DLSS=0`.
+This does not enable the legacy FSR
+upscaler. To isolate FSR generation on NVIDIA hardware, select Frame generation by **Built-in FG** or use
+`RX_VK_DLSS_FG=0`; confirm actual `fsr3fi` made-frame counts, not only the menu selection. FSR generation remains off by default.
+The captured present's actual PQ/sRGB encoding and HDR peak are given to both AMD interpolation and optical flow;
+format, tone mapper, encoding and luminance changes reset the corresponding histories. See
+[FSR frame generation](temporal-history.md#native-hdr-and-fsr-31-frame-generation) for limits and validation.
 
 ### Running a test
 
