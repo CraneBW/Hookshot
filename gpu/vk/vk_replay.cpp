@@ -5412,7 +5412,7 @@ void replay_thread_main() {
         const int64_t t0 = bh_now();
         drain(0);
         present_value = held_present.value;
-        do_present(held_present.has_tex ? &held_present.tex : nullptr, held_present.has_crop ? held_present.crop : nullptr);
+        do_present(held_present.has_tex ? &held_present.tex : nullptr, held_present.has_crop ? held_present.crop : nullptr, held_present.cover);
         bh_shown(held_present.queued);
         update_blocked();
         bh_st.job_ns[1] += bh_now() - t0;
