@@ -64,6 +64,7 @@ int hos_binding(int set, int button, int slot);
 int hos_mic_count(void);            /* nn_audio_in.c: the microphones, for the Insert menu */
 const char *hos_mic_name(int index);
 void hos_mic_select(int mode, const char *name, int index);
+int hos_mic_test(int enabled, int gain, int *levels);
 void hos_bind(int set, int button, int slot, int code);
 int hos_prompts_face(void);         /* prompts.c */
 int hos_prompts_live_parts(void);   /* prompts.c */
@@ -334,6 +335,7 @@ static const MkwVkHost vk_host = {
     hos_options_file,
     hos_mod_info, hos_mod_edit, hos_mods_changed, hos_cheat_info, hos_cheat_set,
     hos_audio_output_count, hos_audio_output_info, hos_audio_output_select, hos_audio_output_state,
+    hos_mic_test,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */

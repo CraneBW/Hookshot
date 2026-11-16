@@ -382,6 +382,8 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Output device | Default or a named Windows playback device; applies live | Default |
 | | Speaker layout | Auto, Stereo, 5.1, Mono (layout changes after a restart; Mono/Stereo live on stereo output) | Auto |
 | | Microphone | Off, Default, or each microphone by name | Default |
+| | Microphone gain | Software input level, 0–400%; applies to new samples without changing system volume | 100% |
+| | Test microphone | Start/stop capture; live levels appear in the help box for Test microphone and Microphone gain | Stopped |
 | Gameplay | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
 | | Skip title screen | Off, On (after a restart) | Off |
@@ -602,6 +604,14 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
   once. A chosen microphone that is unplugged stays chosen (shown as not connected): Default stands in until it is
   back. On Linux (SDL2) two microphones with the same name cannot be told apart: the first is used. Windows must allow desktop apps to use the microphone
   (Settings, Privacy & security, Microphone). `HOS_MIC_LOG=1` logs what the game reads, a line a second.
+- **Microphone gain** changes captured samples for Hookshot only, from 0% to 400% (100% unchanged); it does not change
+  the system's input volume. Boosting raises noise too, and excessive levels clip. It applies to newly captured samples;
+  samples already buffered for the game keep their previous gain.
+- **Test microphone** starts and stops capture on request. During a test, the help box for Test microphone and
+  Microphone gain shows a read-only bar labeled Testing, with the incoming percentage before gain and the adjusted one
+  after it, and says when it clips, falls back to the default device, cannot capture or has no recent samples. Opening
+  the Audio tab alone never starts a test, and Microphone Off prevents one; leaving the tab, closing the menu or losing
+  focus stops it. No microphone sound is played back or saved.
 - **Game language** is the game's own text, `language.txt` in the game folder: the row writes it once you leave the row,
   and the game reads it at its next start (`HOS_LANGUAGE`, when set, wins over the file, as for the game). Where the
   folder cannot be written the row goes back to the file's language. **Menu language** is this menu's: Auto follows the

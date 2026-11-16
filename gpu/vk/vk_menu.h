@@ -130,6 +130,7 @@ struct Options {
     int menu_lang = 0;    // this menu's language: 0 Auto (the game's own, language.txt), else menu_i18n::kLangs[menu_lang - 1]
                           // (vk_menu_i18n.cpp). Saved as menu_language
     int mic = 1;          // (hookshot) the ocarina's microphone: 0 Off, 1 the system's default, 2.. a device as host->mic_name lists it (host/nn_audio_in.c)
+    int microphone_gain = 100; // software capture gain, 0..400%; leaves the system's input volume alone
     int skip_title = 0;   // (hookshot) start with the most recent save, pressing through the title and its file list (host/oot_autoload.c); read at the start
     int item_wheel = 0;   // (hookshot) R or L held shows the item row as a wheel (host/oot_wheel.c, vk_wheel.cpp); HOS_ITEM_WHEEL over it
     int cycle_items = 0;  // (hookshot) a tap of R or L changes the ZR item: 0 off (the default: R and L as the game has them),

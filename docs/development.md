@@ -686,12 +686,13 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 
 **What a build compiles again.** Each object is named by its source, its flags and the headers it depends on
 (`nx2/build.py` `object_key`), and kept in the object cache under that name. The Vulkan back end's own files (`gpu/vk`,
-not eden or sirit) are compiled with `-MD`, and the next build names each by the headers its depfile says it read
-(`renderer_deps`), so a renderer header edit compiles the files that include it. A file with no depfile yet (the first
-build, or one fetched from the object store, `HOOKSHOT_OBJ_STORE` above) is named by every header under `gpu/vk`,
-`gpu/render` and `gpu/compat`, as before. Lifted files depend on every runtime header, and the host's on every
-`host/*.h`. `vk_menu.cpp` and `host/hos_main.c` carry the version, a fingerprint of every source, so any source change
-compiles those two again.
+not eden or sirit) and the host's (`host/`) are compiled with `-MD`, and the next build names each by the headers its
+depfile says it read (`renderer_deps`), so a header edit compiles the files that include it. A file with no depfile yet
+(the first build, or one fetched from the object store, `HOOKSHOT_OBJ_STORE` above) is named by every header it could
+read: for the back end, every header under `gpu/vk`, `gpu/render` and `gpu/compat`; for the host, every header under
+`host/`, the lifted ones, and `gpu/`'s own (not eden's, sirit's or `gpu/third_party`'s). Lifted files depend on every
+runtime header. `vk_menu.cpp` and `host/hos_main.c` carry the version, a fingerprint of every source, so any source
+change compiles those two again.
 
 Builds keep the button prompts when their source, fonts, game assets, button tables, image overrides,
 Python, package/library versions and generation options still match, and every generated file still has its recorded
@@ -1175,6 +1176,26 @@ only 30 seconds of successfully submitted and returned audio blocks reset that b
 or healthy fallback does not establish that the named device plays. Explicitly changing the chosen device resets its
 retry state. Device discovery refreshes when the menu opens, rather than polling on the render thread.
 
+`microphone_gain` persists independently of the device choice (0..400%, default 100%). `nn_audio_in.c` processes each
+fresh SDL block once before distributing it to started guest streams, with saturation and pre/post-gain peak measurements.
+The guest Set/GetInputStreamGain API is unchanged. SDL2 and SDL3 use the same processing path.
+`MkwVkHost.mic_test` is appended after the output-device callbacks (API version 25, preserving `take_text` and `options_path`).
+An explicit Audio test holds a separate source reference, sharing the guest's 48 kHz mono source when possible, with
+one extra source slot reserved for tests. Menu ticks serialize draining with guest reads under the input lock. A test-only
+source has no guest ring; its queued audio is drained before a first guest joins. Releasing the test cannot close a source
+still referenced by the game. The test state is never saved, and menu-tick cleanup releases it on tab/page/close/focus/Off
+transitions. Levels expire after 250 ms without samples; clipping is held for one second. Silence arriving from SDL is valid
+input, not a stalled capture. No system mixer changes, audio playback or audio-file writes are introduced.
+The full menu shows the live read-only meter inside the help box for both Test microphone and Microphone gain; there is
+no separate Microphone level row. Each row's instructions share the same before/after-gain percentage bullets. During an
+explicit test the bar reads `Testing: <incoming>% -> <adjusted>%`, with clipping, fallback and capture availability shown
+separately. Both help measurement and drawing reserve the same meter/status space, so test start/stop does not resize the
+box. Navigating between Test microphone and Microphone gain keeps the existing Audio-tab capture lifetime.
+`tests/test_mic_help_meter.py` adds fake-UI fixtures for shared explanations, status flags, meter bounds and stable sizing
+at multiple scales and widths. Actual font metrics and visual layout still require a game play-test.
+`tests/test_microphone_test_gain.py` covers sample formats, gain, meter freshness and shared capture lifetime using fake SDL
+and clock inputs; actual Windows/Linux capture and menu rendering still require runtime verification.
+
 | Key | Values |
 |---|---|
 | `quality_preset` | 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+) |
@@ -1199,6 +1220,7 @@ retry state. Device discovery refreshes when the menu opens, rather than polling
 | `game_speed` | 0 Per frame, 1 Real time |
 | `text_speed` | 0 Normal, 1 2x, 2 4x, 3 Instant |
 | `microphone` | 0 Off, 1 Default, 2 and up a microphone (the name in `microphone_device` decides which) |
+| `microphone_gain` | 0–400 percent software capture gain; 100 unchanged. Applied once before distribution to guest streams, on SDL2 and SDL3 |
 | `mouse_camera` | 0 As the stick, 1 Native, 2 Off (the mouse is never captured) |
 | `walk_mode` | 0 Hold, 1 Toggle |
 | `layout_preset` | 0 Nintendo, 1 Xbox / PC, 2 Swap Face, 3 Custom |

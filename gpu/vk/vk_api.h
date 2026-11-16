@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 27
+#define MKWVK_API_VERSION 28
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (hookshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -269,6 +269,10 @@ typedef struct MkwVkHost {
     int (*audio_output_info)(int index, char *id, int id_capacity, char *name, int name_capacity);
     void (*audio_output_select)(const char *id);
     int (*audio_output_state)(void);
+    /* (version 28, hookshot: the explicit microphone test, at the end) explicit microphone test; gain 0..400 percent, levels[2] pre/post gain peak permille.
+       Call every menu tick (enabled=0 releases only the test reference). Does not play or save capture.
+       Result: 1 testing, 2 capture open, 4 default fallback, 8 fresh samples, 16 clipping, 32 mic Off. */
+    int (*mic_test)(int enabled, int gain, int *levels);
 } MkwVkHost;
 /* (version 26) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };
