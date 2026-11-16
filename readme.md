@@ -60,7 +60,7 @@ what does not yet. Open problems are collected in tracking issues, linked below.
 | Stutter when entering new areas | ⚠️ Still happens the first time you visit a place. The next visits are smooth |
 | Performance | ⚠️ Depends on the PC: some reach a steady 60 fps, others stay below it, more so in Hyrule Field |
 | Hyrule Field, Castle Town, Kakariko and the dungeons | ⚠️ Players got there, with open bugs: lighting and shadows (#1004), crashes and freezes (#2507) |
-| Ultrawide and 4:3 | ✅ Works. The Aspect ratio row's default, Monitor's shape, widens the 3D to the screen and keeps the HUD and movies in the middle 16:9 ([#2119](https://git.notrexed.dev/Hookshot/Hookshot/commit/145eed2650d9d2cebad85a8a0052d302086015c7)) |
+| Ultrawide and 4:3 | ✅ Works. The Aspect ratio row's default, Monitor's shape, widens the 3D to the screen ([#2119](https://git.notrexed.dev/Hookshot/Hookshot/commit/145eed2650d9d2cebad85a8a0052d302086015c7)); the HUD keeps its 16:9 size with its corners at the screen's edges, or in the middle 16:9 with the HUD layout row; movies stay in the middle 16:9 |
 | NVIDIA cards | ✅ Works. The most tested |
 | AMD cards | ⚠️ Many tested: reports from the RX 6600, RX 6800 XT, RX 7800 XT, RX 7900 XTX and RX 9070 XT. On Windows, the RX 6000 cards (Navi 21 and 22) draw task and mesh shaders through the compute fallback by default, as the driver lost the GPU with them (#1747, [#1992](https://git.notrexed.dev/Hookshot/Hookshot/commit/1396428d0bfcde68b5c7bd63f9837564d9af1a05), [#2215](https://git.notrexed.dev/Hookshot/Hookshot/commit/f95d80f5371821420c5a47a0c7e9f73e7f484abc)). Driver crashes and device lost are still reported ([#996](https://git.notrexed.dev/Hookshot/Hookshot/commit/f95d80f5371821420c5a47a0c7e9f73e7f484abc)) |
 | Intel cards | ❓ Few reports, many of them black screens or crashes (#999) |
@@ -360,6 +360,7 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | CRT filter | Off, Lottes aperture grille, Lottes consumer TV, Hyllian Fast, zfast CRT (changes at once; Native HDR bypasses it) | Off |
 | | CRT lines | 240, 480, 720 virtual lines (shown with a CRT filter on; changes at once; capped at half the destination height) | 240 |
 | | Ultrawide menus | Full width; Centred, blurred sides; Centred, black bars (with the Aspect ratio at the monitor's shape) | Centred, blurred sides |
+| | HUD layout | Screen's edges; Middle 16:9 (on a screen that is not 16:9; `HOS_WIDE_UI`, when set, decides) | Screen's edges |
 | | HDR | Off, Expanded, Native (the game's) | Off |
 | | HDR paper white | 80 to 400 nits (while HDR is on) | 200 nits |
 | | HDR peak brightness | 400 to 4000 nits (while HDR is on) | 1000 nits |
@@ -503,7 +504,8 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
   follow it: moved to another monitor, or the desktop's resolution changed while playing, the menu adds that screen's
   sizes. On Linux the screen's size comes from SDL (the primary display). A portrait screen has no shape the game can
   draw, so the row shows Monitor's shape as a value of its own there. Docked only. A shape other than 16:9 widens the cameras (21:9, 32:9) or narrows the
-  picture (16:10, 4:3, 5:4) and keeps the HUD and movies in the middle 16:9. At 16:9 on a 5120x1440 (32:9) monitor, the
+  picture (16:10, 4:3, 5:4); the HUD keeps its 16:9 size with its corners at the screen's edges (**HUD layout**: or in
+  the middle 16:9, as before), and movies stay in the middle 16:9. At 16:9 on a 5120x1440 (32:9) monitor, the
   game's 16:9 picture is stretched across the 32:9 output, sharp but wide. Options saved by an older version at 16:9,
   the default then, move to Monitor's shape on a screen narrower than 16:9 (16:10 such as the Steam Deck's, or 4:3),
   where 16:9 only adds bars above and below; an ultrawide keeps its 16:9. The output's rows below show the sizes for the

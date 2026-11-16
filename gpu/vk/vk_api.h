@@ -83,6 +83,11 @@ enum { HOS_OPT_GFX_UNCAPPED = 71 };   /* Debug's Uncap detail sliders (vk_menu.c
    as the right stick) read it by its number, as they read 8. The existing option callback: no new member. 59 is the
    transition autosave's and 60 is Shadow resolution's (the item wheel's is 72).) */
 enum { HOS_OPT_MOUSE_INVERT_X = 61 };
+/* (HOS_OPT_HUD_LAYOUT, 75: Graphics' HUD layout, host/hos_wide_ui.c reads it at each present by its number: on a screen
+   that is not 16:9, 0 the HUD's corners at the screen's edges, 1 the HUD in the middle 16:9 as before (on a narrower
+   screen fitted to its width, as the menus). HOS_WIDE_UI, when set, stands over it. The existing option callback: no new
+   member. 71 is Uncap detail sliders', 72 and 73 the item wheel's, 74 the Travel page's pictures.) */
+enum { HOS_OPT_HUD_LAYOUT = 75 };
 
 /* (hookshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of hookshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:
