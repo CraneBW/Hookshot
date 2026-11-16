@@ -2902,6 +2902,11 @@ def main(a=None):
                                       output=sys.stderr):
         print("the dump's damaged textures were not checked: the game runs without the stand-ins", flush=True)
     PHASES.part("shader list")
+    # (hookshot) the text that names the console, reworded for a PC in every language (host/texts.c serves them; a mod's own wins)
+    texts = os.path.join(out, "texts")
+    if run(PY + [os.path.join(HERE, "text_assets.py"), "--romfs", romfs, "--out", texts], check=False, output=sys.stderr):
+        print("the texts were not reworded for a PC: the game shows its own", flush=True)
+        shutil.rmtree(texts, ignore_errors=True)
     # (hookshot) the button prompts of other controllers (host/prompts.c): the game's icon font redrawn per controller, with fontTools.
     # Without it the game shows its own icons
     prompts = os.path.join(out, "prompts")

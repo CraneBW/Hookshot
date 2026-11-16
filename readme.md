@@ -170,6 +170,7 @@ To be safe, copy your saves somewhere first: the `user` folder in the game folde
 | Your saves (`user`, or `~/.local/share/hookshot` on Linux) | The game in `bin` and its files |
 | `hookshot_options.ini`, the in-game menu's choices and your controls | `image.bin` and the shader list |
 | `hookshot_env.txt` | `language.txt`, written again with the game's language |
+| | `texts`: the texts reworded for a PC, made again |
 | `mods` | |
 
 The game files the first build read are kept in the game folder, so an update does not need your `.nup` again.
@@ -360,6 +361,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native. DLSS, FSR and TAAU do not take its scene yet: the game's own upscale runs) | Vanilla |
 | | Texture detail | Auto, Full, Medium, Low | Auto |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
+| | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once | Auto |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | | Threaded rendering | Auto, On, Off (after a restart). Auto is On with 12 or more processor threads for the game | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
