@@ -102,6 +102,7 @@ struct Texture {
     std::vector<BlockAttachment> block_attachments;
 };
 static uint64_t rec_value = 0, destroy_gen = 1, total_bytes = 1 << 20;
+static void destroy_gen_bump(const Texture*) {}   // (vk_texture.cpp: the gone ring's generation, which the caches read)
 static void logf(const char*, ...) {}
 static void full_barrier(VkCommandBuffer, const char* = nullptr) {}
 static void destroy_buffer(VkBuffer, VmaAllocation) {}

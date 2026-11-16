@@ -1635,6 +1635,7 @@ bool bc1_on() {
     return on;
 }
 extern uint64_t destroy_gen;   // (below)
+void destroy_gen_bump(const Texture* tex);   // (below: the generation the caches read, texture_destroy_generation)
 /// (hookshot) tex's image made again in format f (BC1 or BC3, the same size, levels, layers and usage), its old image and views
 /// let go once the work that used them is done (as the compaction's move): its views are made again when next asked for
 bool bc_reformat(Texture& tex, VkFormat f) {
@@ -1653,7 +1654,7 @@ bool bc_reformat(Texture& tex, VkFormat f) {
     VkImage image = VK_NULL_HANDLE;
     VmaAllocation alloc = nullptr;
     if (!(compact_on() && create_image(ci, image, alloc, false, false, true)) && !create_image(ci, image, alloc)) return false;
-    destroy_gen++;
+    destroy_gen++, destroy_gen_bump(&tex);
     Dead d{tex.last_value, tex.image, tex.allocation, {}, {}};
     for (auto& kv : tex.views)
         if (kv.second) d.views.push_back(kv.second);
@@ -2794,7 +2795,9 @@ uint64_t destroy_gen = 1;   // (bumped when textures go: what was resolved to th
 /// later, 120 presents on (issue 2180's A/B: 65% more targets let go, 83% more images made new). The eviction only hands
 /// over one the GPU is done with (it skips those in flight), so the next frame's target takes it)
 void destroy_later(Texture& tex) {
-    destroy_gen++;
+    // (the generation the caches read is the gone ring's (texture_destroy_generation): each place a texture goes bumps it,
+    // or the recording threads' view, slot and descriptor caches keep serving a texture that is gone)
+    destroy_gen++, destroy_gen_bump(&tex);
     Dead d{tex.last_value, tex.image, tex.allocation, {}, {}};
     if (tex.pool_key && tex.allocation && tex.sparse_chunks.empty() && pool_cap()) {   // (a render target's: to the pool, its views too)
         d.pool_key = tex.pool_key, d.view_map = std::move(tex.views), d.bytes = tex.bytes + tex.pad;
@@ -5713,7 +5716,7 @@ void compact_step(uint64_t completed) {
         return;
     }
     full_barrier(cmd, "compaction: after the copies");
-    destroy_gen++;   // (what was resolved to the moved textures' views is stale)
+    destroy_gen++, destroy_gen_bump(nullptr);   // (what was resolved to the moved textures' views is stale: all of them)
     compact.in_pass = true, compact.value = rec_value;
 }
 
@@ -5771,7 +5774,7 @@ void texture_frame(uint64_t completed) {
     if (const int64_t d = st_deferred_frame.exchange(0, std::memory_order_relaxed)) {
         // (the views and descriptor sets resolved to the placeholder this frame go stale, as when textures go: the next frame
         // looks those textures up again, and uploads them)
-        destroy_gen++;
+        destroy_gen++, destroy_gen_bump(nullptr);
         static int told;
         if (told++ < 40 || st_deferred.load(std::memory_order_relaxed) % 2000 < d)
             logf("vk: %lld new ASTC textures left for a later frame (this frame's uploads took their budget; %lld so far)", (long long)d,
