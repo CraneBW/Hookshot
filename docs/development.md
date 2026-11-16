@@ -558,6 +558,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_FALLBACK_LOADED=0` | Where mesh programs are drawn through the compute fallback: the start makes the compute pipelines only of the fallback programs it reads in for that, as before, and not of those read in earlier in the same start (the state lists' programs, in the start that prepares the shaders), whose first draws are then left out until their pipelines are compiled in play |
 | `RX_VK_FALLBACK_PHI_LIMIT=<n>` | RADV on GCN 1-4 cards (RX 400/500, R9 2xx/3xx/Fury): a mesh fallback compute stage with more than this many phis is not built and its draws are left out (default 50000; `0`: no limit; anything but decimal digits is ignored with a warning; the limit in use is logged). Its compiler did not finish the two biggest mesh programs (80,000 phis) and grew past 25 GB (`gpu/vk/fallback_size_policy.h`) |
 | `RX_VK_DRIVER_FAULTS=0` or `2` | 0: programs the driver's compiler faulted on are asked of it again. By default they are left out for the rest of the run and, through `hookshot_driver_faults.txt` in the game folder's `cache`, on later runs with the same driver, and on AMD one program's builds go to the driver one at a time (issue 996). 2: one at a time on every driver |
+| `RX_VK_MMA_UNROLL=0` or `1` | How the game's upscale networks multiply where the GPU has no cooperative matrices (the Steam Deck and other AMD GPUs before RDNA 3, GTX 10 and 16, Intel's integrated GPUs; `gpu/vk/eden/shader_recompiler/backend/spirv/mma_software.h`): 0 the loop, as before; 1 the unrolled form, tried on any GPU. By default it is tried on RADV, where it was measured: on the Steam Deck the gameplay network at Resolution 100% takes 3.82 ms a frame instead of 8.61. Either way a self-test at start runs both forms on the device and keeps the unrolled one only where every word of it is the loop's; the log's `vk: software matrix multiplies` line says which. It changes the shaders' translation (one preparation of the shaders) |
 | `RX_VK_NO_INTEL_SERIAL=1` or `0` | On Windows, Intel's compiler (UHD and Arc) is entered by one thread, and a fault creating a shader or pipeline leaves that one out; on the Arc B-series from driver 101.9154 it is entered side by side by default (the row's Auto, `gpu/vk/intel_compiles.h`: a first visit to an area froze the picture for 4 to 7 minutes one at a time on a B580 and not at all side by side). 1 builds them side by side, as on every other GPU and on Intel elsewhere, 0 one at a time, for the run: the Debug tab's Intel shader compiles row shows it and is not changed (`hookshot_options.ini` keeps the row's own, `intel_shader_compiles=`). The log says which |
 | `RX_VK_COMPUTE_QUICK_FIRST=0` | With Intel's compute pipelines built one at a time on Windows (Intel's own driver; not on Linux, where Mesa's ANV ignores the optimizer flag), a dispatch's pipeline is built first without the driver's optimizer (seconds where the optimizer took up to minutes on a UHD Graphics) and the optimized one is bound once it is built behind the others. This builds the optimized one only, as before, for the run: the Debug tab's Intel quick compute builds row shows it (`hookshot_options.ini` keeps the row's own, `intel_quick_compute_builds=`) |
 | `HOS_VIDEO_NO_CATCHUP=1` | A movie does not skip pictures that are behind its sound. By default, pictures already decoded are skipped, and a decoder that keeps up decodes ahead to skip a late one (at most one picture's time in a frame). A decoder slower than the gap between pictures, timed over its recent pictures, shows the late one instead of decoding the next in order to drop it |
@@ -899,7 +900,7 @@ your own it costs nothing. `scripts/dev_build.py` builds through it.
 ```
 python -I scripts/dev_build.py base                 # the base where this checkout left main: one per commit, shared
 python -I scripts/dev_build.py pack                 # this checkout as a pack over it
-python -I scripts/dev_build.py rt                   # build-linux/rt-<checkout>/, a game folder to run
+python -I scripts/dev_build.py rt                   # build-linux/rt-<checkout>/ (build-windows\ on Windows), a game folder to run
 python -I scripts/dev_build.py rt --empty           # build-linux/rt-base/: the base alone, the other half of an A/B
 python -I scripts/job_queue.py run shots --mode shared -- <your run in that folder>
 python -I scripts/job_queue.py run fps --mode timing -- <your measurement>
@@ -932,6 +933,16 @@ The rules worth knowing (the script's notes have all of them):
   installed once under `~/.cache/hookshot-dev/builder/`), the object and translation stores `dev_packs.py` uses, and one base
   per commit of main (`~/.cache/hookshot-dev/bases/`), so the second checkout to build anything compiles only what differs.
   A checkout's own build files (`build`, `vk`, runtimes) stay in its `build-linux/`, and go when the checkout does.
+- **On Windows too.** The same commands, with Windows' folders: `HOOKSHOT_DEV_HOME` is `%LOCALAPPDATA%\Hookshot\dev`, the
+  stores are `dev_packs.py`'s (`%LOCALAPPDATA%\Hookshot\objects` and `lifts`), the settings file is
+  `%APPDATA%\Hookshot\dev_build.json` (beside `job_queue.json`) and a checkout's own files go in its `build-windows\`. The
+  build tools are tools.lock's `windows-x64` lines, installed by `scripts/tools.py install` and set as the Windows builder
+  has them (its `llvm-mingw` as `HOOKSHOT_MINGW`, `EMSDK`, `RX_CPM`); its Python, which has the build's packages, runs the
+  build, and the tree a build reads gets the builder's prebuilt `SDL2.dll` and `SDL3.dll` in `third_party\sdl2` (git
+  ignores them). `env` prints PowerShell's `$env:` lines; `vk` builds `hookshot_vk.dll` and checks it exports `mkwvk_init`
+  (an undefined symbol already fails the link there). The game's files are found in `~\Games` and `~\Games\Hookshot` (the
+  launcher's builds), else name them (`HOOKSHOT_DEV_ROMFS`, `HOOKSHOT_DEV_EXEFS`). A drive with little room: point
+  `HOOKSHOT_DEV_HOME` and the two stores at one folder on a bigger drive, so the objects stay hard links.
 
 ### Build times
 
