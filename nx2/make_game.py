@@ -2892,6 +2892,15 @@ def main(a=None):
                  "and no second Hookshot Builder is working in that folder, then update again." % (", ".join(cut[:6]), work))
 
     translate()
+    # (Hookshot native engine) the entry gates host/hl_*.c asks for (nx2/hl_gates.py), after the translation (it ran or was skipped):
+    # the lift puts them in, but its key does not cover the HL_GATE lines of host/, so an update that adds a gate would
+    # leave it out, and one that drops a gate would leave a gate line calling a function no host file defines any more (an
+    # undefined symbol at every link). A change here rewrites the key: the files were as it vouched for just before
+    import hl_gates
+    before = gen_print(gen_dir)
+    hl_gates.apply(gen_dir, quiet=True)
+    if gen_print(gen_dir) != before:
+        write_lift_key(work, key)
 
     # (the compile's timer: build.py reads the record of the earlier builds on this PC, says which files this run really
     # rebuilds and how long the rest will take, and reports each module's seconds; they go into the record below)

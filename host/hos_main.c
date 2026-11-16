@@ -159,6 +159,8 @@ static int reserve_guest(void) {
     /* mkw-recomp: 512 GB reserved, committed as the runtime hands memory out (hos_commit) or on first touch */
     void hos_commit_init(void);
     hos_commit_init();
+    int hos_reserve_guest_pages(int write_watch);   /* (mkw_glue.c: HOS_GUEST_PAGES=1, the heap and regions over a placeholder) */
+    if (hos_reserve_guest_pages(0)) return 1;   /* (the window is not hardware write-watched: the soft write watch) */
     return VirtualAlloc((void *)A64_HOST_BASE, GUEST_SPACE, MEM_RESERVE, PAGE_NOACCESS) == (void *)A64_HOST_BASE;
 #else
     /* (linux) the whole window readable and writable at once, its pages made as they are first touched (no commit

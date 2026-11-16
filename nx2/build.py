@@ -57,7 +57,7 @@ NX2_RT = os.path.join(kit.HERE, "rt")
 HOST = os.path.join(kit.HERE, "..", "host")
 OPUS = os.path.join(kit.HERE, "..", "third_party", "opus")
 ZSTD = os.path.normpath(os.path.join(kit.HERE, "..", "third_party", "zstd", "lib"))
-ZSTD_HOST = ("prompts.c", "hos_zstd.c", "zs.c")   # (the host files that use it: a mod's size table; the game's stream decode)
+ZSTD_HOST = ("prompts.c", "hos_zstd.c", "zs.c", "hl_stream.c")   # (the host files that use it: a mod's size table; the game's stream decode)
 OBJ_CACHE = os.path.join(kit.WORK, "objcache")
 # (HOOKSHOT_OBJ_STORE: one store of objects for every work folder, nx2/object_store.py. Its folder for this work folder's compiler
 # and headers, or None)
@@ -429,6 +429,13 @@ def HOT_ORDER():
 HOST_LIBS = ["-lpthread", "-ldl", "-lm"] if LINUX else \
     ["-luser32", "-lwinmm", "-ladvapi32", "-lole32", "-lshell32", "-lgdi32", "-ldbghelp"]
 GPU = os.path.join(kit.HERE, "..", "gpu")
+# (Hookshot) the native engine (engine/native, C++20: docs/native-engine): its own headers and the standard library only;
+# host/hl_host.c and one host/hl_<module>.c a module are the OS layer's side of it
+NATIVE = os.path.normpath(os.path.join(kit.HERE, "..", "native"))
+
+
+def native_sources():
+    return sorted(os.path.join(d, f) for d, _, fs in os.walk(os.path.join(NATIVE, "src")) for f in fs if f.endswith(".cpp"))
 # FFmpeg (libavcodec's VP8/VP9 decoders, swscale) for nn::codec's video decoders (host/nn_video.c): the static build
 # in the Eglantine clone's package cache
 FFMPEG = None   # (found in the CPM caches below, once cpm_dirs is defined)
@@ -1556,9 +1563,13 @@ def main():
         sum(1 for x in srcs if os.path.basename(x).startswith("code_"))), flush=True)
     # the runtime: ordinary C at -O2, with its own headers (any host/*.h change rebuilds all of it)
     host_fl = target() + CPU + (["-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + \
-        ["-I" + HOST, "-I" + rt64, "-I" + gen, "-Wno-everything", "-O2", "-g0", "-mcx16", "-DA64_POLLING"] + WRITE_TRACK
+        ["-I" + HOST, "-I" + rt64, "-I" + gen, "-I" + os.path.join(NATIVE, "include"), "-Wno-everything", "-O2", "-g0", "-mcx16",
+         "-DA64_POLLING"] + WRITE_TRACK
     host_deps = deps + b"".join(open(os.path.join(HOST, f), "rb").read() for f in sorted(os.listdir(HOST))
                                 if f.endswith(".h"))
+    # (the native engine's C surface, hl/c: what host/hl_*.c include)
+    host_deps += b"".join(open(os.path.join(NATIVE, "include", "hl", "c", f), "rb").read()
+                          for f in sorted(os.listdir(os.path.join(NATIVE, "include", "hl", "c"))) if f.endswith(".h"))
     if LINUX:
         host_deps += b"".join(open(os.path.join(POSIX, f), "rb").read() for f in sorted(os.listdir(POSIX)) if f.endswith(".h"))
     host_deps += open(os.path.join(GPU, "vk", "vk_api.h"), "rb").read()   # (the renderer ABI used by host/rx_backend.c)
@@ -1579,6 +1590,15 @@ def main():
               (["-I" + ZSTD] if os.path.basename(s) in ZSTD_HOST else []) +
               (dav1d_fl if os.path.basename(s) in ("nn_video.c", "dav1d_av1.c") else []),
               host_deps + (zstd_api if os.path.basename(s) in ZSTD_HOST else b"")) for s in host_srcs]
+    # (Hookshot) the native engine (native/, C++20), in the game's executable: each module off unless its switch is set
+    # (host/hl_*.c, docs/native-engine)
+    if host_srcs:
+        ncxx = toolchain.need(toolchain.find("clang++"))
+        nflags = target() + CPU + ["-std=c++20", "-O2", "-g0", "-DNDEBUG", "-Wall", "-Wextra", "-I" + os.path.join(NATIVE, "include")]
+        ndeps = tree_headers(os.path.join(NATIVE, "include"))
+        for src in native_sources():
+            name = os.path.relpath(src, os.path.join(NATIVE, "src")).replace(os.sep, "_")[:-4]
+            jobs.append((ncxx, src, os.path.join(obj_dir, "native_" + name + ".o"), nflags, ndeps))
     # libopus 1.5.2 (third_party/opus, from TOTKPort): nn::codec's hardware Opus decoder (host/nn_codec.c)
     # (hookshot: built for the same CPU target as the rest (CPU), so its float code can be vectorized where the target has
     # AVX2: the vendored copy has no x86 intrinsics files of its own)
@@ -1870,7 +1890,8 @@ def main():
         r = run_link([cc] + target() + ["-fuse-ld=lld", "-o", exe] + linker("-Map=" + exe + ".map") +
                      ["-Wl,--gc-sections", "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
                      (["-fprofile-instr-generate"] if PGO == "gen" else []) +
-                     (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS, exe)
+                     (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS +
+                     (["-l:libstdc++.a"] if SYSROOT else ["-lstdc++"]), exe)   # (native/'s C++: static with the AppImage's sysroot)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
             print("link FAILED (%.0fs), %d undefined symbols" % (time.time() - t, len(undefined)))

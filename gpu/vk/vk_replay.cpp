@@ -3069,7 +3069,7 @@ bool occ_sync(VkCommandBuffer& cmd) {
 // (RX_VK_PARALLEL=<threads recording a command buffer, the replay thread one of them>; 0, 1: off, the default. Segments
 // recorded out of order left one-frame black scenes in play, 48-93 in a walk through Kakariko against none on the
 // replay thread alone, at about the same frame rate here: 36-40 fps against 38-41)
-// (2026-11-08, this fork: with HOOKSHOT_OCCLUSION_OFF=1 the flashes of out-of-order segments did not come back in six Kokiri walks (five in one
+// (2026-11-08, the fork: with the game's occlusion queries turned off (a switch since removed) the flashes of out-of-order segments did not come back in six Kokiri walks (five in one
 // walk without it), and the replay fell from 12.6 to 8.5 ms (54 -> 58 fps, the game's 60 Hz pacing then the limit). But the picture is wrong
 // with segments of 160 or 320 draws: the fog is washed out and the ground has no shadows, from the first frame, with or without
 // Occlusion Off. Segments of 640 and one big one are right, and so are two threads on segments of 1000; no boundary placement alone does it
