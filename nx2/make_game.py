@@ -2319,6 +2319,25 @@ def portable_game_home(out):
     return relative
 
 
+# (hookshot) the toolchain's switches a build was made with, kept in its record (write_build_record)
+RECORD_ENV = ("EMSDK", "RX_CPM", "HOOKSHOT_MINGW", "HOOKSHOT_NGX_SDK", "HOOKSHOT_FFX_SDK", "WGPU_NATIVE", "HOOKSHOT_TOOLS")
+
+
+def write_build_record(out, work, tag, fsr):
+    """(hookshot) .hookshot_build.json in the game folder: how it was built (the version, these tools, their Python, the work
+    folder, the toolchain's switches, AMD FSR 4), so the launcher's Mods page builds it again the same way when the mods' code
+    patches change: the same version and work folder, nothing downloaded (builder/HookshotBuilder/BuildRecord.cs)"""
+    record = {"version": tag, "tools": os.path.abspath(ROOT), "python": sys.executable, "work": os.path.abspath(work),
+              "env": {k: os.environ[k] for k in RECORD_ENV if os.environ.get(k)}, "fsr": bool(fsr)}
+    path = os.path.join(out, ".hookshot_build.json")
+    try:
+        with open(path + ".new", "w", encoding="utf-8", newline="\n") as f:
+            json.dump(record, f, indent=1)
+        os.replace(path + ".new", path)
+    except OSError as e:
+        print("the build's record was not written (%s): the Mods page cannot rebuild this folder by itself" % e, flush=True)
+
+
 def write_game_home(out, relative):
     """Only called after successful output finalization; never resolves relative to the process cwd."""
     destination = os.path.join(out, ".hookshot_builder_home")
@@ -3029,6 +3048,7 @@ def main(a=None):
                 f.write("builder_local=1\n")
             elif os.environ.get("HOOKSHOT_BUILDER_EXE"):
                 f.write("builder=%s\n" % os.environ["HOOKSHOT_BUILDER_EXE"])
+    write_build_record(out, work, tag, fsr_wanted(a, out))
     PHASES.part("pipeline lists, icon and stamps")
     # (the game's code as read: written again by every build, so not left behind in the work folder. The translated code (sa\gen)
     # and the compiled objects stay: the next build skips the lift when nothing it reads changed (#428) and compiles only what

@@ -399,11 +399,7 @@ public partial class MainWindow : Window
     {
         ToolsPage.Back = () => ShowPage(from);
         ToolsPage.Play = play;
-        ToolsPage.Rebuild = f =>
-        {
-            keepPatchBuild = f;
-            Updater.UpdateFolder(this, f, Tools.Find()?.Version, fetched: false);   // (as Update: the same folder, saves kept)
-        };
+        ToolsPage.Rebuild = RebuildForMods;
         ToolsPage.Open(Tools.Find(), folder);
         ShowPage(ToolsPage);
     }
@@ -1595,6 +1591,33 @@ public partial class MainWindow : Window
     }
 
     /// The new tools are here: the folder built again with them (only what changed is compiled)
+    /// (the Mods page's Rebuild) the folder built again for its mods' code patches, the way it was built (BuildRecord.cs): its own
+    /// version, tools and work folder, so only what the patches change is done again. Never another version, never a download
+    void RebuildForMods(string folder)
+    {
+        var (rec, why) = BuildRecord.Find(folder);
+        if (rec != null && !rec.AppliesPatches)
+            why = $"This game's version ({rec.Version}) does not apply the mods' code patches yet: update the game first, then Rebuild.";
+        if (rec == null || why != null)
+        {
+            MessageBox.Show(this, why ?? "This game cannot be rebuilt here.", "Hookshot", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        keepPatchBuild = folder;
+        BeginUpdate(folder, rec.Version);
+        BuildTitle.Text = "Rebuilding for your mods";
+        BuildNote.Text = "The same version, built again with your mods' code patches. Your current game stays as it is until the new one is complete.";
+        if (rows.TryGetValue("download", out var d)) { d.Done(); d.Small("This game's own build tools: nothing to download"); }
+        var saved = BuilderSettings.Load(SettingsPath);
+        var dlss = File.Exists(System.IO.Path.Combine(folder, "ngx", "nvngx_dlss.dll")) &&
+                   (saved?.DlssLicense == true || File.Exists(System.IO.Path.Combine(Storage.NgxSdk, "LICENSE.txt")) ||
+                    rec.Tools.Env?.ContainsKey("HOOKSHOT_NGX_SDK") == true);
+        var args = new List<string> { "--update", folder };
+        if (!string.IsNullOrEmpty(rec.Work)) { args.Add("--work"); args.Add(rec.Work); }
+        if (rec.Fsr) args.Add("--fsr");
+        Run(rec.Tools, ShaderStep.Args(args, prepareNow), keepRows: true, dlss: dlss, fsr: rec.Fsr);
+    }
+
     internal void UpdateBuild(Tools tools, string folder)
     {
         download = null;
