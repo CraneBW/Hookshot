@@ -77,13 +77,13 @@ class Http:
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             if not isinstance(e, SetupError):
                 self.status = self.status if self.status and self.status != 200 else 0
-                raise SetupError("Could not reach GitHub (%s)" % getattr(e, "reason", e)) from None
+                raise SetupError("Could not reach the release server (%s)" % getattr(e, "reason", e)) from None
             raise
 
 
 def api_link_for(http, url):
-    """https://github.com/<owner>/<repo>/releases/download/<tag>/<name> (or .../latest/download/<name>) -> the API's own link to
-    that file, which redirects to a fresh download (GitHub's cached release links answered 504 for hours while its API answered)"""
+    """https://git.notrexed.dev/<owner>/<repo>/releases/download/<tag>/<name> (or .../latest/download/<name>) -> the API's own link to
+    that file, which redirects to a fresh download (the cached release links answered 504 for hours while the API answered)"""
     m = re.match(r"https://git\.notrexed\.dev/([^/]+/[^/]+)/releases/(?:download/([^/]+)|latest/download)/([^/?]+)$", url)
     if not m:
         return None
@@ -124,8 +124,8 @@ def manifest_url(tag=None):
     if e:
         return e
     if tag:
-        return "https://github.com/%s/releases/download/%s/hookshot-setup.txt" % (REPO, tag)
-    return "https://github.com/%s/releases/latest/download/hookshot-setup.txt" % REPO
+        return "https://git.notrexed.dev/%s/releases/download/%s/hookshot-setup.txt" % (REPO, tag)
+    return "https://git.notrexed.dev/%s/releases/latest/download/hookshot-setup.txt" % REPO
 
 
 def read_manifest(status, tag=None, cancel=None):
@@ -134,7 +134,7 @@ def read_manifest(status, tag=None, cancel=None):
     text, last = None, ""
     for attempt in range(len(WAITS) + 1):
         if attempt:
-            status("GitHub didn't answer (%s). Trying again in %d s..." % (http.status or "no answer", WAITS[attempt - 1]))
+            status("The release server didn't answer (%s). Trying again in %d s..." % (http.status or "no answer", WAITS[attempt - 1]))
             time.sleep(WAITS[attempt - 1])
             status("Looking for the latest Hookshot Builder...")
         try:
@@ -156,11 +156,11 @@ def read_manifest(status, tag=None, cancel=None):
     if text is None:
         if http.status == 404:
             raise SetupError("The latest Hookshot release has no setup files yet. Download it from the releases page for now: "
-                             "https://github.com/%s/releases/latest" % REPO)
+                             "https://git.notrexed.dev/%s/releases/latest" % REPO)
         if http.status:
-            raise SetupError("GitHub's download servers are failing right now (an error 500 or above, tried 8 times over 3 minutes). "
-                             "This is on GitHub's side: try again in a few minutes, or later today.")
-        raise SetupError("Could not reach GitHub to get the Hookshot Builder (%s). Check your internet connection and try again." % last)
+            raise SetupError("The download servers are failing right now (an error 500 or above, tried 8 times over 3 minutes). "
+                             "This is on their side: try again in a few minutes, or later today.")
+        raise SetupError("Could not reach the release server to get the Hookshot Builder (%s). Check your internet connection and try again." % last)
     got_tag, parts = "", []
     for line in text.splitlines():
         p = line.split()
@@ -175,7 +175,7 @@ def read_manifest(status, tag=None, cancel=None):
     if not list_ok(got_tag, parts):
         raise SetupError("The release's setup list has a name this setup does not accept. Try again later.")
     if tag and tag != got_tag:
-        raise SetupError("GitHub answered with the setup list of %s, not %s (its download links can lag right after a release). "
+        raise SetupError("The release server answered with the setup list of %s, not %s (its download links can lag right after a release). "
                          "Try the update again in a few minutes." % (got_tag, tag))
     return got_tag, parts
 
@@ -300,8 +300,8 @@ def download_part(status, progress, p, i, n, zpath, cancel):
     http, part = Http(), zpath + ".part"
     for attempt in range(len(WAITS) + 1):
         if attempt:
-            status("Part %d of %d: GitHub didn't answer (%s). Trying again in %d s..." % (i, n, http.status or "no answer",
-                                                                                          WAITS[attempt - 1]))
+            status("Part %d of %d: the release server didn't answer (%s). Trying again in %d s..." % (i, n, http.status or "no answer",
+                                                                                                   WAITS[attempt - 1]))
             time.sleep(WAITS[attempt - 1])
         status("Downloading part %d of %d (%d MB)..." % (i, n, p.size >> 20))
         h = hashlib.sha256()
@@ -333,8 +333,8 @@ def download_part(status, progress, p, i, n, zpath, cancel):
         os.remove(part)
     except OSError:
         pass
-    raise SetupError(("Downloading part %d of %d failed: GitHub's download servers are failing right now (tried 8 times over 3 "
-                      "minutes). This is on GitHub's side. The parts already downloaded are kept: try again in a few minutes."
+    raise SetupError(("Downloading part %d of %d failed: the release server is failing right now (tried 8 times over 3 "
+                      "minutes). This is on their side. The parts already downloaded are kept: try again in a few minutes."
                       if retryable(http.status) else
                       "Downloading part %d of %d failed. Check your connection and free space, then try again.") % (i, n))
 
