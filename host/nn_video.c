@@ -826,7 +826,7 @@ static void dec_acquire(Ctx *c) {
         if (skipped && video_log()) hos_log("video: %d pictures skipped to catch up with the movie's clock", skipped);
     }
     {   /* (Hookshot) And above 60 fps the game still takes one picture a frame: at 120 the movie ran at twice its speed,
-           ended early and stayed black while its sound and voice lines went on (the owner's v0.3.2 report). A picture
+           ended early and stayed black while its sound and voice lines went on. A picture
            ahead of the movie's clock (by more than half a frame at 60) is not handed out yet: the buffer gets the last
            picture again, as a display shows a frame until the next one is due. Only for pools the game reads through
            the API (OoT's): nothing in guest memory to keep. HOS_VIDEO_NO_HOLD=1: as before */
