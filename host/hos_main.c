@@ -2399,6 +2399,7 @@ static int game_main(int argc, char **argv) {
     uint64_t sp = c->x[31];
     void hos_prof_start(void);
     hos_prof_start();   /* HOS_PROFILE=<seconds> */
+    hos_jt_start();     /* HOS_JOBTRACE=<path>: the guest threads' blocking and waking, a short window (hos_jobtrace.c) */
     void hos_chain_start(void);
     hos_chain_start();  /* HOS_CHAIN=<path> */
 #ifdef _WIN32

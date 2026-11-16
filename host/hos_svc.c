@@ -149,7 +149,9 @@ static uint32_t arbitrate_lock(uint32_t owner, uint64_t mutex, uint32_t tag) {
     waiters[nwaiters++] = (Waiter){self, mutex, 0, tag, 0};
     ReleaseSRWLockExclusive(&klock);
     int to;
+    HOS_JT(JT_K_WAIT_B, mutex, hos_jt_lr());
     hos_thread_wait(self, -1, &to);   /* woken once release_locked made us the owner */
+    HOS_JT(JT_K_WAIT_E, mutex, 2);
     return 0;
 }
 
@@ -174,7 +176,9 @@ static uint32_t wait_key(uint64_t mutex, uint64_t key, uint32_t tag, int64_t tim
     release_locked(mutex);
     ReleaseSRWLockExclusive(&klock);
     int to;
+    HOS_JT(JT_K_WAIT_B, key, hos_jt_lr());
     hos_thread_wait(self, timeout, &to);
+    HOS_JT(JT_K_WAIT_E, key, to ? 6 : 2);
     if (!to) return 0;
     AcquireSRWLockExclusive(&klock);
     int i = find_thread(self);
@@ -267,7 +271,9 @@ static uint32_t wait_address(uint64_t addr, uint32_t type, uint64_t value, int64
     waiters[nwaiters++] = (Waiter){self, 0, addr, 0, 2};
     ReleaseSRWLockExclusive(&klock);
     int to;
+    HOS_JT(JT_K_WAIT_B, addr, hos_jt_lr());
     hos_thread_wait(self, timeout, &to);
+    HOS_JT(JT_K_WAIT_E, addr, to ? 6 : 2);
     if (!to) return 0;
     AcquireSRWLockExclusive(&klock);
     int i = find_thread(self);
@@ -345,6 +351,8 @@ static void query_memory(uint64_t out, uint64_t addr) {
 #define CUR_THREAD 0xFFFF8000u
 static HosThread *thread_handle(uint32_t h) { return h == CUR_THREAD ? hos_self() : hos_thread_by_handle(h); }
 
+int hos_core_count_on(void);
+void hos_core_count_svc(void);
 void a64_svc(Ctx *c, uint32_t imm) {
     hos_vcore_checkpoint();
     switch (imm) {
@@ -439,6 +447,7 @@ void a64_svc(Ctx *c, uint32_t imm) {
         return;
     }
     case 0x10:   /* GetCurrentProcessorNumber */
+        if (hos_core_count_on()) hos_core_count_svc();   /* (TICK-062 A10, HOS_CORE_COUNT) */
         c->x[0] = (uint32_t)hos_thread_core(hos_self());
         return;
     case 0x1E:   /* GetSystemTick */
