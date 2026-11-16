@@ -1838,6 +1838,29 @@ LIFT_KEY = ".lift_key"   # (in <work>/sa/gen: what the lifted C there was made f
 # that nothing else the key covers reads them. The renderer's profile too, after ProjectReLink: a renderer profile made, changed or
 # taken away does not translate the game again)
 COMPILE_ONLY_ENV = ("RX_HOT_OPT", "RX_PGO", "RX_VK_PGO", "RX_VK_PGO_FILE")
+# (the dev-loop proposal's A2) what of the environment the key hashes: the variables whose values change the lifted C. The key
+# took every A64_, OOT_ and RX_ variable, so an RX_VK_ switch left set in the shell, or RX_RELEASE, which the lift does not read,
+# translated the game again, and so did a work folder or a game folder somewhere else: OOT_WORK, OOT_EXEFS, OOT_ROMFS, OOT_DUMP and
+# A64_HOT_FUNCS are paths, and what the lift reads through them (the exefs files, the hot list, the chunks, the hot pieces) is
+# hashed by its contents. SUYU_RECOMP_ is the emitter's own (third_party/a64-kit/lift/suyu/arm64_to_c.h), and was not in the key.
+# tests/test_lift_cache.py checks that every variable the lift's sources read is one of these, a path, or in LIFT_ENV_NOT_OUTPUT
+LIFT_ENV_PREFIXES = ("A64_", "SUYU_RECOMP_")
+LIFT_ENV_NAMES = ("RX_TARGET",)   # (toolchain.py: the target the emitter and its tables are made for)
+LIFT_PATH_ENV = ("OOT_WORK", "OOT_EXEFS", "OOT_ROMFS", "OOT_DUMP", "A64_HOT_FUNCS")
+LIFT_ENV_NOT_OUTPUT = {   # (read by the lift's sources, and no change to what it writes)
+    "HOOKSHOT_LIFT_JOBS": "how many processes", "HOOKSHOT_LIFT_NO_FORK": "how they are started", "RX_JOBS": "how many processes",
+    "EMSDK": "where the compiler is", "HOOKSHOT_MINGW": "where the compiler is",
+    "A64_SITE_PROFILE": "the game's runtime (a64_rt.c), at play", "RX_VK_NAN_GUARD": "nx2/bake_ds's own run",
+    "RX_VK_NO_DRAW_PARAMS": "nx2/bake_ds's own run", "RX_VK_NO_F16": "nx2/bake_ds's own run",
+    "RX_VK_SHARED_48K": "nx2/bake_ds's own run",
+    "HOS_NO_FASTFP": "the game's runtime (the lifted C reads it at play)",
+}
+
+
+def lift_reads_env(name):
+    """A variable whose value is part of the lift key (LIFT_ENV_PREFIXES, LIFT_ENV_NAMES; not a path, not the compile's)"""
+    return ((name.startswith(LIFT_ENV_PREFIXES) or name in LIFT_ENV_NAMES) and name not in LIFT_PATH_ENV
+            and name not in COMPILE_ONLY_ENV)
 
 
 LIFT_SCRIPTS = ("lift.py", "split_hot.py")   # (in nx2/: the two steps of the lift)
@@ -1907,8 +1930,8 @@ def lift_key(exefs, work, env, planning=True, paths=None):
             h.update(os.path.relpath(f, base).replace(os.sep, "/").encode() + bytes(1))
             with open(f, "rb") as src:
                 h.update(hashlib.sha1(src.read(), usedforsecurity=False).digest())
-    lift_env = dict(env, **{k: v for k, v in os.environ.items() if k.startswith(("A64_", "OOT_", "RX_"))})
-    lift_env = {k: v for k, v in lift_env.items() if k not in COMPILE_ONLY_ENV}
+    lift_env = dict(env, **os.environ)
+    lift_env = {k: v for k, v in lift_env.items() if lift_reads_env(k)}
     if paths:
         lift_env = {k: paths(v) for k, v in lift_env.items()}
     h.update(repr(sorted(lift_env.items())).encode())
