@@ -787,6 +787,18 @@ const char* tx_fov(int v) { return v == 100 ? "100% (original)" : tx_percent(v);
 // (hookshot) Walk mode: how the Walk key (the Controls page) makes Link walk with the movement keys (host/nn_hid.c walk_held)
 const char* tx_walk_mode(int v) { return v == 1 ? "Toggle" : "Hold"; }
 MENU_HINTS(hn_walk_mode, 0, "Link walks while the Walk key is held.", "One press of the Walk key walks, the next runs again.")
+/// Shadow resolution: the sun's cascades at the game's own sizes (host/oot_shadow.c). Auto, the default, takes the size
+/// for the card's memory (menu_shadow_res)
+const char* tx_shadow_res(int v) {
+    static const char* t[] = {"Auto", "Game's", "High", "Highest"};
+    return (unsigned)v < 4 ? t[v] : t[0];
+}
+MENU_HINTS(hn_shadow_res, 0,
+           "Chosen from the graphics card's memory: the game's size on 4 and 6 GB, High on 8 GB, Highest on 12 GB or "
+           "more.",
+           "1600 pixels a side, the console's. About 31 MB of video memory.",
+           "2200 pixels a side. About 58 MB of video memory.",
+           "3072 pixels a side, the game's own highest. About 113 MB of video memory.")
 const char* tx_prompts(int v) {
     static const char* t[HOS_PROMPT_N + 1] = {"Auto", "Switch", "Xbox", "PlayStation 4", "PlayStation 5", "Steam Deck",
                                               "Keyboard"};
@@ -920,6 +932,7 @@ void apply_preset(int p) {
     if (p > 0)
         for (const int* v : {&opts.resolution, &opts.upscale, &opts.sharpness, &opts.pace, &opts.realtime, &opts.handheld})
             env_release(v);
+    if (p > 0) opts.shadow_res = 0;   // (Shadow resolution back to Auto: the size for this preset's memory, menu_shadow_res)
     switch (p) {
     case 1: // Minimum (4GB VRAM / iGPU)
         opts.resolution = 4; opts.upscale = 2; opts.sharpness = 30;
@@ -1294,7 +1307,8 @@ Row rows[] = {
     // Quality preset first, as it sets rows in every section. (Reflex, Anti-Lag 2, the Upscaler and the DLSS model only where
     // they run here; HDR's paper white and peak brightness only with HDR on: row_shown)
     {TAB_GRAPHICS, "Quality preset", &opts.preset, 0, 6, 1, tx_preset,
-     "Sets the scaling rows for a GPU with that much memory. The Upscaler and Frame generation stay yours.",
+     "Sets the scaling rows and Shadow resolution for a GPU with that much memory. The Upscaler and Frame "
+     "generation stay yours.",
      hn_preset},
     // (the picture's way, top to bottom: the output's size, what fills it from the 3D, the 3D's size, its sharpening; then
     // the frames, and the window it is shown in)
@@ -1379,6 +1393,10 @@ Row rows[] = {
     {TAB_GRAPHICS, "Anisotropic filtering", &opts.anisotropy, 0, 4, 1, tx_anisotropy,
      "Keeps textures sharp on surfaces seen at a slant, such as the ground ahead: higher is sharper in the distance, for a "
      "little GPU time. Game's is the console's own (1x or 2x).", nullptr, false, true},
+    {TAB_GRAPHICS, "Shadow resolution", &opts.shadow_res, 0, 3, 1, tx_shadow_res,
+     "The size of the sun's shadow maps: higher keeps the shadows of thin things near you, such as chains, fences and "
+     "leaves, smooth instead of stair-stepped, for more video memory and a little GPU time. Applies at once.",
+     hn_shadow_res},
     // (the rows to change when something is wrong, or on a card short of memory: last)
     {TAB_GRAPHICS, "GPU and memory", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     {TAB_GRAPHICS, "GPU device", &opts.gpu_device, 0, 8, 1, tx_gpu,
@@ -5002,6 +5020,14 @@ int menu_heart_protection() {
 int menu_player_flight() { return cheats_on() ? player_flight.load(std::memory_order_relaxed) : -1; }
 int menu_free_camera() { return cheats_on() ? free_camera.load(std::memory_order_relaxed) : 0; }
 int menu_link_speed() { return cheats_on() ? link_speeds[std::clamp(link_speed.load(std::memory_order_relaxed), 0, kLinkSpeeds - 1)] : 100; }
+/// The size the host draws the sun's cascades at (HOS_OPT_SHADOW_RES: 0 the game's 1600, 1 2200, 2 3072): the row's, or for
+/// Auto the one for the card's memory tier, the preset's (opts.budget) or else Auto's own for this PC (auto_choice): the
+/// game's on Minimum and Low (4 and 6 GB, where 113 MB is a lot), 2200 on Balanced (8 GB), 3072 from High (12 GB) up
+int menu_shadow_res() {
+    if (opts.shadow_res > 0) return std::min(opts.shadow_res, 3) - 1;
+    const int tier = opts.budget > 0 ? opts.budget : auto_choice.tier;
+    return tier == 1 || tier == 2 ? 0 : tier >= 4 ? 2 : 1;   // (an unknown tier: 2200, the middle)
+}
 int menu_transition_autosave() { return transition_autosave_enabled.load(std::memory_order_relaxed); }
 int menu_damage_taken() { return cheats_on() ? opts.damage_taken : 1; }   // (Normal while the tools are off; the choice is kept)
 int menu_take_cheat_action() { return cheat_action.exchange(0, std::memory_order_relaxed); }

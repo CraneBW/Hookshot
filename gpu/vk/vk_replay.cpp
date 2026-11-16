@@ -6294,6 +6294,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_PROMPTS) return opts.prompts;
         if (id == HOS_OPT_FOV) return opts.fov;
         if (id == HOS_OPT_TRANSITION_AUTOSAVE) return menu_transition_autosave();
+        if (id == HOS_OPT_SHADOW_RES) return menu_shadow_res();
         if (id == HOS_OPT_DAMAGE_TAKEN) return menu_damage_taken();
         if (id == HOS_OPT_SKIP_OPENING) return opts.skip_opening;
         if (id == HOS_OPT_FPS_CAP) return opts.fps_cap;
