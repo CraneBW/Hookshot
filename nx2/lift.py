@@ -28,6 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I le
 import kit
 import nso2  # noqa: F401  (DT_RELR)
 import insn
+import dead_flags   # (hookshot) the kit's dead_flags, answered at once for a function that writes no flag
+import walk   # (hookshot) the kit's walk, with one shared entry per plain op's word
 import lift_fixes
 import suyu_rt_fixes
 import chunks
@@ -42,6 +44,8 @@ import a64_lift
 import a64_rtgen
 
 insn.install()
+dead_flags.install()
+walk.install()
 lift_fixes.install()
 suyu_rt_fixes.install()
 

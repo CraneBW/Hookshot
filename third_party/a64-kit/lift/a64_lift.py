@@ -766,13 +766,14 @@ def fp_is_frame_kept(text):
     return f
 
 
-def ff_region(items):
+def ff_region(items, least=None):
     """a run's C text ([(pc, text)], every text ff_eligible): the fast and exact copies, or the exact text alone when the
-    run has too few float ops to pay for its check. (text, number of ops made fast)"""
+    run has too few float ops to pay for its check. (text, number of ops made fast). least: ff_min(), read once by the
+    caller (hookshot: once a function, not for each of the 3.8 million runs of OoT)"""
     exact = "\n".join(t for _, t in items)
     # (FF_CONV's matches are in one instruction's text each, so the run's count is their sum)
     n = sum(ff_convs(t) for _, t in items)
-    if n < ff_min():
+    if n < (ff_min() if least is None else least):
         return exact, 0
     fast = FF_CONV.sub(lambda m: "a64_ff_v%s(" % m.group(1) if m.group(1) else "a64_ff_%s(" % m.group(2), exact)
     xs = sorted({int(r) for r in REG_REF.findall(exact)})
@@ -2035,11 +2036,12 @@ class Lifter:
         # (fast float regions, ff_region: the run of joinable instructions so far, [(pc, text)])
         ff_only = getattr(self, "ff_only", None)
         ff = bool(fastfp_mode()) and (ff_only is None or self.fname(e) in ff_only)
+        least = ff_min()   # (hookshot: read once a function, not for each run)
         run = []
 
         def flush():
             if run:
-                text, n = ff_region(run)
+                text, n = ff_region(run, least)
                 out.append(text)
                 if n:
                     self.stats["ff_regions"] = self.stats.get("ff_regions", 0) + 1
