@@ -1361,6 +1361,7 @@ bool started_up() {
     if (FILE* f = fopen(skipped_path().c_str(), "rb")) {
         fclose(f);
         logf("vk: the shaders' preparation was skipped at the build: left to when each is first drawn");
+        precompile_index_only();
         return true;
     }
     if (precompile_wanted()) {   // (a release build, before the game: nothing to build during play)
@@ -1413,6 +1414,8 @@ bool started_up() {
         precompile_run(progress);
         if (update) prepare_background();
         if (console) CloseHandle(console), console = nullptr, FreeConsole();
+    } else {
+        precompile_index_only();
     }
     return true;
 }

@@ -9745,6 +9745,18 @@ void precompile_at_create() {
     predicted_check();
 }
 
+// Skipping startup compilation must not leave load-at-create requests without an
+// index. Initialize the shared cache before starting its workers, then index only
+// existing notes/programs. Do not import state lists, translate shaders, warm cold
+// pipelines, or eagerly load mesh fallback programs here.
+void precompile_index_only() {
+    if (!programs_load_at_create()) return;
+    pcache_init();
+    const ComputePlan plan = computes_plan(getenv("RX_VK_PRECOMPILE_COMPUTES"), !env_on("RX_VK_NO_STATE_LIST"));
+    programs_index(pipe_notes_refs(), plan.none ? std::unordered_set<uint64_t>{} : plan.keys);
+    logf("vk: startup compilation skipped; cached load-at-create index initialized");
+}
+
 void precompile_run(void (*progress)(size_t done, size_t total)) {
     // (hookshot, RX_VK_LOAD=create: only once every note has been built into the pipeline cache, so that a load from the
     // caches alone never meets a pipeline the prepare should have compiled. The first start after a preparation builds them

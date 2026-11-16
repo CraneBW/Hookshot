@@ -3649,6 +3649,61 @@ void transfer_barrier(VkCommandBuffer cmd) {
     full_barrier(cmd, "barrier (write-back or sync)");   // (the same barrier; one right after another is left out)
 }
 
+// (hookshot) Upload staging arenas for coalescing mirror_sync capture runs into single contiguous copies:
+// ANV / Intel Arc processes hundreds of individual 4 KB copies with heavy command processor latency (~5.5 ms).
+// Coalescing adjacent destination pages across capture buffers into a linear host staging buffer reduces
+// 1000+ tiny VkBufferCopy commands to < 50 contiguous DMA transfers.
+struct MsyncArena {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocation allocation = nullptr;
+    uint8_t* mapped = nullptr;
+    uint64_t size = 0, used = 0, value = 0;
+};
+std::vector<MsyncArena> msync_arenas;
+constexpr uint64_t kMsyncArenaDefaultSize = 16ull << 20;   // 16 MB arena
+
+struct MsyncSlice {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    uint64_t offset = 0;
+    uint8_t* ptr = nullptr;
+    VmaAllocation allocation = nullptr;
+};
+
+MsyncSlice msync_stage_alloc(uint64_t bytes, uint64_t align = 256) {
+    if (!bytes) return {};
+    align = std::max<uint64_t>(align, dev.props.limits.nonCoherentAtomSize);
+    const uint64_t done = vk_timeline_completed();
+    const uint64_t cur_val = mem_rec_value ? mem_rec_value : 1;
+    for (MsyncArena& a : msync_arenas) {
+        if (a.value == cur_val) {
+            const uint64_t at = (a.used + align - 1) & ~(align - 1);
+            if (at + bytes <= a.size) {
+                a.used = at + bytes;
+                return {a.buffer, at, a.mapped + at, a.allocation};
+            }
+        }
+    }
+    for (MsyncArena& a : msync_arenas) {
+        if (a.value != cur_val && a.value <= done && a.size >= bytes) {
+            a.value = cur_val;
+            a.used = bytes;
+            return {a.buffer, 0, a.mapped, a.allocation};
+        }
+    }
+    MsyncArena a;
+    a.size = std::max(bytes, kMsyncArenaDefaultSize);
+    void* m = nullptr;
+    if (!create_buffer(a.size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, a.buffer, a.allocation, &m) || !m) {
+        if (a.buffer) destroy_buffer(a.buffer, a.allocation);
+        return {};
+    }
+    a.mapped = (uint8_t*)m;
+    a.used = bytes;
+    a.value = cur_val;
+    msync_arenas.push_back(a);
+    return {a.buffer, 0, a.mapped, a.allocation};
+}
+
 // Captured pages in a run are copied from one buffer to one mirror. Combining only contiguous source and
 // destination bytes leaves gaps, overlaps and the order of the remaining regions unchanged.
 void append_capture_copy(std::vector<VkBufferCopy>& runs, const VkBufferCopy& next) {
@@ -3741,18 +3796,95 @@ void mirror_sync(Pool& p) {
         page++;
     }
     if (run_hi) runs.push_back({run_lo, run_lo, run_hi - run_lo});
-    for (const auto& [buf, rs] : cap_runs) {
-        if (msync_pass_on() && msync_pass_add(p, buf, rs)) {   // (as the pass's chunks: dispatched below, or after the presync's loop)
-            for (const VkBufferCopy& r : rs) st_sync_bytes += (int64_t)r.size;
-            st_sync_copies += (int64_t)rs.size();
-            continue;
+    bool coalesced = false;
+    static const bool coalesce_msync = !env_on("RX_VK_NO_COALESCE_MSYNC");
+    if (!msync_pass_on() && coalesce_msync && !cap_runs.empty()) {
+        size_t total_items = 0;
+        uint64_t total_bytes = 0;
+        for (const auto& [buf, rs] : cap_runs) {
+            total_items += rs.size();
+            for (const VkBufferCopy& r : rs) total_bytes += r.size;
         }
-        GprofSpan gp(upload_command_buffer(), "msync copies (CPU pages from a capture -> mirror)");
-        gp.items = (int)rs.size();
-        vkCmdCopyBuffer(upload_command_buffer(), buf, p.mirror, (uint32_t)rs.size(), rs.data());
-        shadow_sync_copy(upload_command_buffer(), buf, p, rs);   // (the shadow as the mirror: see shadow_follows_sync_on)
-        for (const VkBufferCopy& r : rs) st_sync_bytes += (int64_t)r.size, gp.bytes += r.size;
-        st_sync_copies += (int64_t)rs.size();
+        if (total_items > 1 && total_bytes > 0) {
+            struct FlatCopy {
+                const uint8_t* src;
+                uint64_t dst_offset;
+                uint64_t size;
+            };
+            std::vector<FlatCopy> flat;
+            flat.reserve(total_items);
+            bool all_mapped = true;
+            for (const auto& [buf, rs] : cap_runs) {
+                const uint8_t* src_base = nullptr;
+                for (const auto& [gen, cb] : cap_bufs) {
+                    if (cb.buffer == buf && cb.map) {
+                        src_base = (const uint8_t*)cb.map;
+                        break;
+                    }
+                }
+                if (!src_base) {
+                    all_mapped = false;
+                    break;
+                }
+                for (const VkBufferCopy& r : rs) {
+                    flat.push_back({src_base + r.srcOffset, r.dstOffset, r.size});
+                }
+            }
+            if (all_mapped) {
+                std::sort(flat.begin(), flat.end(), [](const FlatCopy& a, const FlatCopy& b) {
+                    return a.dst_offset < b.dst_offset;
+                });
+                MsyncSlice slice = msync_stage_alloc(total_bytes, 256);
+                if (slice.ptr && slice.buffer != VK_NULL_HANDLE) {
+                    std::vector<VkBufferCopy> coalesced_runs;
+                    uint64_t cur_stage_offset = slice.offset;
+                    uint8_t* cur_stage_ptr = slice.ptr;
+                    size_t i = 0;
+                    while (i < flat.size()) {
+                        size_t j = i + 1;
+                        uint64_t span_dst = flat[i].dst_offset;
+                        uint64_t span_size = flat[i].size;
+                        while (j < flat.size() && flat[j - 1].dst_offset + flat[j - 1].size == flat[j].dst_offset) {
+                            span_size += flat[j].size;
+                            j++;
+                        }
+                        uint64_t chunk_pos = 0;
+                        for (size_t k = i; k < j; k++) {
+                            std::memcpy(cur_stage_ptr + chunk_pos, flat[k].src, (size_t)flat[k].size);
+                            chunk_pos += flat[k].size;
+                        }
+                        coalesced_runs.push_back({cur_stage_offset, span_dst, span_size});
+                        cur_stage_ptr += chunk_pos;
+                        cur_stage_offset += chunk_pos;
+                        i = j;
+                    }
+                    flush_mapped_range(slice.allocation, slice.offset, total_bytes);
+                    GprofSpan gp(upload_command_buffer(), "msync copies (CPU pages from a capture -> mirror, coalesced)");
+                    gp.items = (int)coalesced_runs.size();
+                    gp.bytes = total_bytes;
+                    vkCmdCopyBuffer(upload_command_buffer(), slice.buffer, p.mirror, (uint32_t)coalesced_runs.size(), coalesced_runs.data());
+                    shadow_sync_copy(upload_command_buffer(), slice.buffer, p, coalesced_runs);
+                    st_sync_bytes += (int64_t)total_bytes;
+                    st_sync_copies += (int64_t)coalesced_runs.size();
+                    coalesced = true;
+                }
+            }
+        }
+    }
+    if (!coalesced) {
+        for (const auto& [buf, rs] : cap_runs) {
+            if (msync_pass_on() && msync_pass_add(p, buf, rs)) {
+                for (const VkBufferCopy& r : rs) st_sync_bytes += (int64_t)r.size;
+                st_sync_copies += (int64_t)rs.size();
+                continue;
+            }
+            GprofSpan gp(upload_command_buffer(), "msync copies (CPU pages from a capture -> mirror)");
+            gp.items = (int)rs.size();
+            vkCmdCopyBuffer(upload_command_buffer(), buf, p.mirror, (uint32_t)rs.size(), rs.data());
+            shadow_sync_copy(upload_command_buffer(), buf, p, rs);
+            for (const VkBufferCopy& r : rs) st_sync_bytes += (int64_t)r.size, gp.bytes += r.size;
+            st_sync_copies += (int64_t)rs.size();
+        }
     }
     if (!msync_batching) msync_pass_flush();
     if (runs.empty()) return;
@@ -4378,6 +4510,10 @@ void reap_mirrors() {   // (pools_mu held)
         st_retired_imports_freed++, st_retired_import_bytes_freed += dead_imports.front().bytes;
         dead_import_bytes -= std::min(dead_import_bytes, dead_imports.front().bytes);
         dead_imports.pop_front();
+    }
+    while (msync_arenas.size() > 4 && msync_arenas.front().value <= mem_completed) {
+        destroy_buffer(msync_arenas.front().buffer, msync_arenas.front().allocation);
+        msync_arenas.erase(msync_arenas.begin());
     }
 }
 bool system_heap_usage(uint64_t* used, uint64_t* budget);   // (vk_vma.cpp; said here too: the pressure probe below runs before imports_give_back's own forward of it)
