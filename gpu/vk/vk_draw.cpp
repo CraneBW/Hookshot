@@ -752,6 +752,11 @@ void ensure_layout(Program& p) {
 VkPipelineCache pcache = VK_NULL_HANDLE;
 std::string pcache_path;
 std::atomic<int64_t> pcache_built_since_save{0};
+// (Hookshot) RX_VK_PCACHE_MISSES=0: every pipeline made counts toward a save of the cache, as before
+bool pcache_misses_only() {
+    static const bool v = !getenv("RX_VK_PCACHE_MISSES") || atoi(getenv("RX_VK_PCACHE_MISSES")) != 0;
+    return v;
+}
 // (hookshot) The size of the cache's data when it was last read or written. The count above takes in every pipeline made
 // with the cache, the ones it already held too: the precompile's ~13,000 at each start, all found in the cache, made the
 // first check in play (present 300) write the whole cache again, 1.1 GB, at every start, the file the same 1146 MB each
@@ -2071,6 +2076,37 @@ void state_record(const Program& p, const NvnState& s, const Targets& at, VkPrim
     if (!state_file) state_open_locked();
     if (state_file && state_seen.insert(h).second) fwrite(&r, sizeof r, 1, state_file), fflush(state_file);
 }
+/// (RX_VK_SHIPPED_STATES) The shipped list's contents by a hash, and the hash state_list_prepare last went through, in
+/// hookshot_pipeline_states_shipped.done: a list that came after the shaders were prepared (a list shipped later, or a folder
+/// prepared before it had one) was never noted, the prepare being done for that translator and seed, and its pipelines were all
+/// made in play. 0: no list
+uint64_t shipped_list_hash() {
+    uint64_t h = 0xCBF29CE484222325ull;
+    FILE* f = fopen(state_list_path("hookshot_pipeline_states_shipped.bin").c_str(), "rb");
+    if (!f) return 0;
+    uint8_t buf[65536];
+    size_t total = 0;
+    for (size_t got; (got = fread(buf, 1, sizeof buf, f)) > 0; total += got)
+        for (size_t i = 0; i < got; i++) h = (h ^ buf[i]) * 1099511628211ull;
+    fclose(f);
+    return total > 12 ? h : 0;
+}
+uint64_t shipped_list_done() {
+    uint64_t h = 0;
+    if (FILE* f = fopen(state_list_path("hookshot_pipeline_states_shipped.done").c_str(), "rb")) {
+        if (fread(&h, 8, 1, f) != 1) h = 0;
+        fclose(f);
+    }
+    return h;
+}
+bool shipped_list_pending() {
+    static const bool on = !getenv("RX_VK_SHIPPED_STATES") || atoi(getenv("RX_VK_SHIPPED_STATES")) != 0;
+    if (!on || getenv("RX_VK_NO_STATE_LIST")) return false;
+    const uint64_t h = shipped_list_hash();
+    const bool pending = h && h != shipped_list_done();
+    if (pending) logf("vk: the shipped pipeline state list is new since the shaders were prepared: its pipelines are noted now");
+    return pending;
+}
 /// (a compute program's first dispatch of this run: dispatch) the program in the list once, by its key alone, as a kCompute record
 void state_record_compute(uint64_t key) {
     static const bool off = env_on("RX_VK_NO_STATE_LIST");
@@ -2108,6 +2144,9 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool open_s
     // (the shipped list's compute programs are not pipelines to note: precompile_run keeps them ready, computes_plan)
     std::vector<StateRec> recs = state_list_read(state_list_path("hookshot_pipeline_states_shipped.bin"), &shipped_version);
     const size_t shipped = recs.size();
+    if (const uint64_t h = shipped ? shipped_list_hash() : 0) {   // (gone through: state_list_pending is false until it changes)
+        if (FILE* f = fopen(state_list_path("hookshot_pipeline_states_shipped.done").c_str(), "wb")) fwrite(&h, 8, 1, f), fclose(f);
+    }
     // (the player's own: this build's, and an older build's version 1 list, state_open_locked)
     for (const char* own : {"hookshot_pipeline_states.bin", "hookshot_pipeline_states_v1.bin"})
         for (const StateRec& r : state_list_read(state_list_path(own))) recs.push_back(r);
@@ -2803,6 +2842,12 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
     }
     if (cold) ci.flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+    // (Hookshot, RX_VK_PCACHE_MISSES: whether the pipeline cache had it. A hit adds nothing to the cache: counted as built, the
+    // 1.2 GB cache was fetched and written again at every scene load, whose pipelines all come from it)
+    VkPipelineCreationFeedback feedback{};
+    VkPipelineCreationFeedbackCreateInfo feedback_ci{VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO};
+    feedback_ci.pPipelineCreationFeedback = &feedback;
+    if (pcache_misses_only() && part < 0 && !driver_cache_only) feedback_ci.pNext = ci.pNext, ci.pNext = &feedback_ci;
     // (the two shader libraries go into our cache, as whole pipelines do: asked for under the flag, the driver answers from a cache
     // it is handed and not from its own on disk, so a library the warm pass built and let go was cold again at its first draw
     // (measured: 21 of 21). gpl_libs_cached: RX_VK_GPL_NO_CACHE=1 keeps them out, as before. With our cache: through
@@ -2861,7 +2906,10 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         if (logged++ < 10) logf("vk: graphics pipeline for %016llx not made (%d)", (unsigned long long)p.key, (int)r);
         pl = VK_NULL_HANDLE;
     }
-    pcache_built_since_save += !driver_cache_only && !quick_build;
+    // (a pipeline the cache had already adds nothing to it: RX_VK_PCACHE_MISSES)
+    if (!(pcache_misses_only() && (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) &&
+          (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT)))
+        pcache_built_since_save += !driver_cache_only && !quick_build;
     if (!quick_build) {   // (hookshot: quick builds are counted apart, in quick_pipeline's log line)
         st_pipelines++;
         st_pipeline_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -9169,6 +9217,7 @@ struct PreparedFor {
     uint64_t stamp = 0, seed_hash = 0, seed_size = 0;
     int64_t seed_time = 0, recorded_at = 0;   // (Windows: 100 ns FILETIME ticks; elsewhere: filesystem-clock nanoseconds)
     bool timed = false;   // (recorded_at read: records of four words had none)
+    uint64_t kept = 0;   // (the program keys the cache held when the prepare ended; 0: a record from before it was written)
     uint64_t warmed = 0;   // (what the driver's part was made for: warmed_stamp. 0: not made, or a record of five words)
 };
 #ifdef _WIN32
@@ -9176,7 +9225,7 @@ constexpr int64_t kSeedTimeSlack = 20'000'000;   // (two seconds in FILETIME tic
 #else
 constexpr int64_t kSeedTimeSlack = 2'000'000'000;
 #endif
-enum class PrepareWhy { None, First, Translator, Seed };
+enum class PrepareWhy { None, First, Translator, Seed, Cache };
 /// The seed's size and write time (false: there is none). Windows keeps native 100 ns FILETIME ticks: converting that
 /// epoch to nanoseconds overflows int64_t. Other platforms keep filesystem-clock nanoseconds
 bool seed_file_id(const std::string& path, uint64_t* size, int64_t* time) {
@@ -9241,17 +9290,19 @@ bool seed_file_hash(const std::string& path, uint64_t* out) {
 int prepared_read(const std::string& path, PreparedFor* had) {
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return 0;
-    uint64_t r[6]{};
-    const size_t n = fread(r, 8, 6, f);
+    uint64_t r[7]{};
+    const size_t n = fread(r, 8, 7, f);
     fclose(f);
     had->stamp = r[0], had->seed_hash = r[1], had->seed_size = r[2], had->seed_time = (int64_t)r[3];
     had->recorded_at = (int64_t)r[4], had->timed = n >= 5;
     had->warmed = n >= 6 ? r[5] : 0;
+    had->kept = n >= 7 ? r[6] : 0;   // (hookshot: the program keys the cache held when the prepare ended)
     return n >= 4 ? 2 : n >= 1 ? 1 : 0;
 }
 void prepared_write(const std::string& path, const PreparedFor& now) {
-    const uint64_t r[6] = {now.stamp, now.seed_hash, now.seed_size, (uint64_t)now.seed_time, (uint64_t)file_clock_now(), now.warmed};
-    if (FILE* f = fopen(path.c_str(), "wb")) fwrite(r, 8, 6, f), fclose(f);
+    const uint64_t r[7] = {now.stamp, now.seed_hash, now.seed_size, (uint64_t)now.seed_time, (uint64_t)file_clock_now(), now.warmed,
+                           now.kept};
+    if (FILE* f = fopen(path.c_str(), "wb")) fwrite(r, 8, 7, f), fclose(f);
 }
 /// Whether to prepare (and why), and what for: *now, written once the prepare is done. No seed: the translator alone, as before.
 /// *hash_ms: how long the seed's hash took (0: not taken). now->warmed is the record's, for this translator: the caller's to renew
@@ -9260,6 +9311,7 @@ PrepareWhy prepare_check(const std::string& path, const std::string& seed, uint6
     PreparedFor had;
     const int read = prepared_read(path, &had);
     now->stamp = stamp;
+    now->kept = had.kept;
     now->warmed = had.stamp == stamp ? had.warmed : 0;   // (kept where the record is only written again for the seed's new time)
     const bool have_seed = seed_file_id(seed, &now->seed_size, &now->seed_time);
     bool same_seed = !have_seed;
@@ -9278,7 +9330,14 @@ PrepareWhy prepare_check(const std::string& path, const std::string& seed, uint6
     }
     if (!read) return PrepareWhy::First;
     if (had.stamp != stamp) return PrepareWhy::Translator;
-    return same_seed ? PrepareWhy::None : PrepareWhy::Seed;
+    if (!same_seed) return PrepareWhy::Seed;
+    // (the record says prepared, but the program cache may not have kept it: a start with other shader settings (RX_VK_OOT_*, ...,
+    // program_cache_stamp) makes the cache again under its stamp, and closed before it prepared, the next start under the
+    // usual settings found an empty cache and a record that said prepared: every program then translated in play, 200-400 ms
+    // each. Less than half of what the last prepare left, or none for a record from before the count: prepared again)
+    const size_t kept = program_cache_kept();
+    if (kept != SIZE_MAX && (had.kept ? kept < had.kept / 2 : kept == 0)) return PrepareWhy::Cache;
+    return PrepareWhy::None;
 }
 } // namespace
 /// What the driver's part is good for: these programs, this driver on this GPU (its version too: the cache's UUID is the driver's
@@ -9460,8 +9519,16 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     if (why == PrepareWhy::Seed)
         logf("vk: the game's shader list (hookshot_shaders.bin) is not the one the shaders were prepared from: preparing again "
              "(only the programs not kept yet)");
+    if (why == PrepareWhy::Cache)
+        logf("vk: the program cache holds %zu program keys of the %llu the last preparation left: preparing again",
+             program_cache_kept(), (unsigned long long)prepared_for.kept);
     const size_t programs = seed_open();
     if (!programs) return false;
+    // (the record goes while the shaders are prepared and is written again when they are: a preparation closed or killed part
+    // way left the old record standing, and the next start trusted it whenever the cache held more than half of what it had held,
+    // or anything at all under a record from before the count: thousands of programs were then translated in play. With no
+    // record the next start prepares again, and only what the cache does not hold yet)
+    remove(path.c_str());
     const size_t total = programs * 3;   // (each program for float, one and two integer bone inputs)
     // The driver's part: each program's stage libraries, built once and let go, for the driver's own disk cache. What stays with us is
     // nothing: a kept library costs memory, and our pipeline cache would be read in whole at every start. A driver whose compiler
@@ -9597,9 +9664,11 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     if (!background) crash_markers::end(warming);
     // (the driver's part left out, by a start that ended in it or in play, is not tried again for this driver: as before)
     prepared_for.warmed = warmed;
+    if (const size_t kept = program_cache_kept(); kept != SIZE_MAX) prepared_for.kept = kept;
     prepared_write(path, prepared_for);
     return true;
 }
+bool state_list_pending() { return shipped_list_pending(); }
 /// (hookshot) An update (prepare_is_update): the seed is prepared in play, behind the game, too late for the precompile; the pipelines
 /// of the state list are made now, before it, so that precompile_run builds them before the game as on a first start
 void state_list_run() {

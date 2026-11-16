@@ -944,6 +944,17 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
         // (RX_VK_BATCH_MAX=<command buffers>: held at most this many, default 32)
         static const size_t cap = getenv("RX_VK_BATCH_MAX") ? (size_t)std::max(1, atoi(getenv("RX_VK_BATCH_MAX"))) : 32;
         if (pend.cbs.size() >= cap) flush_reason = FR_CAP, queue_flush_locked();
+        // (hookshot, #1993 by mrdev023) Sent at once while the GPU has done every batch sent so far: a held batch waited for
+        // the next wait or present and the GPU sat idle meanwhile, and with serial replay the game waits for it mid-frame
+        // (take_capture's late pages), so the GPU started cold just as it was waited for. RX 9070 XT, RADV, Kokiri Forest:
+        // 33-41 fps -> 46-61, no flashes in 5230 frames; ~10 flushes a frame of ~3.7 command buffers each, so batching still
+        // groups the submits while the GPU is busy. RX_VK_BATCH_IDLE=0: held until a wait, a present or the cap, as before
+        static const bool idle_flush = !getenv("RX_VK_BATCH_IDLE") || atoi(getenv("RX_VK_BATCH_IDLE")) != 0;
+        if (idle_flush && !pend.cbs.empty()) {
+            uint64_t done = 0;
+            if (vkGetSemaphoreCounterValue(dev.device, batch_tl, &done) == VK_SUCCESS && done >= batch_flushed)
+                flush_reason = FR_OTHER, queue_flush_locked();
+        }
         if (!pend.cbs.empty() && batch_gpu_idle()) flush_reason = FR_OTHER, queue_flush_locked();   // (#1993)
         if (!pend.cbs.empty() && readback_send_now()) flush_reason = FR_READBACK, queue_flush_locked();
         return;
@@ -1646,7 +1657,12 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
         }
         case NOP_COPY_B2T: if (!dry) { ParLock lk; copy_b2t(cmd, s, payload<nvn_p_copy_bt>(a, avail), true); } break;
         case NOP_COPY_T2B: if (!dry) { ParLock lk; copy_b2t(cmd, s, payload<nvn_p_copy_bt>(a, avail), false); } break;
-        case NOP_COPY_T2T: if (!dry) { ParLock lk; copy_t2t(cmd, s, payload<nvn_p_copy_tt>(a, avail)); } break;
+        case NOP_COPY_T2T: {
+            ParLock lk;
+            if (dry) dry_mark_copy_target(payload<nvn_p_copy_tt>(a, avail));
+            else copy_t2t(cmd, s, payload<nvn_p_copy_tt>(a, avail));
+            break;
+        }
         case NOP_CLEAR_TEX: if (!dry) { ParLock lk; clear_tex(cmd, s, payload<nvn_p_clear_tex>(a, avail)); } break;
         case NOP_UPDATE_UB: {
             const auto u = payload<nvn_p_update_ub>(a, avail);
@@ -5358,6 +5374,13 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     si.pNext = reflex_submit_id(nullptr, reflex_present_frame);
     res = vkQueueSubmit2(dev.queue, 1, &si, f.done);
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
+    if (res != VK_SUCCESS) {
+        // (the present below waits for the semaphore this submit signals: with the submit refused it would wait for good, on the
+        // presents' own queue unseen by anything that waits on the replay's queue)
+        static int logged;
+        if (logged++ < 8) logf("vk: the present's blit submit failed (VkResult %d): this frame is not shown", (int)res);
+        return;
+    }
     if (present_defer_into) {   // (present ahead: the copy is queued; present_commit shows it at its time)
         present_defer_into->used = true;
         present_defer_into->index = index;
@@ -5434,13 +5457,22 @@ static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk) {
     }
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
     reflex_presented();
+    if (res == VK_ERROR_DEVICE_LOST) device_lost();   // (on the presents' own queue this is the first place a lost device shows)
     if (res == VK_ERROR_SURFACE_LOST_KHR) {
         if (!qk.owns_lock()) qk.lock();
         invalidate_lost_surface(res);
         return false;
     }
+    {   // (every 600 presents: how they ended; a window shot is taken before the present, so a black window shows only here)
+        static int64_t n_ok, n_subopt, n_old, n_other;
+        (res == VK_SUCCESS ? n_ok : res == VK_SUBOPTIMAL_KHR ? n_subopt : res == VK_ERROR_OUT_OF_DATE_KHR ? n_old : n_other)++;
+        if ((n_ok + n_subopt + n_old + n_other) % 600 == 0)
+            logf("vk: presents%s: %lld shown, %lld suboptimal, %lld out of date, %lld failed", dev.present_queue_supported ? " (own queue)" : "",
+                 (long long)n_ok, (long long)n_subopt, (long long)n_old, (long long)n_other);
+    }
     present_finish(res, false);
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
+        logf("vk: present result %d: the swapchain is made again", (int)res);
         if (!qk.owns_lock()) qk.lock();
         create_swapchain(dev.swap_extent.width, dev.swap_extent.height);
     }
