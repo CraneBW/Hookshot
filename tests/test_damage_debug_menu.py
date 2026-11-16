@@ -111,7 +111,7 @@ int main() {
     assert(menu_transition_autosave() == 0 && saves == 1);
     int order[64], dev, heading;
     const char* expected[] = {"Debug tools", "Autosave:", "Heart protection", "Damage taken", "No-clip flight",
-        "Movement speed", "Switch age", "Inventory", "Teleport", "Mark position", "Return to mark",
+        "Movement speed", "Switch age", "Inventory", "Rupees", "Teleport", "Mark position", "Return to mark",
         "Free camera", "Set time"};
     for (int env = 0; env < 2; ++env) for (int enabled = 0; enabled < 2; ++enabled) {
         cheats_env = env;
@@ -144,11 +144,11 @@ int main() {
         assert(opts.damage_taken == 3); // Hiding the tools must not reset the saved option.
         assert(menu_damage_taken() == (env || enabled ? 3 : 1)); // Hidden means Normal for the host.
     }
-    assert(kDebugGroups == 3 && kDebugTools == 11);
+    assert(kDebugGroups == 3 && kDebugTools == 12);
     assert(!std::strcmp(debug_groups[0].title, "Player"));
-    assert(debug_groups[0].from == 0 && debug_groups[0].to == 6);
-    assert(debug_groups[1].from == 6 && debug_groups[1].to == 9);
-    assert(debug_groups[2].from == 9 && debug_groups[2].to == 11);
+    assert(debug_groups[0].from == 0 && debug_groups[0].to == 7);
+    assert(debug_groups[1].from == 7 && debug_groups[1].to == 10);
+    assert(debug_groups[2].from == 10 && debug_groups[2].to == 12);
 }
 '''
     with tempfile.TemporaryDirectory(prefix="damage-debug-menu-") as tmp:
