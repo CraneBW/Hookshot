@@ -95,6 +95,7 @@ struct { void note(const int*) {} } restart_state;
 bool can_mic() { return false; }
 int output_pick;
 bool output_forced() { return false; }
+bool framegen_by_dlss_offered() { return true; }   // (vk_menu.cpp: Frame generation by offers DLSS FG)
 void output_chosen() {}   // Playback selection is covered by test_audio_output_devices.py.
 /* (the Upscaler row's choices, which set_row steps through: the game's own only, here) */
 unsigned upscalers_available() { return 1; }

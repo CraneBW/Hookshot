@@ -389,6 +389,8 @@ void ubo_check_ref(uint64_t gpu, uint64_t size, uint32_t kind);
 void ubo_check_captured(const uint32_t* pages, int64_t n);
 /// a present: the frame's pages classified, the tables logged every 10 s
 void ubo_check_frame();
+struct SubmittedRead { uint64_t gpu; void* dst; uint64_t n; };
+void memory_read_as_submitted_many(const SubmittedRead* reads, size_t count);   // (pools_mu once for all of them)
 bool pools_mirrored();   // (vk_memory.cpp mirror_on: the buffer pools have VRAM mirrors)
 bool memory_sparse_wait(VkSemaphoreSubmitInfo* w);   // (vk_memory.cpp, RX_VK_MIRROR_SPARSE: a submission's wait for the sparse binds; dev.present_mu held)
 uint64_t memory_capture_view();          // (bumped when a capture is published or any page is stamped)

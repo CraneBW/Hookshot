@@ -132,6 +132,7 @@ std::string output_name_key(const char* text) { return text; }
 void refresh_outputs() {}
 bool can_outputs() { return false; }
 bool output_forced() { return false; }
+bool framegen_by_dlss_offered() { return true; }   // (vk_menu.cpp: Frame generation by offers DLSS FG)
 void output_chosen() {}
 bool can_mods() { return false; }
 namespace i18n { int game_lang_index() { return 0; } }   // no external language.txt in this fixture
