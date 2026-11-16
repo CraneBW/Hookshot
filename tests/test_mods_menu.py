@@ -68,11 +68,11 @@ static void key(int k) {
 enum { UP = 1, DOWN = 2, LEFT = 3, RIGHT = 4, ESC = 5, ENTER = 7 };
 int main() {
     MkwVkHost h{};
-    h.version = 23, h.mod_info = mod_info, h.mod_edit = mod_edit, h.mods_changed = mods_changed, h.cheat_info = cheat_info,
+    h.version = 25, h.mod_info = mod_info, h.mod_edit = mod_edit, h.mods_changed = mods_changed, h.cheat_info = cheat_info,
     h.cheat_set = cheat_set;
     host = &h;
-    CHECK(!tab_shown(TAB_MODS) && tab_shown(TAB_GRAPHICS));   /* (a host before version 24: no Mods tab) */
-    h.version = 24;
+    CHECK(!tab_shown(TAB_MODS) && tab_shown(TAB_GRAPHICS));   /* (a host before version 26: no Mods tab) */
+    h.version = 26;
     CHECK(tab_shown(TAB_MODS));
     const std::vector<ModLine> lines = mod_lines();
     std::string kinds;

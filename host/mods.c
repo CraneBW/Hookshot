@@ -644,9 +644,13 @@ int hos_mods_file(const char *rel, char *out, size_t cap) {
     snprintf(key, sizeof key, "%s", rel);
     lower_slash(key);
     if (sizes_key[0] && !strcmp(key, sizes_key)) {
-        if (sizes_served[0] || !sizes_fallback[0]) return 0;
-        snprintf(out, cap, "%s", sizes_fallback);
-        return 1;
+        if (sizes_served[0]) return 0;
+        if (sizes_fallback[0]) {
+            snprintf(out, cap, "%s", sizes_fallback);
+            return 1;
+        }
+        /* (no table of a mod read as one: the mod's file as it is, below, so prompts.c sees it cannot merge into it and keeps
+           the game's own icons) */
     }
     const Entry *e = table_n ? find(key) : NULL;
     if (!e || e->is_dir) return 0;
