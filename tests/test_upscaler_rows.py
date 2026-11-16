@@ -39,7 +39,7 @@ def main():
     order = ['"Output resolution", &opts.output_res', '"Upscaler", &opts.dlss', '"DLSS model", &opts.dlss_model',
              '"Render resolution", &opts.resolution', '"Sharpness", &opts.sharpness',
              '"Frame generation", &opts.framegen', '"Frame generation by", &opts.framegen_by',
-             '"Frame pacing", &opts.pace', '"NVIDIA Reflex", &opts.reflex',
+             '"NVIDIA Reflex", &opts.reflex',
              '"Window scaling filter", &opts.upscale']
     at = [menu.find(row) for row in order]
     if -1 in at:
