@@ -463,6 +463,7 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_PASS_TRACE=1` | The passes of the last frames, logged at a flash or a dark frame (`RX_VK_PASS_TRACE_AT=<n>`: every n-th present) |
 | `RX_VK_PROBE=1` or `2` | The centre texel after every pass: `probe_<frame>.txt` at a flash (1), or `probe_all_<n>.txt` at speed (2); `python -I scripts/probe.py` reads them |
 | `RX_VK_DUMP_FAILED=<dir>` | The native code of every program that does not translate, for `nx2/lower_test.py` (game data: keep it local) |
+| `RX_VK_SHADER_DIR=<folder>` | Each of the renderer's built-in shaders (`gpu/vk/shaders/*_spv.h`, `host_shaders/`) taken from `<folder>/<name>.spv` when that file is SPIR-V (`clear_vert.spv` for `clear_vert_spv.h`; `gpu/vk/vk_builtin_spv.h`), each logged once; a missing file is the compiled-in one, a file that isn't SPIR-V is named in the log and the compiled-in one used. For trying a shader edit without a renderer build: `glslangValidator -V <source> -o <folder>/<name>.spv`, then start the game again. Not taken from `hookshot_env.txt` (a `_DIR` switch) |
 
 ### Time and profiles
 
@@ -538,6 +539,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `HOS_VIDEO_NO_CATCHUP=1` | A movie does not skip pictures that are behind its sound. By default, pictures already decoded are skipped, and a decoder that keeps up decodes ahead to skip a late one (at most one picture's time in a frame). A decoder slower than the gap between pictures, timed over its recent pictures, shows the late one instead of decoding the next in order to drop it |
 | `HOS_VIDEO_ACQUIRE_TRIES=1` | The movie waits for a picture by 50 sleeps of 2 ms, as before. By default the wait is by the clock: about 100 ms for each picture, the first too, and none after a Stop or Flush with nothing submitted since |
 | `RX_VK_GM_LOOP=0` or `1` | The storage buffer tables of a global memory access searched in a loop (1) or written out entry by entry (0). On by default on Intel, whose compiler did not finish the culling programs with the entries written out |
+| `RX_VK_DESC_POOL_DIV=<1..32>` | A recording's descriptor pool at an n-th of its size (8192 sets, up to 32768 descriptors a type; `make_pool` in `gpu/vk/vk_draw.cpp`), for the memory the driver keeps for it. A pool that runs out is followed by another, made and destroyed with the recording: the log's "recording streams" line counts those, which says how small is too small for a scene |
 | `RX_VK_IMPORT_CHUNK_MB=<MB>` | The size game memory is imported for the GPU by, and so a pool's VRAM mirror's least size (default 4 where the pools have VRAM mirrors, discrete cards; 16 without them, and before). Larger: fewer imports, more of each mirror outside the game's pools |
 | `RX_VK_NO_PROGRAM_CACHE` (set) | Neither reads nor writes `hookshot_programs.bin` and the pipeline notes |
 | `RX_VK_PCACHE_LOAD=0` | Starts with an empty in-memory pipeline cache; neither the base cache nor rolling play-cache files are loaded or saved. Required pipelines are still made, and the driver can still use its own disk cache: this is not a driver-cold test. Old temporary-file cleanup still runs. Unset or `1`: load and save as usual |
@@ -1048,9 +1050,11 @@ number is not the obvious one:
 It applies after remapping to either pad binding, keys and mouse buttons. Only Switch buttons accept it, excluding
 Plus and Minus; directions, Walk and ocarina notes do not. Other values mean Off. Saving keeps the flags, not live latches.
 Opening Insert, Plus/Minus, focus loss, rebinding and Reset to defaults clear latches. Background pad presses can
-latch again when Controller in background permits them. Linux's other game dialogs are not guaranteed resets;
-Insert always releases the latch. Text fields use physical pad edges, not latched gameplay buttons: a held confirm
-or shoulder does not commit or add another character when editing starts. Fresh presses and D-pad repeats still edit,
+latch again when Controller in background permits them. On Linux, `hos_oot_menu_focus` clears latches whenever
+`f_802ed660` runs for a menu screen's pane focus, not only the pause page (`nx2/oot_patches.py`
+`patch_menu_focus`). This describes the hook; individual title, save and game-over transitions have not been
+separately verified in play. Insert always releases the latch. Text fields use physical pad edges, not latched gameplay
+buttons: a held confirm or shoulder does not commit or add another character when editing starts. Fresh presses and D-pad repeats still edit,
 and keyboard editing keys reach the field while the game receives none.
 
 Custom output size's restart state tracks the actual width and height, not just the custom choice's list index.

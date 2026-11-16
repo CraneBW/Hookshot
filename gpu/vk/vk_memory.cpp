@@ -41,6 +41,7 @@
 #include "retired_give_back.h"
 #include "sparse_mirror.h"
 #include "linux_pressure.h"
+#include "page_table_census.h"   // (the page table's windows, and the census of the pools outside them)
 #include <atomic>
 #include <unordered_set>
 #ifdef __linux__
@@ -51,6 +52,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
+#include "vk_builtin_spv.h"   // (RX_VK_SHADER_DIR)
 #include "shaders/wb_diff_comp_spv.h"
 #include "shaders/late_fix_comp_spv.h"
 #include "vram_pressure.h"
@@ -554,9 +556,8 @@ void guest_pages_set(uint64_t lo, uint64_t hi, uint64_t address) {
     // 0-1 bright / 4 dark in two 40 s Kokiri runs, as many as without it, and the same fps. One earlier run with 21 dark ones was
     // the runs' spread, not this. RX_VK_TABLE_NOW=1: written at once, as before)
     static const bool now = env_on("RX_VK_TABLE_NOW");
-    // (two windows, as spirv_emit_context.cpp reads them: 8 GB from 0x1000000000, then 4 GB from 0x7f00000000)
-    const struct { uint64_t base, bytes, first; } windows[] = {{0x1000000000ull, 8ull << 30, 0}, {0x7f00000000ull, 4ull << 30, (8ull << 30) >> 12}};
-    for (const auto& w : windows) {
+    // (two windows, as spirv_emit_context.cpp reads them: page_table_census.h)
+    for (const PageWindow& w : kPageWindows) {
         const uint64_t a0 = std::max(lo, w.base) & ~0xFFFull, a1 = std::min(hi, w.base + w.bytes);
         if (a0 >= a1) continue;
         const uint64_t first = w.first + ((a0 - w.base) >> 12), count = (a1 - a0 + 0xFFF) >> 12;
@@ -637,7 +638,7 @@ uint64_t memory_guest_pages() {
     VkBuffer b = VK_NULL_HANDLE;
     VmaAllocation a = nullptr;
     void* mapped = nullptr;
-    const uint64_t bytes = ((8ull << 30 >> 12) + (4ull << 30 >> 12)) * 8;
+    const uint64_t bytes = kPageTableEntries * 8;
     if (!create_buffer(bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                        true, b, a, &mapped, true) || !mapped) {
         logf("vk: no page table of guest memory: pointers in no bound buffer read as 0");
@@ -675,6 +676,16 @@ bool memory_init() {
     return true;
 }
 
+// (hookshot) The pools the page table cannot reach (page_table_census.h): refreshed with the pool table, the count at close
+namespace {
+std::mutex page_census_mu;
+PageTableCensus page_census;
+} // namespace
+void page_table_census_log(const char* when) {
+    std::lock_guard lk(page_census_mu);
+    logf("%s", page_census.summary(when).c_str());
+}
+
 /// Refresh the guest's pool table (no Vulkan work: pools are imported as they are used)
 std::atomic<int64_t> memsync_lock_wait_ns{0};
 std::atomic<int64_t> memsync_part_ns[3];
@@ -702,6 +713,10 @@ void memory_sync() {
         next.push_back(p);
     }
     std::sort(next.begin(), next.end(), [](const GuestPool& a, const GuestPool& b) { return a.lo < b.lo; });
+    {   // (hookshot) a line for each pool that came outside the page table's windows, the first 30 of them
+        std::lock_guard ck(page_census_mu);
+        for (const std::string& line : page_census.refresh(next)) logf("%s", line.c_str());
+    }
     const auto w1 = std::chrono::steady_clock::now();
     std::lock_guard lk(pools_mu);
     memsync_lock_wait_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - w1).count();
@@ -2304,8 +2319,9 @@ bool late_fix_pipe_ready() {
     li.pPushConstantRanges = &pr;
     if (vkCreatePipelineLayout(dev.device, &li, nullptr, &late_fix_pipe.layout) == VK_SUCCESS) {
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        mi.codeSize = sizeof LATE_FIX_COMP_SPV;
-        mi.pCode = LATE_FIX_COMP_SPV;
+        const auto spv = BUILTIN_SPV(LATE_FIX_COMP_SPV);
+        mi.codeSize = spv.size;
+        mi.pCode = spv.code;
         VkShaderModule m = VK_NULL_HANDLE;
         IntelDriverGate gate;   // (as wbd_pipe_ready's: Intel's compiler on Windows, one thread at a time, and the fault guard)
         if (extern_guarded_shader_module(&mi, &m) == VK_SUCCESS) {
@@ -5593,8 +5609,9 @@ bool wbd_pipe_ready() {
     VkShaderModule m = VK_NULL_HANDLE;
     if (vkCreatePipelineLayout(dev.device, &li, nullptr, &wbd_pipe.layout) == VK_SUCCESS) {
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        mi.codeSize = sizeof WB_DIFF_COMP_SPV;
-        mi.pCode = WB_DIFF_COMP_SPV;
+        const auto spv = BUILTIN_SPV(WB_DIFF_COMP_SPV);
+        mi.codeSize = spv.size;
+        mi.pCode = spv.code;
         IntelDriverGate gate;
         if (extern_guarded_shader_module(&mi, &m) == VK_SUCCESS) {
             VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
