@@ -87,18 +87,22 @@ static struct timespec rel_ms(DWORD ms) {
 }
 void WakeConditionVariable(CONDITION_VARIABLE *cv) {
     __atomic_add_fetch(&cv->seq, 1, __ATOMIC_SEQ_CST);
-    futex(&cv->seq, FUTEX_WAKE_PRIVATE, 1, NULL);
+    if (__atomic_load_n(&cv->waiters, __ATOMIC_SEQ_CST))
+        futex(&cv->seq, FUTEX_WAKE_PRIVATE, 1, NULL);
 }
 void WakeAllConditionVariable(CONDITION_VARIABLE *cv) {
     __atomic_add_fetch(&cv->seq, 1, __ATOMIC_SEQ_CST);
-    futex(&cv->seq, FUTEX_WAKE_PRIVATE, INT_MAX, NULL);
+    if (__atomic_load_n(&cv->waiters, __ATOMIC_SEQ_CST))
+        futex(&cv->seq, FUTEX_WAKE_PRIVATE, INT_MAX, NULL);
 }
 static BOOL cv_wait(CONDITION_VARIABLE *cv, DWORD ms, void (*unlock)(void *), void (*relock)(void *, ULONG), void *l, ULONG flags) {
     const uint32_t seq = __atomic_load_n(&cv->seq, __ATOMIC_SEQ_CST);
+    __atomic_add_fetch(&cv->waiters, 1, __ATOMIC_SEQ_CST);
     unlock(l);
     struct timespec ts = rel_ms(ms);
     const long r = futex(&cv->seq, FUTEX_WAIT_PRIVATE, seq, ms == INFINITE ? NULL : &ts);
     const int timed_out = r == -1 && errno == ETIMEDOUT;
+    __atomic_sub_fetch(&cv->waiters, 1, __ATOMIC_SEQ_CST);
     relock(l, flags);
     if (timed_out) { last_error = ERROR_TIMEOUT; return FALSE; }
     return TRUE;
