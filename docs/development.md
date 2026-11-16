@@ -1271,4 +1271,4 @@ where no translation is available.
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.
 
-`frame_rate_cap=-1` selects 30 FPS in the existing host pacer. This forces real-time stepping without changing the saved Game speed setting; returning to 60 restores that choice. `HOS_FPS_MAX` is read once and overrides the menu, including `HOS_FPS_MAX=30`.
+`frame_rate_cap=7` (the Game frame rate cap row's 30) selects 30 FPS in the existing host pacer. This forces real-time stepping without changing the saved Game speed setting; returning to 60 restores that choice. `HOS_FPS_MAX` is read once and overrides the menu, including `HOS_FPS_MAX=30`.
