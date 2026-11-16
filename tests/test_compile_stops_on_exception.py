@@ -81,7 +81,8 @@ class CompileStopsOnExceptionTests(unittest.TestCase):
                 Path(child.obj).write_bytes(b'authored object')
                 return '', ''
 
-        self.scope.update(jobs=self.jobs, a=SimpleNamespace(jobs=workers),
+        # (order: the start order main() sets before the loop, build.py start_order; the jobs as listed here)
+        self.scope.update(jobs=self.jobs, order=list(self.jobs), a=SimpleNamespace(jobs=workers),
                           subprocess=SimpleNamespace(Popen=Child, PIPE=subprocess.PIPE,
                                                      CompletedProcess=subprocess.CompletedProcess),
                           OBJ_CACHE=str(self.cache), PLANNED={(j[1], j[2]): '%040d' % i for i, j in enumerate(self.jobs)},

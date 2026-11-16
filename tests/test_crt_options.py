@@ -115,6 +115,7 @@ std::vector<gpu_choice::Card> gpu_device_cards;   // (the GPU row's cards, save:
 bool debug_warning = false;
 int debug_warning_choice = 0;
 void sync_transition_autosave() {}
+void gfx_limits() {}   // (the view distance rows' caps: vk_menu.cpp)
 bool menu_refresh = false;
 std::string ini_file;
 std::string ini_path() { return ini_file; }

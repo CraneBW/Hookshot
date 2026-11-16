@@ -379,12 +379,6 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
 | | Audio output | Auto, Stereo, 5.1 (after a restart) | Auto |
-| Gameplay | FPS counter | Off, FPS, Frame time, Graph, Breakdown, Dev | Off |
-| | FPS counter position | Top right, Top left, Bottom right, Bottom left | Top right |
-| | FPS counter size | Auto, Small, Medium, Large | Auto |
-| | FPS counter details | Opens the FPS counter details page: Version and hardware at every level (Off, On; Off), then a line each of the Dev level (VRAM, Textures, Draws, Dispatches, Render passes, Draws skipped, Texture uploads, Pipelines built, GPU slot waits, Queue submits, Write-backs) and the CPU and GPU lines (Off, On; On) | Version and hardware off, every line on |
-| | Menu size | Small, Medium, Large | Medium |
-| | Game speed | Per frame, Real time | Real time |
 | | Microphone | Off, Default, or each microphone by name | Default |
 | Gameplay | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
@@ -394,14 +388,14 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Text size | Original, 110%, 125%, 150%, 175% (dialogue, Navi and signs) | Original |
 | | Game language | The game's 16 languages, each by its own name (after a restart) | The one built with |
 | | Menu language | Auto (the game's language), or English, Português (Brasil), Español (Latinoamérica), Español (España), Français, Deutsch, Italiano, Nederlands, Polski, Русский, 日本語, 한국어, 简体中文, 繁體中文 | Auto |
-| | FPS counter | Off, FPS, Frame time, Graph, Breakdown | Off |
+| | FPS counter | Off, FPS, Frame time, Graph, Breakdown, Dev | Off |
 | | FPS counter position | Top right, Top left, Bottom right, Bottom left | Top right |
+| | FPS counter size | Auto, Small, Medium, Large | Auto |
+| | FPS counter details | Opens the FPS counter details page: Version and hardware at every level (Off, On; Off), then a line each of the Dev level (VRAM, Textures, Draws, Dispatches, Render passes, Draws skipped, Texture uploads, Pipelines built, GPU slot waits, Queue submits, Write-backs) and the CPU and GPU lines (Off, On; On) | Version and hardware off, every line on |
 | | Menu size | Small, Medium, Large | Medium |
 | | Discord status | Off, On ("Playing Hookshot" and the time played in your Discord status, while Discord runs on this PC) | On |
 | | Bug report | Saves a report into a new folder in `bug-reports` (below) | |
 | Controls | Controls | Opens the Controls page | |
-| | Layout preset | Nintendo (Def), Xbox / PC, Swap Face, Custom (on the Controls page) | Nintendo (Def) |
-| | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck (on the Controls page) | Auto |
 | | Controller in background | Off, On | Off |
 | | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |
 | | Rumble strength | Off, 25% to 150%, in steps of 25 | 100% |
@@ -418,6 +412,8 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Walk speed | 15% to 90%, in steps of 5 | 45% |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
+| | Layout preset | Nintendo (Def), Xbox / PC, Swap Face, Custom (on the Controls page) | Nintendo (Def) |
+| | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck (on the Controls page) | Auto |
 | Debug | Debug tools | Off, On (the tools below it while on) | Off |
 | | Developer: Descriptor reuse | Off, On (after a restart) | On |
 | | Developer: Sampler cache | Off, On (after a restart) | Off |

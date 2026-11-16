@@ -74,6 +74,7 @@ Options opts;
 bool debug_warning = false;
 int debug_warning_choice = 0;
 void sync_transition_autosave() {}
+void gfx_limits() {}   // (the view distance rows' caps: vk_menu.cpp)
 
 /* TABS */
 /* ROW */
