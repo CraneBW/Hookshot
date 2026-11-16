@@ -1047,7 +1047,7 @@ static int au_menu_output(void) {
     return v < 1 ? 0 : v > 3 ? 3 : v;
 }
 /* The speakers the game mixes for: the Insert menu's Audio output, Stereo/Mono 2 or 5.1 6, HOS_AUDIO_CHANNELS=2 or 6 over it;
-   Auto: 6 when the default output has 5.1 or more, else 2. The game asks once, at its start
+   Auto: 6 when the default output has 5.1 or more speakers (au_layout_channels), else 2. The game asks once, at its start
    (GetActiveAudioDeviceChannelCountForOutput), and pans for that many, so a change takes a restart. Told 2 (always,
    before), it put nothing behind the player, and a 5.1 system played the whole game from the front speakers (issue
    1124). Its device sink has the six channels either way; with two speakers they are mixed down. */
