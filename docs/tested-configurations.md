@@ -172,6 +172,14 @@ Do not append new runs here. Frame rates come from the named run's log at the st
 | 2026-11-12 | v2.1.0-rc.3-257-g9d786cf13 (source 7acafacf) | Arch Linux 7.2.15-1-omarchy, headless | RTX 4090, NVIDIA 615.78.08 | i9-13900K, 94 GiB | 5120x2880, render 100%, game upscaler, frame generation off, cap 240 | Hyrule Field, standing after save load, 95 s | Ordinary diagnostic run, **no speed claim**. New resource waits 2.927 ms/frame, of which timelines 2.916; old recording-slot value 0.000 ms/frame over complete log blocks at 45–75 s after first present. Exit 124, no fatal/kernel fault; load 44.89 → 16.84. Paired overhead/control timings deferred. |
 | 2026-11-12 | v2.1.0-rc.3-256-g51da0464b (source 18ed87b5) | Arch Linux 7.2.15-1-omarchy, headless | RTX 4090, NVIDIA 615.78.08 | i9-13900K, 94 GiB | 5120x2880, render 100%, game upscaler, frame generation off, cap 240 | Hyrule Field, standing after save load, 95 s | Ordinary diagnostic run, **no speed claim**. No resource-wait counter on this build; old recording-slot value 0.010 ms/frame over complete log blocks at 45–75 s after first present. Exit 124, no fatal/kernel fault; load 21.28 → 44.89. |
 | 2026-11-11 | v2.1.0-rc.3-246-g87991bc8 (source 6d41d308), main built from source (llvm-mingw, no DLSS) | Windows 11, 1280x720 window (mailbox, V-Sync Auto) | RTX 3080 10 GB, 621.14 | Core i9-12900K, 64 GB | Default options, uncapped (`HOS_FPS_MAX=1000`); a warm-up run first, no pipeline compiled while measuring | Hyrule Field (adult), by the Lost Woods bridge where the Cheats teleport puts Link, standing; 120 s from 45 s after the teleport | Two runs: 78.4 and 79.3 fps, median frame 12.18 and 12.23 ms, 30 and 37 frames over 20 ms, 1,335-1,453 draws. Readbacks of GPU results: about 1,550 of 3,000 waited, 0.04-0.07 ms each (medians). Against the nightly below for [#2602](https://git.notrexed.dev/Hookshot/Hookshot/commit/76bbe4aa58e3097a0350840badef1c4035ea8ea6) |
+| 2026-11-12 | v2.1.0-rc.3-193-g55b976c0 (source ae9e7c1b), local Steam Deck shader-preparation renderer; identity and method below | SteamOS 3.8.25 (20260807.2), headless | LCD Steam Deck, AMD Custom GPU 0405 / RADV VANGOGH, Mesa 26.2.0-devel (62436c0070) | AMD APU 0405, 16 GB shared | 1280x800 output, 50% render resolution, Docked, FOV 110%, FG off, 15 W; automatic clocks / fixed 1200 MHz / stronger detail cuts (as D4) / original detail / automatic clocks | D7: adult Kakariko potion shop, stationary; direct save load | 164.7 s total; 15 s first measurement, then 20 s each: 16.61 / 19.88 / 20.23 / 19.93 / 15.95 fps. Geometry cuts added little indoors. Process CPU time: 4.31-4.44 logical cores across phases. Original saves/settings unchanged; automatic clocks restored. No outdoor Kakariko result |
+| 2026-11-12 | same measured build as D7 | as above | as above | as above | same starting settings; copied save; 10 GiB test cgroup, no test-cgroup swap; 1100 MiB available-memory guard | D6: Kakariko potion shop, then an attempted outdoor teleport | Stopped after 63.2 s when system MemAvailable was sampled at 289 MiB. Game then exited normally; original saves/settings unchanged; automatic clocks restored. No outdoor FPS measurement, OOM-kill or driver-fault result established |
+| 2026-11-12 | same measured build as D7 | as above | as above | as above | same starting settings, copied save | D5: Kakariko potion shop, first attempted outdoor teleport | Game declined the teleport; experiment stopped after 41.5 s and exited normally. Original saves/settings unchanged; no outdoor result |
+| 2026-11-12 | same measured build as D7 | as above | as above | as above | same starting settings; automatic / fixed 1200 MHz / stronger detail cuts / handheld base quality / original detail / automatic | D4: adult Hyrule Field, stationary on the path by the ranch, rain | 226.0 s total; 18 s first measurement, then 25 s each: 8.76 / 12.34 / 14.26 / 14.18 / 12.30 / 8.43 fps. Stronger cuts: foliage 25%, grass 0, object detail 50%, world and character shadow distances 25%. The handheld-quality flag was not rechecked at phase end. Original saves/settings unchanged; automatic clocks restored |
+| 2026-11-12 | same measured build as D7 | as above | as above | as above | same starting settings; automatic / fixed 1200 MHz / foliage 25%, grass 0, shadow distance 50% / original detail / automatic | D3: same Hyrule Field save and camera | 187.9 s total; 18 s first measurement, then 25 s each: 10.26 / 12.74 / 14.42 / 12.34 / 8.63 fps. Median sampled GPU clocks: 922 / 1200 / 1200 / 1200 / 455 MHz. Original saves/settings unchanged; automatic clocks restored |
+| 2026-11-12 | same measured build as D7 | as above | as above | as above | same starting settings, automatic clocks; original / upscaler off / original / foliage 25%, grass 0, shadow distance 50% / original / lower detail + upscaler off / original | D2: same Hyrule Field save and camera | 203.9 s total, 18 s per measured phase: 8.33 / 8.27 / 8.27 / 9.88 / 8.55 / 11.38 / 10.10 fps. Original-detail phase medians: about 3650-3685 draws; lower detail: about 3258-3304. Late baseline drift prevents attributing the combined result solely to its switches. Original saves/settings unchanged |
+| 2026-11-12 | same measured build as D7 | as above | as above | as above | same starting settings and phase sequence as D2 | D1: adult Kakariko potion shop, stationary | 200.2 s total, 18 s per measured phase: 17.55 / 16.82 / 17.10 / 17.49 / 16.60 / 17.32 / 16.71 fps. No useful geometry or upscaler-off gain established indoors. Original saves/settings unchanged; no outdoor Kakariko result |
+| 2026-11-11 | v2.1.0-rc.3-246-g87991bc8 (source 6d41d308), main built from source (llvm-mingw, no DLSS) | Windows 11, 1280x720 window (mailbox, V-Sync Auto) | RTX 3080 10 GB, 621.14 | Core i9-12900K, 64 GB | Default options, uncapped (`HOS_FPS_MAX=1000`); a warm-up run first, no pipeline compiled while measuring | Hyrule Field (adult), by the Lost Woods bridge where the Cheats teleport puts Link, standing; 120 s from 45 s after the teleport | Two runs: 78.4 and 79.3 fps, median frame 12.18 and 12.23 ms, 30 and 37 frames over 20 ms, 1,335-1,453 draws. Readbacks of GPU results: about 1,550 of 3,000 waited, 0.04-0.07 ms each (medians). Against the nightly below for [#2602](https://github.com/NotRexed/Hookshot/pull/2602) |
 | 2026-11-11 | v2.1.0-rc.3-193-g55b976c0 (source ae9e7c1b), the last nightly before #2602, built from source as above | as above | as above | as above | as above | as above | Two runs, interleaved with the two above: 59.7 and 60.8 fps, median frame 16.39 and 16.32 ms, 264 and 22 frames over 20 ms, 1,355-1,445 draws. Readbacks of GPU results: 172 of 3,000 waited, 5.80 and 5.56 ms each (medians) |
 | 2026-11-12 UTC | main 51da0464 / PR2649 84a006d5, matching host and renderer | Windows 11, windowed | RTX 5070 Ti 16 GB, NVIDIA 621.01 | Ryzen 7 9800X3D, 32 GB | 1280x720, 60 fps cap, FG off, precompile/prediction off, RX_VK_PLAY_CACHE=0; identical 1,124,480,456-byte base plus one play file and warmed translator inputs restored before each process | Kokiri balcony checkpoint, 30 s after loaded state; eight fresh processes: A/A then AB, BA, AB | All exit 0; checkpoint and final cache hashes match. Paired peak private reductions 924.9 / 1,064.3 / 900.3 MiB, but A/A varied 979.9 MiB. Working-set peak deltas -8.7 / -59.9 / +74.3 MiB; no consistent steady-memory, physical-memory, FPS or startup benefit established |
 | 2026-11-12 UTC | PR2649 23c50087 against main 51da0464; [reported by dankman42](https://git.notrexed.dev/Hookshot/Hookshot/commit/fc5ab98158757bc5cf895452e7548118b82c4fe3) | Windows 11, windowed | RTX 3080 10 GB, NVIDIA 621.14 | i9-12900K, 64 GB | 1280x720, default options; fixed 1,615,665,731-byte base plus three play files restored each run; one warm-up per build, three interleaved pairs | Adult Kakariko save, teleport to Hyrule Field, 30 s, clean quit; three base saves per measured run | Reported median peak private 26,418 vs 27,831 MB, working set level; all saves published and a further start read the saved cache. Earlier-head external evidence, not a local or current-head rerun; no FPS/Linux/AMD/Intel test |
@@ -230,6 +238,60 @@ Do not append new runs here. Frame rates come from the named run's log at the st
 | 2026-11-09 | main 7eac5bf | as above | as above | as above | 3840x2160, DLSS Quality, no mods | Hyrule Castle road | 52.8 fps (replay submit 17.5 ms, memory sync 4.8 ms, GPU 12.8 ms) |
 | 2026-11-09 | main 7eac5bf | as above | as above | as above | fullscreen (`HOS_FULLSCREEN=1`) | Hyrule Castle road | fullscreen works, no device lost |
 | 2026-11-09 | v2.0.11-142 (7dbdcdc) | as above | as above | as above | 3840x2160, DLSS Quality | Water Temple 1F, Hyrule Castle road, Deku Tree 2F | Water Temple walls missing with the 23.3 GB dump, drawn with stand-in textures (#1308) or a complete dump. Slingshot and bow aiming: no fps change (51-52 fps, #1305). Pause / unpause: no freeze |
+
+## Steam Deck investigation, 2026-11-12
+
+The seven Deck runs above record an investigation, with temporary settings, rather than a runtime patch or a new
+preset. They measured the installed `55b976c0` host with the local shader-preparation work described in
+[PR #2800](https://github.com/NotRexed/Hookshot/pull/2800). The deployed renderer's SHA-256 was
+`e010bca302381ed193a79862009c6afb7b7704c3c431452684ef3b4331994f94`. They do not measure newer `main`, including
+the readback changes in [PR #2602](https://github.com/NotRexed/Hookshot/pull/2602).
+
+All runs used the same installed build and driver, copies of the saves and settings, no audio device, frame
+generation off, the game's upscaler unless a phase says Off, and
+`RX_VK_MESH_NOCULL=2c56dc1006942f74`. Each ran in a 10 GiB memory-limited cgroup with no cgroup swap, a 300-second
+runtime limit and a guard that stopped the experiment below 1100 MiB system MemAvailable.
+The workaround kept its meaning throughout: every meshlet of the affected
+programs was drawn. Its cost was not isolated, and these measurements do not justify removing a hang workaround.
+The output setting was 1280x800; the headless bridge reported a 1920x1080 window, so these runs do not establish
+the framing or performance of the Deck's Gaming Mode display route.
+
+Each timed phase followed a three-second settling interval. FPS here is the control bridge's game-frame counter
+delta divided by monotonic wall time, after loading and an initial ten-second warm-up. It is not a generated-frame
+rate, GPU timestamp duration or scanout measurement. The D1-D4 durations were 18 or 25 seconds as marked; D7 used
+15 or 20 seconds. Draw counts and, where recorded, GPU clocks are medians of one-second status/telemetry samples
+within a phase; the draw count itself is the bridge's running average. Loading, screenshots and parameter changes
+were outside the timed intervals. Weather, animation and automatic CPU/GPU power allocation continued to vary; the original-detail
+repeats matter more than comparisons between separate launches.
+
+The geometry experiment used the game's parameters described in
+[PR #2669](https://github.com/NotRexed/Hookshot/pull/2669), through the opt-in control bridge on the copied saves.
+The supported instruction, typed geometry-object links and parameter bounds were checked before the writes.
+The geometry parameters were read back after each measured phase in D2-D4 and D7; D1 checked the writes when made.
+D4 and D7 also tried an object-detail multiplier below that PR's advertised 100% minimum; those values are
+experimental, not an existing menu preset. The handheld base
+quality comparison in D4 did not change the output resolution or operation profile. These runs are not a test of
+that PR's full implementation, transitions or settings persistence.
+
+The clearest comparison is D3: at a fixed 1200 MHz GPU clock, original detail gave 12.74 fps, the foliage/grass/shadow
+cuts gave 14.42, and restoring original detail gave 12.34. D4's stronger cuts gave 14.26 fps between original-detail
+measurements of 12.34 and 12.30. Writing the handheld base-quality flag gave 14.18, but its persistence throughout
+that phase was not recorded, so that comparison is inconclusive. This supports a modest geometry benefit
+in this view, not a general 30 fps result or a reason to keep cutting model detail. Automatic clocks gave lower and
+less stable results on this Deck; the observations do not establish why the governor chose those clocks or a
+universal 1200 MHz recommendation.
+
+The Kakariko saves inspected at runtime loaded inside the potion shop. D6's outdoor transition lost memory
+headroom and was stopped by the guard. This does not establish a memory leak, an outdoor FPS number, or that the
+same failure happens outside the test cgroup. Further work needs a direct outdoor checkpoint and matched Gaming
+Mode measurements on current `main`, followed by call-stack profiling of the replay and game workers. Thread CPU
+time alone does not show whether the workers were computing or polling.
+
+Automatic GPU control and its original 200-1600 MHz range were restored after the clock comparisons; the 15 W
+power limit was not raised. Original save/settings hashes were unchanged. The temporary game copy and seven test
+save copies were removed. The local experimental script, raw reports, game files and caches are not part of this
+documentation contribution. OLED Decks, Windows, other GPUs, physical input, audio and extended play were not
+tested in these runs.
 
 ## Limits of the original RTX 4070 Ti runs
 
