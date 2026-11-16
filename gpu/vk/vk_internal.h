@@ -559,6 +559,9 @@ int shot_ask_next(const char* path, void (*done)(void* ctx, int64_t present, int
 
 bool create_swapchain(uint32_t width, uint32_t height);
 void present_thread_drain();   // (vk_replay.cpp: the presenter thread's present made, RX_VK_PRESENT_THREAD)
+/// (hookshot) ReShade (and RenoDX, a ReShade add-on) in the process, or RX_VK_RESHADE=1: the presents on the graphics queue and the
+/// swapchain's images drawable, as ReShade's effects and RenoDX's HDR pass need. RX_VK_RESHADE=0: never
+bool reshade_compat();
 int swapchain_framegen();   // (vk_main.cpp: frame generation's fixed multiplier as the swapchain is made for it, 0 none)
 bool swapchain_dlssg();     // (vk_main.cpp: and DLSS-G makes its sets: V-Sync Auto's FIFO)
 void retire_swapchain();   // (dev.present_mu held)

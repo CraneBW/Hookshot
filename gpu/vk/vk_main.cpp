@@ -533,6 +533,12 @@ bool create_device() {
         (void)dp;       //  NVIDIA's driver on Windows. RX_VK_PRESENT_QUEUE=1: on)
 #endif
         if (const char* e = getenv("RX_VK_PRESENT_QUEUE")) want = atoi(e) != 0;
+        // (hookshot: ReShade, and RenoDX through it, draws its effects and its HDR pass on the queue the presents are made on: a
+        // compute family's has no graphics, and ReShade turns itself off there. reshade_compat)
+        if (want && reshade_compat()) {
+            want = false;
+            logf("vk: ReShade / RenoDX: the presents stay on the graphics queue (RX_VK_PRESENT_QUEUE left off)");
+        }
         for (uint32_t i = 0; want && i < n && compute_family == UINT32_MAX; i++)
             if ((families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
                 compute_family = i;
@@ -919,6 +925,25 @@ void swap_views_make(VkImageUsageFlags usage, VkFormat format) {
 /// (hookshot) Frame generation as the swapchain is made for it: the fixed multiplier, 2 to 4 (more takes no more images), or 0
 /// for off and Auto. Its present mode under V-Sync Auto and its spare images follow it; present_image makes the swapchain
 /// again when it changes
+bool reshade_compat() {
+    // (asked when the device is made, after the instance: ReShade's Vulkan layer, an implicit layer the ReShade installer registers
+    // for hookshot.exe, has loaded its DLL by then)
+    static int on = -1;
+    if (on >= 0) return on != 0;
+    const char* e = getenv("RX_VK_RESHADE");
+    if (e && *e) {
+        on = env_on("RX_VK_RESHADE");
+    } else {
+#ifdef _WIN32
+        on = GetModuleHandleA("ReShade64.dll") != nullptr || GetModuleHandleA("ReShade.dll") != nullptr;
+#else
+        on = 0;
+#endif
+    }
+    if (on) logf("vk: ReShade / RenoDX compatibility on (%s): presents on the graphics queue, the swapchain's images drawable",
+                 e && *e ? "RX_VK_RESHADE" : "ReShade's layer is loaded");
+    return on != 0;
+}
 int swapchain_framegen() { return opts.framegen >= 2 ? std::min(opts.framegen, 4) : 0; }
 
 /// (hookshot) Whether the swapchain is made for NVIDIA DLSS Frame Generation: a fixed multiplier, and DLSS-G making the sets
@@ -1094,6 +1119,9 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     // (hookshot) the overlays Dear ImGui draws (vk_imgui.cpp) render into it. Every surface allows it (the Vulkan spec)
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
         ci.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // (hookshot) ReShade / RenoDX: their effects and RenoDX's HDR output pass also sample the swapchain's images (reshade_compat;
+    // not storage: an sRGB swapchain format has no storage use, whatever the surface lists, and the swapchain would fail)
+    if (reshade_compat() && (caps.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT)) ci.imageUsage |= VK_IMAGE_USAGE_SAMPLED_BIT;
     ci.preTransform = caps.currentTransform;
     ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     if (!(caps.supportedCompositeAlpha & ci.compositeAlpha)) {
