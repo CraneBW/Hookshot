@@ -283,11 +283,7 @@ public partial class MainWindow : Window
     }
 
     /// The game in a folder: bin\hookshot.exe below its launcher (hookshot.exe), or hookshot.exe in a folder built before the launcher
-    static string GameExe(string folder)
-    {
-        var game = System.IO.Path.Combine(folder, "bin", "hookshot.exe");
-        return File.Exists(game) ? game : System.IO.Path.Combine(folder, "hookshot.exe");
-    }
+    static string GameExe(string folder) => PatchBuilds.GameExe(folder);   // (bin\hookshot.exe, or a newer development build's own)
 
     /// (the launcher already checked for updates: the game does not ask again)
     static void StartGame(string folder)
@@ -397,10 +393,17 @@ public partial class MainWindow : Window
 
     // ---- Mods + Editor (ToolsPage): the game folder's mods and its saves; Back comes back to the page it was opened from, and
     // Save and play starts the game as Play does there ----
+    string? keepPatchBuild;   // (a build the Mods page asked for: its mix of code patches kept once it is in, PatchBuilds)
+
     void OpenTools(string folder, FrameworkElement from, Action<string> play)
     {
         ToolsPage.Back = () => ShowPage(from);
         ToolsPage.Play = play;
+        ToolsPage.Rebuild = f =>
+        {
+            keepPatchBuild = f;
+            Updater.UpdateFolder(this, f, Tools.Find()?.Version, fetched: false);   // (as Update: the same folder, saves kept)
+        };
         ToolsPage.Open(Tools.Find(), folder);
         ShowPage(ToolsPage);
     }
@@ -1340,6 +1343,12 @@ public partial class MainWindow : Window
         }
         if (Finder.ShortcutError != null) AddLog("shortcut not made: " + Finder.ShortcutError);
         ShowPage(ReadyPage);
+        if (keepPatchBuild != null && string.Equals(keepPatchBuild, finished, StringComparison.OrdinalIgnoreCase))
+        {
+            var kept = keepPatchBuild;
+            _ = Task.Run(() => { try { PatchBuilds.Store(kept); } catch (Exception ex) { Dispatcher.BeginInvoke(() => AddLog("patch build not kept: " + ex.Message)); } });
+        }
+        keepPatchBuild = null;
         _ = FreeAfterBuild();
         _ = BringInSave();
     }

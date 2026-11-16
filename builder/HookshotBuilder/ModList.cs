@@ -113,6 +113,30 @@ sealed class ModList
         }
     }
 
+    /// The code patches the ticked mods have (nx2/exefs_patches.py collect): "mod, file, FNV-1a of its bytes" a line, as
+    /// exefs_patches.txt lists them, for PatchBuilds.KeyOf
+    public List<string> PatchLines()
+    {
+        var lines = new List<string>();
+        foreach (var m in Mods.Where(m => m.On && m.ExeFs))
+        {
+            IEnumerable<string> names;
+            try { names = Directory.EnumerateFiles(System.IO.Path.Combine(m.Path, "exefs")).Select(System.IO.Path.GetFileName).OfType<string>(); }
+            catch (Exception) { continue; }
+            foreach (var n in names.Where(n => n.EndsWith(".ips", StringComparison.OrdinalIgnoreCase) || n.EndsWith(".pchtxt", StringComparison.OrdinalIgnoreCase))
+                                   .OrderBy(n => n, StringComparer.Ordinal))
+            {
+                uint h = 0x811C9DC5;
+                try { foreach (var b in File.ReadAllBytes(System.IO.Path.Combine(m.Path, "exefs", n))) h = (h ^ b) * 0x01000193; }
+                catch (Exception) { continue; }
+                lines.Add($"{m.Name}\t{n}\t{h:x8}");
+            }
+        }
+        return lines;
+    }
+
+    public bool AnyPatches => Mods.Any(m => m.ExeFs);
+
     public void Move(int i, int by)
     {
         var j = i + by;

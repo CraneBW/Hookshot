@@ -24,6 +24,7 @@ partial class ToolsPage : UserControl
     int edited;
     public Action? Back;
     public Action<string>? Play;
+    public Action<string>? Rebuild;   // (MainWindow: the folder built again, as Update builds it, then its mix kept: PatchBuilds)
 
     public ToolsPage()
     {
@@ -170,8 +171,63 @@ partial class ToolsPage : UserControl
     }
 
     // ================================================================ Mods
+    // ---- the mods' code patches: the mix ticked against the one the game was built with (PatchBuilds.cs)
+    string patchWant = "none";
+    void RefreshPatchBar()
+    {
+        if (mods == null) return;
+        patchWant = PatchBuilds.KeyOf(mods.PatchLines());
+        var built = PatchBuilds.KeyBuilt(game);
+        if (!mods.AnyPatches && built == "none" || patchWant == built)
+            PatchBar.Visibility = Visibility.Collapsed;
+        else
+        {
+            var before = PatchBuilds.Has(game, patchWant);
+            PatchText.Text = "The code patches ticked are not the ones this game was built with. " +
+                             (before ? "It was built with this mix before: Apply switches to it in a few seconds."
+                                     : "Rebuild to use them (as long as an update: the code is translated again). Until then the game plays as it was built.");
+            PatchButton.Content = before ? "Apply" : "Rebuild";
+            PatchBar.Visibility = Visibility.Visible;
+        }
+        var kept = PatchBuilds.Size(game);
+        KeptRow.Visibility = kept > 0 ? Visibility.Visible : Visibility.Collapsed;
+        KeptText.Text = $"Builds kept for other mixes of code patches: {Finder.Size(kept)}";
+    }
+
+    async void PatchClick(object sender, RoutedEventArgs e)
+    {
+        if (mods == null) return;
+        if (GameRunning(game)) { SetStatus("Close the game first.", true); return; }
+        PatchButton.IsEnabled = false;
+        try
+        {
+            mods.Save();   // (the build reads the ticks from hookshot_mods.txt)
+            modsDirty = false;
+            var want = patchWant;
+            SetStatus("Keeping this build for its mix of patches…");
+            await Task.Run(() => PatchBuilds.Store(game));   // (the mix in the folder now: switching back to it is a copy too)
+            if (await Task.Run(() => PatchBuilds.Restore(game, want)))
+            {
+                SetStatus("Switched to the build with these code patches.");
+                RefreshPatchBar();
+                return;
+            }
+            Close();
+            Rebuild?.Invoke(game);
+        }
+        catch (Exception ex) { SetStatus("Not switched: " + ex.Message, true); }
+        finally { PatchButton.IsEnabled = true; }
+    }
+
+    void FreeKeptClick(object sender, RoutedEventArgs e)
+    {
+        try { PatchBuilds.Clear(game); } catch (Exception ex) { SetStatus("Not freed: " + ex.Message, true); }
+        RefreshPatchBar();
+    }
+
     void FillMods()
     {
+        RefreshPatchBar();
         ModRows.Children.Clear();
         if (mods == null) return;
         if (mods.Mods.Count == 0)
@@ -366,7 +422,7 @@ partial class ToolsPage : UserControl
         string text(double? d) => d is { } x ? x.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : "";
 
         var life = Card("Health and magic");
-        Line(life, "Hearts", Box(text(num("hearts")), v => SetStat("hearts", v)), $"of {text(num("max_hearts"))}", ("Fill", () => Fill("hearts")));
+        Line(life, "Hearts", Box(text(num("hearts")), v => SetStat("hearts", v)), $"of {text(num("max_hearts"))} (the containers)", ("Fill", () => Fill("hearts")));
         Line(life, "Heart containers", Box(text(num("max_hearts")), v => SetStat("max_hearts", v)), "3 to 20");
         Line(life, "Magic meter", Pick(st["meters"]!.AsArray(), st["meter"]!.GetValue<int>(), i => SetStat("meter", i.ToString())));
         Line(life, "Magic", Box(text(num("magic")), v => SetStat("magic", v)), $"of {text(num("max_magic"))}", ("Fill", () => Fill("magic")));
