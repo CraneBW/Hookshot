@@ -47,6 +47,7 @@
 #include "vk_menu.h"
 #include "oot_cheat_items.h"   // (hookshot: OOT_CHEAT_ITEM_BASE, OOT_CHEAT_AGE_ID: the item wheel's counts and pages)
 #include "oot_wheel_state.h"   // (hookshot: the Item wheel and Cycle items rows' option ids)
+#include "oot_teleport_capture.h"   // (hookshot: HOS_OPT_TELEPORT_PICTURES)
 #include "vk_jobs.h"
 #include "vk_shader.h"
 #include "vk_state.h"
@@ -943,17 +944,6 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
         // (RX_VK_BATCH_MAX=<command buffers>: held at most this many, default 32)
         static const size_t cap = getenv("RX_VK_BATCH_MAX") ? (size_t)std::max(1, atoi(getenv("RX_VK_BATCH_MAX"))) : 32;
         if (pend.cbs.size() >= cap) flush_reason = FR_CAP, queue_flush_locked();
-        // (hookshot, #1993 by mrdev023) Sent at once while the GPU has done every batch sent so far: a held batch waited for
-        // the next wait or present and the GPU sat idle meanwhile, and with serial replay the game waits for it mid-frame
-        // (take_capture's late pages), so the GPU started cold just as it was waited for. RX 9070 XT, RADV, Kokiri Forest:
-        // 33-41 fps -> 46-61, no flashes in 5230 frames; ~10 flushes a frame of ~3.7 command buffers each, so batching still
-        // groups the submits while the GPU is busy. RX_VK_BATCH_IDLE=0: held until a wait, a present or the cap, as before
-        static const bool idle_flush = !getenv("RX_VK_BATCH_IDLE") || atoi(getenv("RX_VK_BATCH_IDLE")) != 0;
-        if (idle_flush && !pend.cbs.empty()) {
-            uint64_t done = 0;
-            if (vkGetSemaphoreCounterValue(dev.device, batch_tl, &done) == VK_SUCCESS && done >= batch_flushed)
-                flush_reason = FR_OTHER, queue_flush_locked();
-        }
         if (!pend.cbs.empty() && batch_gpu_idle()) flush_reason = FR_OTHER, queue_flush_locked();   // (#1993)
         if (!pend.cbs.empty() && readback_send_now()) flush_reason = FR_READBACK, queue_flush_locked();
         return;
@@ -1656,12 +1646,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
         }
         case NOP_COPY_B2T: if (!dry) { ParLock lk; copy_b2t(cmd, s, payload<nvn_p_copy_bt>(a, avail), true); } break;
         case NOP_COPY_T2B: if (!dry) { ParLock lk; copy_b2t(cmd, s, payload<nvn_p_copy_bt>(a, avail), false); } break;
-        case NOP_COPY_T2T: {
-            ParLock lk;
-            if (dry) dry_mark_copy_target(payload<nvn_p_copy_tt>(a, avail));
-            else copy_t2t(cmd, s, payload<nvn_p_copy_tt>(a, avail));
-            break;
-        }
+        case NOP_COPY_T2T: if (!dry) { ParLock lk; copy_t2t(cmd, s, payload<nvn_p_copy_tt>(a, avail)); } break;
         case NOP_CLEAR_TEX: if (!dry) { ParLock lk; clear_tex(cmd, s, payload<nvn_p_clear_tex>(a, avail)); } break;
         case NOP_UPDATE_UB: {
             const auto u = payload<nvn_p_update_ub>(a, avail);
@@ -4469,6 +4454,73 @@ std::shared_ptr<std::vector<uint8_t>> shot_pixels(uint64_t at_value, int64_t at_
     const uint8_t* const sm = (const uint8_t*)shot_maps[at_present & 1];
     return std::make_shared<std::vector<uint8_t>>(sm, sm + (size_t)kShotW * kShotH * 4);
 }
+// (hookshot) the Travel page's own pictures, vk_menu.cpp: when the game side says Link has stayed at a place, the
+// middle 60% of the picture shown, away from the HUD's corners, at 480x270; recorded with one present and read at a later one
+// once the GPU has finished it (a present never waits for it), handed to the menu's picture worker
+struct TeleportShot {
+    VkImage image = VK_NULL_HANDLE;
+    VmaAllocation image_alloc = nullptr;
+    VkBuffer buf = VK_NULL_HANDLE;
+    VmaAllocation buf_alloc = nullptr;
+    void* map = nullptr;
+    bool tried = false;
+    int pending = -1;
+    uint64_t value = 0;
+};
+TeleportShot tp_shot;
+constexpr uint32_t kTpShotW = 480, kTpShotH = 270;
+void teleport_capture(VkCommandBuffer cmd, VkImage src, uint32_t sw, uint32_t sh, const int crop[4], uint64_t value) {
+    if (tp_shot.pending >= 0) {   // (the last one's pixels, once the GPU is past its present: never waited for here)
+        if (completed() < tp_shot.value) return;
+        invalidate_mapped(tp_shot.buf_alloc, (uint64_t)kTpShotW * kTpShotH * 4);
+        menu_store_capture(tp_shot.pending, (const uint8_t*)tp_shot.map, kTpShotW, kTpShotH);
+        tp_shot.pending = -1;
+    }
+    if (!src) return;
+    const int want = menu_take_capture_request();
+    if (want < 0) return;
+    if (!tp_shot.image) {
+        if (tp_shot.tried) return;
+        tp_shot.tried = true;
+        VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.format = VK_FORMAT_R8G8B8A8_UNORM;
+        ci.extent = {kTpShotW, kTpShotH, 1};
+        ci.mipLevels = ci.arrayLayers = 1;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        VkImage image = VK_NULL_HANDLE;
+        VmaAllocation image_alloc = nullptr;
+        if (!create_image(ci, image, image_alloc)) {
+            logf("vk: Travel pictures: no image could be made");
+            return;
+        }
+        if (!create_buffer((uint64_t)kTpShotW * kTpShotH * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, tp_shot.buf, tp_shot.buf_alloc,
+                           &tp_shot.map)) {
+            destroy_image(image, image_alloc);
+            logf("vk: Travel pictures: no buffer could be made");
+            return;
+        }
+        tp_shot.image = image, tp_shot.image_alloc = image_alloc;
+    }
+    int x0 = 0, y0 = 0, w = (int)sw, h = (int)sh;
+    if (crop && crop[2] > 0 && crop[3] > 0) x0 = crop[0], y0 = crop[1], w = crop[2], h = crop[3];
+    const int middle[4] = {x0 + w / 5, y0 + h / 5, w - 2 * (w / 5), h - 2 * (h / 5)};
+    if (middle[2] <= 0 || middle[3] <= 0) return;
+    image_barrier(cmd, tp_shot.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    blit_crop(cmd, src, sw, sh, middle, tp_shot.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kTpShotW, kTpShotH);
+    image_barrier(cmd, tp_shot.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    const VkBufferImageCopy c{0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {kTpShotW, kTpShotH, 1}};
+    vkCmdCopyImageToBuffer(cmd, tp_shot.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, tp_shot.buf, 1, &c);
+    VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};   // (the copy seen by the host's read at the next present)
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT, mb.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &di);
+    tp_shot.pending = want, tp_shot.value = value;
+}
+
 void do_present(const nvn_tex* t, const int crop[4], float cover) {
     static PendingShot pending;
     // (hookshot) NVIDIA Reflex (vk_reflex.cpp): this frame's simulation ended, its submission starts; on the way out (after the
@@ -4643,6 +4695,7 @@ void do_present(const nvn_tex* t, const int crop[4], float cover) {
         }
         shot_ask_record(r.cmd, headless_fx ? headless_fx : src, headless_fx ? kShotW : sw, headless_fx ? kShotH : sh,
                         headless_fx ? nullptr : crop, value);   // the bridge captures the same CRT output, without Hookshot overlays
+        teleport_capture(r.cmd, src, sw, sh, crop, value);   // (hookshot: the Travel page's own pictures)
         memory_end_submission(r.cmd, r.part);
         full_barrier(r.cmd);
         submit_recording(r);   // (nothing is stopped at a present: drain)
@@ -5305,13 +5358,6 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     si.pNext = reflex_submit_id(nullptr, reflex_present_frame);
     res = vkQueueSubmit2(dev.queue, 1, &si, f.done);
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
-    if (res != VK_SUCCESS) {
-        // (the present below waits for the semaphore this submit signals: with the submit refused it would wait for good, on the
-        // presents' own queue unseen by anything that waits on the replay's queue)
-        static int logged;
-        if (logged++ < 8) logf("vk: the present's blit submit failed (VkResult %d): this frame is not shown", (int)res);
-        return;
-    }
     if (present_defer_into) {   // (present ahead: the copy is queued; present_commit shows it at its time)
         present_defer_into->used = true;
         present_defer_into->index = index;
@@ -5388,22 +5434,13 @@ static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk) {
     }
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
     reflex_presented();
-    if (res == VK_ERROR_DEVICE_LOST) device_lost();   // (on the presents' own queue this is the first place a lost device shows)
     if (res == VK_ERROR_SURFACE_LOST_KHR) {
         if (!qk.owns_lock()) qk.lock();
         invalidate_lost_surface(res);
         return false;
     }
-    {   // (every 600 presents: how they ended; a window shot is taken before the present, so a black window shows only here)
-        static int64_t n_ok, n_subopt, n_old, n_other;
-        (res == VK_SUCCESS ? n_ok : res == VK_SUBOPTIMAL_KHR ? n_subopt : res == VK_ERROR_OUT_OF_DATE_KHR ? n_old : n_other)++;
-        if ((n_ok + n_subopt + n_old + n_other) % 600 == 0)
-            logf("vk: presents%s: %lld shown, %lld suboptimal, %lld out of date, %lld failed", dev.present_queue_supported ? " (own queue)" : "",
-                 (long long)n_ok, (long long)n_subopt, (long long)n_old, (long long)n_other);
-    }
     present_finish(res, false);
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
-        logf("vk: present result %d: the swapchain is made again", (int)res);
         if (!qk.owns_lock()) qk.lock();
         create_swapchain(dev.swap_extent.width, dev.swap_extent.height);
     }
@@ -6497,6 +6534,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_CYCLE_ITEMS) return opts.cycle_items;
         if (id == OOT_CHEAT_AGE_ID) return menu_link_age();
         if (id >= OOT_CHEAT_ITEM_BASE && id < OOT_CHEAT_ITEM_BASE + 4096) return menu_item_count(id - OOT_CHEAT_ITEM_BASE);
+        if (id == HOS_OPT_TELEPORT_PICTURES) return menu_teleport_captures_on();   // (hookshot: host/hos_main.c oot_capture_tick)
         if (id == HOS_OPT_CHEAT_SPEED) return menu_link_speed();
         if (id == HOS_OPT_HDR_NATIVE) return dev.hdr && opts.hdr == 2;
         if (id == HOS_OPT_HDR_TONEMAP) return scene_tonemap_on();

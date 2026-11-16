@@ -129,7 +129,6 @@ void program_load_async_here(bool on);
 /// (hookshot) a cached program's stand-in: once ready (and failed), its records are read and the draw picks again
 bool program_is_stand_in(const Program* p);
 uint64_t program_cache_stamp();   // (what the kept programs and pipelines are good for)
-size_t program_cache_kept();   // (hookshot) program keys in the cache now, SIZE_MAX: no cache
 size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const std::function<void(Program&)>& fn,
                                bool computes = true, bool fallbacks = false);   // (computes: and every kept compute program)
 /// The precompile of every shader of the game (hookshot_shaders.bin, from nx2/shader_census.py): how many programs it names, 0: none

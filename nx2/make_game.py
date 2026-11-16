@@ -3053,6 +3053,10 @@ def main(a=None):
     icon = os.path.join(ROOT, "assets", "hookshot.png")
     if LINUX and not game_title.write_png(out, os.path.join(out, "hookshot.png")) and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c; the game's own when its .nup had one)
         copy_writable(icon, os.path.join(out, "hookshot.png"))   # (a second build overwrites the first's)
+    # (hookshot) the Travel places' positions, arrival events and story marks (gpu/vk/oot_tp_places_data.h), from the
+    # player's own maps (nx2/teleport_places.py, zstandard alone). Without them the places arrive with the plain event, no pictures
+    if run(PY + [os.path.join(HERE, "teleport_places.py"), "--romfs", romfs, "--out", out], check=False, output=sys.stderr):
+        print("the Travel places' data was not made: they arrive with the plain event and take no pictures", flush=True)
     seed_pipelines(out)
     ship_state_list(out)
     # (hookshot) the item wheel's icons, names and sounds (gpu/vk/vk_wheel.cpp, host/oot_wheel.c, host/nn_audio.c): the game's own,

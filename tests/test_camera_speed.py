@@ -125,6 +125,8 @@ def source_checks():
         value.update({n: int(start) + i for i, n in enumerate(names)})
     cheats = (ROOT / "gpu" / "vk" / "oot_cheat_items.h").read_text(encoding="utf-8")   # (the game side's own ids: OOT_CHEAT_AGE_ID)
     value.update({n: int(v) for n, v in re.findall(r"#define (OOT_CHEAT_\w+) (\d+)", cheats)})
+    capture = (ROOT / "gpu" / "vk" / "oot_teleport_capture.h").read_text(encoding="utf-8")   # (the Travel pictures' id)
+    value.update({n: int(v) for n, v in re.findall(r"#define (HOS_OPT_\w+) (\d+)", capture)})
     check("HOS_OPT_CAMERA_SPEED" in value, "vk_api.h has no HOS_OPT_CAMERA_SPEED")
     table = block(replay, "t.option = [](int id) -> int {")
     ids = [int(n) if n.isdigit() else value[n] for n in re.findall(r"\bid == (\w+)", table)]

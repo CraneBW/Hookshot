@@ -1010,6 +1010,14 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 `hookshot_env.txt` in the game folder). The tools then show below it on the same tab. The tab's Developer section,
 always shown, has the Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8 rows.
 
+**Travel** (a debug tool, beside Teleport) opens a page of 190 places to go to: villages, dungeons' entrances, shops,
+warp points and story spots, grouped by area, for Link's age (Tab, X on a pad, or the Child and Adult buttons show the other
+age's: going there makes Link that age). Once you have opened the page, each place gets a picture taken from your own game
+the first time Link stays there a few seconds with the menu closed (in `teleport_pictures` in the game folder, with a short
+"Travel picture saved" line over the game); Backspace or Y on the page takes a place's picture again at the next stay there.
+Link arrives through the game's own map change, as when he walks in. The places' positions and arrival events come from
+your game files at every build (`teleport_places.bin`, `nx2/teleport_places.py`).
+
 A save whose minimap stopped showing after a Teleport on an earlier build (the area left had hidden it, and the flag
 stayed set in the save) is mended by the Teleport itself: teleport to an outdoor area, wait until you can move, then
 save from the game's System menu. The minimap then stays after a restart.
@@ -1135,6 +1143,8 @@ Hookshot exists thanks to the work of many people:
 - **[kinnay/zbic](https://github.com/kinnay/zbic)**, **Opus** and **SDL**: decompression, audio and controllers.
 - **[sostenesfreitas/ocarina-recomp](https://github.com/sostenesfreitas/ocarina-recomp)**: this README's layout, and its notes
   confirmed the mesh stage's control section.
+- **HanSoloBlaster and afiaka87** ([Fast Travel](https://github.com/afiaka87/oots2-release)): the Travel page's list of
+  places (MIT).
 - **[MythosOfs/Orchid](https://github.com/MythosOfs/Orchid)**: the fog and exposure workaround the game used before
   its fog and lighting were fixed.
 - **Mesa (NAK)**: the reference for Ampere's instruction encoding.
@@ -1148,7 +1158,8 @@ Hookshot exists thanks to the work of many people:
 Hookshot is free software under the [GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later).
 It includes code from Eden and suyu, which are under the GPL too. Third-party parts under other licenses that
 work with the GPL (Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus fonts, zbic and the
-a64-kit tools) keep their own notices in their folders.
+a64-kit tools) keep their own notices in their folders. The Travel page's list of places follows the Fast Travel mod's
+(MIT): its notice is in `gpu/vk/oot_tp_places.LICENSE`.
 
 Hookshot is an unofficial fan project, not affiliated with or endorsed by Nintendo. The Legend of Zelda and Ocarina of
 Time are trademarks of Nintendo.

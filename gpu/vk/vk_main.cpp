@@ -24,7 +24,6 @@
 #include "presenter_queue.h"
 static_assert(mkwvk::kQueueGraphics == VK_QUEUE_GRAPHICS_BIT && mkwvk::kQueueCompute == VK_QUEUE_COMPUTE_BIT);
 #include "gpu_choice.h"
-#include "radv_submit_thread.h"
 #include "vk_menu.h"
 #include "auto_settings.h"
 #include "vk_dlss.h"
@@ -690,18 +689,6 @@ bool create_device() {
              drv.driverName, drv.driverInfo, (int)dev.fixes.fetch_bounds, (int)dev.fixes.nan_bits, (int)dev.fixes.gather_offset);
     }
     dev.eds3_a2c = dev.dynamic_state3 && eds3.extendedDynamicState3AlphaToCoverageEnable;
-    {   // (hookshot) which denorm modes a shader may declare: all programs say them, and not every device has them (strip_float_controls)
-        VkPhysicalDeviceVulkan12Properties p12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
-        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-        p2.pNext = &p12;
-        vkGetPhysicalDeviceProperties2(dev.physical, &p2);
-        dev.denorm_preserve_widths = (p12.shaderDenormPreserveFloat16 ? 1u : 0u) | (p12.shaderDenormPreserveFloat32 ? 2u : 0u) |
-                                     (p12.shaderDenormPreserveFloat64 ? 4u : 0u);
-        dev.denorm_flush_widths = (p12.shaderDenormFlushToZeroFloat16 ? 1u : 0u) | (p12.shaderDenormFlushToZeroFloat32 ? 2u : 0u) |
-                                  (p12.shaderDenormFlushToZeroFloat64 ? 4u : 0u);
-        logf("vk: float controls: denorm preserve widths %#x, flush to zero %#x (modes the device lacks are taken out of the shaders)",
-             dev.denorm_preserve_widths, dev.denorm_flush_widths);
-    }
     dev.vk12 = f12;
     dev.vk13 = f13;
     {   // (hookshot, after TotK Recomp's vk_caps.c) NVN's programs are written for 32 lanes: the translator is told 32, and the lane
@@ -774,32 +761,7 @@ bool create_device() {
     ci.pQueueCreateInfos = qs.data();
     ci.enabledExtensionCount = (uint32_t)want.size();
     ci.ppEnabledExtensionNames = want.data();
-#ifndef _WIN32
-    // (RADV) Mesa's submit thread, read by Mesa in this vkCreateDevice (radv_submit_thread.h): set for it unless the user set
-    // MESA_VK_ENABLE_SUBMIT_THREAD or RX_VK_RADV_SUBMIT_THREAD=0, and taken out again once the device is made
-    const auto submit_thread = radv_submit_thread::decide(fadd_driver.driverID == VK_DRIVER_ID_MESA_RADV,
-                                                          getenv("MESA_VK_ENABLE_SUBMIT_THREAD"), getenv("RX_VK_RADV_SUBMIT_THREAD"));
-    switch (submit_thread) {
-    case radv_submit_thread::Choice::set_on:
-        setenv("MESA_VK_ENABLE_SUBMIT_THREAD", "1", 0);
-        logf("vk: RADV: Mesa's submit thread on (MESA_VK_ENABLE_SUBMIT_THREAD unset; RX_VK_RADV_SUBMIT_THREAD=0: off)");
-        break;
-    case radv_submit_thread::Choice::user_set:
-        logf("vk: RADV: Mesa's submit thread left as the user set it (MESA_VK_ENABLE_SUBMIT_THREAD=%s)",
-             getenv("MESA_VK_ENABLE_SUBMIT_THREAD"));
-        break;
-    case radv_submit_thread::Choice::switch_off:
-        logf("vk: RADV: Mesa's submit thread off by the switch (RX_VK_RADV_SUBMIT_THREAD=0: Mesa's own choice)");
-        break;
-    case radv_submit_thread::Choice::not_radv:
-        break;
-    }
-#endif
-    const VkResult created = vkCreateDevice(dev.physical, &ci, nullptr, &dev.device);
-#ifndef _WIN32
-    if (submit_thread == radv_submit_thread::Choice::set_on) unsetenv("MESA_VK_ENABLE_SUBMIT_THREAD");
-#endif
-    if (created != VK_SUCCESS) {
+    if (vkCreateDevice(dev.physical, &ci, nullptr, &dev.device) != VK_SUCCESS) {
         logf("vk: vkCreateDevice failed");
         return false;
     }
@@ -957,16 +919,10 @@ bool create_swapchain(uint32_t width, uint32_t height) {
         return false;
     }
     if (caps.currentExtent.width != UINT32_MAX) width = caps.currentExtent.width, height = caps.currentExtent.height;
-    // (a minimised window has a 0x0 surface and the game presents every frame: said once, not a thousand times)
-    static bool told_empty;
-    if (width && height) told_empty = false;
-    if ((width && height) || !told_empty) {
-        told_empty = !width || !height;
-        logf("vk: surface caps images %u..%u extent %ux%u..%ux%u usage %#x alpha %#x transform %#x",
-             caps.minImageCount, caps.maxImageCount, caps.minImageExtent.width, caps.minImageExtent.height,
-             caps.maxImageExtent.width, caps.maxImageExtent.height, caps.supportedUsageFlags,
-             caps.supportedCompositeAlpha, caps.supportedTransforms);
-    }
+    logf("vk: surface caps images %u..%u extent %ux%u..%ux%u usage %#x alpha %#x transform %#x",
+         caps.minImageCount, caps.maxImageCount, caps.minImageExtent.width, caps.minImageExtent.height,
+         caps.maxImageExtent.width, caps.maxImageExtent.height, caps.supportedUsageFlags,
+         caps.supportedCompositeAlpha, caps.supportedTransforms);
     if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
         logf("vk: surface does not support transfer-destination swapchain images");
         return false;
@@ -1336,7 +1292,6 @@ void prepare_with_screen() {
         }
         if (update) prep_skip[0].store(true), prep_skip[1].store(true);
         const bool prepared = !update && prepare_run(prep_progress, false);
-        if (!update && !prepared && !prepare_stopped() && state_list_pending()) state_list_run();
         if (!prepared) prep_skip[0].store(true);
         // (a first start, or one after a start that did not finish them: the pipelines the notes predict, into the driver's cache)
         if ((prepared || (!update && predict_pending())) && compile_all() && !prepare_stopped()) {
@@ -1484,7 +1439,6 @@ bool started_up() {
         // (no prediction: its part of the bar goes. On Most after a preparation too: left in, the step to the noted pipelines
         // counted it done at its guess, and the bar jumped by the prediction's share, about half of it)
         if (!predict) bar.skip(1);
-        if (!prepared && state_list_pending()) state_list_run();   // (the builder's step: a list shipped after the last prepare)
         part = 1;
         prepare_moved(1, 0, 0);
         if (predict) predict_run(progress);
@@ -1554,7 +1508,6 @@ bool started_up() {
         };
         const bool update = prepare_is_update();   // (an update: what the notes name now, the rest in play)
         if (!update && (prepare_run(progress, false) || predict_pending()) && compile_all()) predict_run(progress);
-        else if (!update && state_list_pending()) state_list_run();
         if (update) state_list_run();
         precompile_run(progress);
         if (update) prepare_background();

@@ -751,40 +751,6 @@ std::unique_ptr<Translation> translate(Env& env, bool graphics, bool one_exit = 
 
 } // namespace
 
-/// The denorm modes (DenormPreserve, DenormFlushToZero) a shader declares for a width the device does not report, and their
-/// capability when it reports none of that kind, taken out of the module's preamble. Eden declares them for any program that
-/// uses them (the profile says every device has them), validation calls each one an error, and a driver that does not know a mode
-/// need not ignore it. A program loaded from the program cache is cleaned here too, so the cache stays as it was.
-std::vector<uint32_t> strip_float_controls(const std::vector<uint32_t>& spirv, uint32_t preserve, uint32_t flush) {
-    constexpr uint32_t kOpCapability = 17, kOpExecutionMode = 16, kOpFunction = 54;
-    constexpr uint32_t kModePreserve = 4459, kModeFlush = 4460, kCapPreserve = 4464, kCapFlush = 4465;
-    const auto width_bit = [](uint32_t w) { return w == 16 ? 1u : w == 32 ? 2u : w == 64 ? 4u : 0u; };
-    std::vector<uint32_t> out;
-    bool changed = false;
-    size_t i = 5;
-    while (i < spirv.size()) {
-        const uint32_t op = spirv[i] & 0xFFFF, wc = spirv[i] >> 16;
-        if (!wc || i + wc > spirv.size() || op == kOpFunction) break;
-        bool drop = false;
-        if (op == kOpExecutionMode && wc == 4) {
-            if (spirv[i + 2] == kModePreserve) drop = !(preserve & width_bit(spirv[i + 3]));
-            if (spirv[i + 2] == kModeFlush) drop = !(flush & width_bit(spirv[i + 3]));
-        } else if (op == kOpCapability) {
-            if (spirv[i + 1] == kCapPreserve) drop = !preserve;
-            if (spirv[i + 1] == kCapFlush) drop = !flush;
-        }
-        if (drop && !changed) {
-            changed = true;
-            out.assign(spirv.begin(), spirv.begin() + i);
-        }
-        if (changed && !drop) out.insert(out.end(), spirv.begin() + i, spirv.begin() + i + wc);
-        i += wc;
-    }
-    if (!changed) return {};
-    out.insert(out.end(), spirv.begin() + i, spirv.end());
-    return out;
-}
-
 bool spirv_uses_subgroups(const std::vector<uint32_t>& spirv) {
     if (spirv.size() < 5 || spirv[0] != 0x07230203u) return true;   // (not SPIR-V we can read: as if it did)
     for (size_t i = 5; i < spirv.size();) {
@@ -803,13 +769,7 @@ bool spirv_uses_subgroups(const std::vector<uint32_t>& spirv) {
 }
 
 thread_local uint64_t module_program = 0;   // (translate_into's program, for make_module's callers that do not name it)
-VkShaderModule make_module(const std::vector<uint32_t>& spirv_in, uint64_t program, bool* busy) {
-    // (RX_VK_KEEP_DENORM=1: the modules as translated, to compare a picture or a number with and without the strip)
-    static const bool keep = getenv("RX_VK_KEEP_DENORM") != nullptr;
-    const bool lacks = !keep && (dev.denorm_preserve_widths != 7 || dev.denorm_flush_widths != 7);
-    const std::vector<uint32_t> cleaned = lacks ? strip_float_controls(spirv_in, dev.denorm_preserve_widths, dev.denorm_flush_widths)
-                                                : std::vector<uint32_t>{};
-    const std::vector<uint32_t>& spirv = cleaned.empty() ? spirv_in : cleaned;
+VkShaderModule make_module(const std::vector<uint32_t>& spirv, uint64_t program, bool* busy) {
     if (!program) program = module_program;
     if (driver_faulted_program(program)) return VK_NULL_HANDLE;
     VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};

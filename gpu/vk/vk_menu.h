@@ -170,6 +170,9 @@ int menu_take_cheat_action();
 void menu_note_frame(bool game_frame, int shown = 1);   // (the frame rates the FPS counter shows)
 int menu_item_count(int i);   // (hookshot) the game side's count of oot_cheat_items.h's item i, -1 unknown: the item wheel's numbers
 int menu_link_age();          // (hookshot) Link's age as the game side said it: 0 child, 1 adult, -1 unknown
+int menu_take_capture_request();   // (hookshot, vk_replay.cpp: a place whose picture the Travel page wants now, -1 none)
+void menu_store_capture(int place, const uint8_t* rgba, uint32_t w, uint32_t h);   // (that picture, RGBA: to the picture worker)
+bool menu_teleport_captures_on();   // (hookshot: whether the Travel page's pictures are taken: the game side watches only then)
 /// The game's picture's size (the Output resolution, its crop) and the window's, at each present: the Window scaling filter
 /// row says when it is not needed
 void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t window_w, uint32_t window_h);

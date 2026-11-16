@@ -204,6 +204,7 @@ def option_ids():
         value.update({n: int(start) + i for i, n in enumerate(names)})
     # (the game side's own ids: OOT_CHEAT_AGE_ID)
     value.update({n: int(v) for n, v in re.findall(r"#define (OOT_CHEAT_\w+) (\d+)", read("gpu", "vk", "oot_cheat_items.h"))})
+    value.update({n: int(v) for n, v in re.findall(r"#define (HOS_OPT_\w+) (\d+)", read("gpu", "vk", "oot_teleport_capture.h"))})
     table = block(replay, replay.index("t.option = [](int id) -> int {"))
     ids = []
     for name in re.findall(r"\bid == (\w+)", table):

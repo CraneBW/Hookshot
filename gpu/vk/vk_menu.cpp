@@ -17,6 +17,11 @@
 // closes the window as the player would, and the game starts again (WM_APP + 9: host/hos_relaunch.c).
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <filesystem>
+#include <map>
+#include <thread>
 #include <cmath>
 #include <utility>
 #include <cstdio>
@@ -41,6 +46,8 @@
 #include "vk_progress.h"   // (StartupView, version_text: the start-up screen)
 #include "vk_ui.h"
 #include "vk_menu_keys.h"   // (which gamepad buttons confirm and go back: those A and B are bound to)         // (how it looks: Dear ImGui, vk_imgui.h)
+#include "oot_teleport_capture.h"   // (hookshot: the Travel page's pictures)
+#include "oot_tp_places.h"   // (hookshot: the Travel page's places)
 #include "vk_dlss.h"
 #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
 #include "vk_bug_report.h"   // (the Gameplay tab's Bug report: what it writes, and how)
@@ -1705,6 +1712,9 @@ Row rows[] = {
      "Move and look with your usual controls. Page Up / Page Down or R / L changes height.", nullptr, false, true, 7},
     {TAB_DEBUG, "Teleport", nullptr, 0, 0, 0, nullptr,
      "Opens the map list. Link travels through the game's own map change, in his current age.", nullptr, false, true, 8},
+    {TAB_DEBUG, "Travel", nullptr, 0, 0, 0, nullptr,
+     "Go to a place you know: villages, dungeons' entrances, shops, warps. Each with a picture from your own game, taken the "
+     "first time Link stays there a few seconds with the menu closed.", nullptr, false, true, 13},
     {TAB_DEBUG, "Switch age", nullptr, 0, 0, 0, nullptr,
      "Swaps Link between child and adult and reloads this map in the other age (the Market when this map has no match).", nullptr, false, true, 9},
     {TAB_DEBUG, "Inventory", nullptr, 0, 0, 0, nullptr,
@@ -1913,7 +1923,7 @@ void choose_inventory_filter(int filter) {
     inventory_amount = false;
     inventory_reveal();
 }
-constexpr int kCheatRows = 13;   // (the debug tools' rows: Row::cheat 0 to 12)
+constexpr int kCheatRows = 14;   // (the debug tools' rows: Row::cheat 0 to 13)
 /// A debug tool's value as its row shows it ("" an action: confirm does it)
 std::string cheat_value(int i) {
     char t[32];
@@ -1941,12 +1951,12 @@ bool age_shown(int i) { return i == 9 && link_age.load(std::memory_order_relaxed
 /// What confirm does on a tool's row, for its prompt (nullptr: nothing)
 const char* cheat_confirm(int i) {
     static const char* const says[kCheatRows] = {"Toggle", "Toggle", "Apply", "Apply", "Set", nullptr, "Apply", "Toggle", "Open list",
-                                                 "Switch", "Open", nullptr, "Apply"};
+                                                 "Switch", "Open", nullptr, "Apply", "Open"};
     return i >= 0 && i < kCheatRows ? says[i] : nullptr;
 }
 /// The button label on an action tool's row ("": not a button action)
 const char* cheat_button_text(int i) {
-    static const char* const buttons[kCheatRows] = {"", "", "Mark", "Return", "", "", "", "", "Choose map", "Switch", "Edit items", "", ""};
+    static const char* const buttons[kCheatRows] = {"", "", "Mark", "Return", "", "", "", "", "Choose map", "Switch", "Edit items", "", "", "Choose place"};
     return i >= 0 && i < kCheatRows ? buttons[i] : "";
 }
 constexpr int kRows = sizeof rows / sizeof rows[0];
@@ -2097,6 +2107,263 @@ std::atomic<bool> open_now{false};
 bool tune_mode = false;
 bool quick_debug = false;
 bool menu_refresh = false;
+
+// ---- (hookshot) the Travel page: the places of Link's age, grouped by area (gpu/vk/oot_tp_places.h), with a
+// picture of each, taken in play the first time Link stays a few seconds at the place (vk_replay.cpp teleport_capture). One
+// file a place in the game folder's teleport_pictures folder; nothing is shipped. The files are read and written by a worker
+// thread of their own (picture_worker), never by the replay's, the game's or the menu's: a picture is 389 KB, and a present
+// must not wait on a disk ----
+struct TeleportPicture {
+    uint32_t w = 0, h = 0;
+    std::vector<unsigned char> rgba;
+};
+std::map<std::string, TeleportPicture> teleport_captures;   // (by a place's key; std::map: its nodes stay put)
+std::map<std::string, int> teleport_files;   // (by key: 1 its file being read, 2 read: in teleport_captures, or none on disk)
+std::mutex teleport_captures_mu;   // (both maps: the worker's thread and the menu's)
+std::atomic<int> teleport_capture_want{-1};
+// (whether pictures are taken at all: only once the player has opened the Travel page, in this session or an earlier one (its
+// folder is there). A player who never opens it gets no files and no notice over the game)
+std::atomic<bool> travel_pictures_on{false};
+std::atomic<int> teleport_map_now{-1};   // (the place nearest Link, as the game side says)
+std::atomic<int64_t> notice_until{0};    // (a line over the game while the menu is closed: a picture taken, until then)
+char notice_text[128];
+/// A file in the game folder, or "" (logged) when unknown
+std::string game_folder_file(const char* name) {
+    char exe[MAX_PATH];
+    const DWORD n = game_module_path(exe, MAX_PATH);
+    const std::string path(exe, n && n < MAX_PATH ? n : 0);
+    const size_t slash = path.find_last_of("\\/");
+    if (slash == std::string::npos) {
+        logf("menu: no game folder for %s", name);
+        return "";
+    }
+    return path.substr(0, slash + 1) + name;
+}
+/// A picture's file, teleport_pictures/<key>.bin in the game folder, or "" when the folder is unknown
+std::string teleport_picture_path(const std::string& key) {
+    const std::string dir = game_folder_file("teleport_pictures");
+    return dir.empty() ? "" : dir + "/" + key + ".bin";
+}
+// A picture file: 'FTP2', width, height, then its RGB (no alpha: a picture is opaque). 480x270: 389 KB
+constexpr char kPictureMagic[4] = {'F', 'T', 'P', '2'};
+bool read_picture_file(const std::string& path, TeleportPicture& p) {
+    FILE* f = path.empty() ? nullptr : fopen(path.c_str(), "rb");
+    if (!f) return false;
+    char magic[4];
+    uint32_t wh[2];
+    bool ok = fread(magic, 1, 4, f) == 4 && !memcmp(magic, kPictureMagic, 4) && fread(wh, 4, 2, f) == 2 && wh[0] && wh[0] <= 2048 &&
+              wh[1] && wh[1] <= 2048;
+    std::vector<unsigned char> rgb;
+    if (ok) {
+        rgb.resize((size_t)wh[0] * wh[1] * 3);
+        ok = fread(rgb.data(), 1, rgb.size(), f) == rgb.size();
+    }
+    fclose(f);
+    if (!ok) {
+        logf("menu: %s is no Travel picture, left out", path.c_str());
+        return false;
+    }
+    p.w = wh[0], p.h = wh[1];
+    p.rgba.resize((size_t)p.w * p.h * 4);
+    for (size_t i = 0, n = (size_t)p.w * p.h; i < n; ++i)
+        p.rgba[i * 4] = rgb[i * 3], p.rgba[i * 4 + 1] = rgb[i * 3 + 1], p.rgba[i * 4 + 2] = rgb[i * 3 + 2], p.rgba[i * 4 + 3] = 255;
+    return true;
+}
+bool write_picture_file(const std::string& path, const TeleportPicture& p) {
+    if (path.empty()) return false;
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
+    std::vector<unsigned char> rgb((size_t)p.w * p.h * 3);
+    for (size_t i = 0, n = (size_t)p.w * p.h; i < n; ++i)
+        rgb[i * 3] = p.rgba[i * 4], rgb[i * 3 + 1] = p.rgba[i * 4 + 1], rgb[i * 3 + 2] = p.rgba[i * 4 + 2];
+    FILE* f = fopen((path + ".tmp").c_str(), "wb");
+    if (!f) return false;
+    const uint32_t wh[2] = {p.w, p.h};
+    fwrite(kPictureMagic, 1, 4, f), fwrite(wh, 4, 2, f), fwrite(rgb.data(), 1, rgb.size(), f);
+    bool ok = !ferror(f);
+    ok = fclose(f) == 0 && ok;
+    if (ok) std::filesystem::rename(path + ".tmp", path, ec);   // (over the old one, on either platform)
+    return ok && !ec;
+}
+// The worker's jobs: read a picture's file; Link has stayed near a place (its picture wanted when it has none, here or on
+// disk); keep and write a picture taken; forget one (the page's retake: taken again at the next stay there)
+struct PictureJob {
+    enum Kind { Read, Arrived, Store, Forget, Begin } kind = Read;   // (Begin: the page opened the first time, its folder made)
+    int place = -1;     // (Arrived, Store, Forget: a place of oot_tp_places)
+    std::string name;   // (Read: a place's key)
+    TeleportPicture pic;
+};
+std::mutex picture_jobs_mu;
+std::condition_variable picture_jobs_cv;
+std::deque<PictureJob> picture_jobs;
+/// The picture of this key read into teleport_captures when its file is there; whether it has one now. On the worker
+bool picture_read_now(const std::string& name) {
+    {
+        std::lock_guard lk(teleport_captures_mu);
+        if (teleport_captures.count(name)) return true;
+        if (teleport_files[name] == 2) return false;
+    }
+    TeleportPicture p;
+    const bool have = read_picture_file(teleport_picture_path(name), p);
+    std::lock_guard lk(teleport_captures_mu);
+    if (have && !teleport_captures.count(name)) teleport_captures[name] = std::move(p);
+    teleport_files[name] = 2;
+    return teleport_captures.count(name) != 0;
+}
+void picture_worker() {
+    for (;;) {
+        PictureJob j;
+        {
+            std::unique_lock lk(picture_jobs_mu);
+            picture_jobs_cv.wait(lk, [] { return !picture_jobs.empty(); });
+            j = std::move(picture_jobs.front());
+            picture_jobs.pop_front();
+        }
+        if (j.kind == PictureJob::Begin) {
+            std::error_code ec;
+            const std::string dir = game_folder_file("teleport_pictures");
+            if (!dir.empty()) std::filesystem::create_directories(dir, ec);
+            logf("menu: Travel pictures are taken from now on, in %s%s", dir.c_str(), ec ? " (the folder could not be made)" : "");
+        } else if (j.kind == PictureJob::Read) {
+            picture_read_now(j.name);
+            menu_refresh = true;   // (the page shows it now, if it is the chosen place's)
+        } else if (j.kind == PictureJob::Arrived) {
+            if (!picture_read_now(oot_tp_places[j.place].key)) teleport_capture_want.store(j.place, std::memory_order_relaxed);
+        } else if (j.kind == PictureJob::Forget) {
+            const OotTpPlace& place = oot_tp_places[j.place];
+            {
+                std::lock_guard lk(teleport_captures_mu);
+                teleport_captures.erase(place.key);
+                teleport_files[place.key] = 2;
+            }
+            std::error_code ec;
+            std::filesystem::remove(teleport_picture_path(place.key), ec);
+            logf("menu: Travel picture of %s (%s) forgotten: taken again at the next stay there", place.label, place.key);
+            menu_refresh = true;
+        } else {
+            const OotTpPlace& place = oot_tp_places[j.place];
+            for (size_t i = 3; i < j.pic.rgba.size(); i += 4) j.pic.rgba[i] = 255;   // (opaque, whatever the picture's alpha held)
+            const bool saved = write_picture_file(teleport_picture_path(place.key), j.pic);
+            int count;
+            {
+                std::lock_guard lk(teleport_captures_mu);
+                teleport_captures[place.key] = std::move(j.pic);
+                teleport_files[place.key] = 2;
+                count = (int)teleport_captures.size();
+            }
+            logf("menu: Travel picture of %s (%s) taken (%d in memory)%s", place.label, place.key, count, saved ? "" : "; not saved");
+            if (saved) {   // (the line over the game for 2.5 s)
+                snprintf(notice_text, sizeof notice_text, "Travel picture saved: %s", place.label);
+                                notice_until.store(prof_now() + 2500000000LL, std::memory_order_relaxed);
+            }
+        }
+    }
+}
+void picture_job(PictureJob&& j) {
+    static std::once_flag started;
+    std::call_once(started, [] { std::thread(picture_worker).detach(); });   // (it lives as long as the game)
+    {
+        std::lock_guard lk(picture_jobs_mu);
+        picture_jobs.push_back(std::move(j));
+    }
+    picture_jobs_cv.notify_one();
+}
+
+// the list: the places of one age by area (an area's heading is a line of its own, above its places)
+struct TravelList {
+    int adult = -1;
+    std::vector<int> place;               // (the shown places, in order: indices into oot_tp_places)
+    std::vector<TeleportSection> areas;   // (each area's title and first shown place)
+};
+TravelList travel;
+int travel_choice = 0;
+int travel_page_rows = 1;   // (as last drawn: the lines that fit, Page Up / Down)
+float travel_scroll_px = 0, travel_want_px = 0;   // (the list's scroll, eased toward travel_want_px)
+bool travel_follow = true;   // (the scroll follows the choice; the wheel lets go of it until the choice moves)
+int travel_wheel = 0;        // (the wheel's notches since the last drawing)
+int travel_pick = -1;   // (the age whose places the page lists, chosen with Tab or the top face button; -1 Link's own)
+ImTextureData* travel_tex = nullptr;   // (the chosen place's picture, as ImGui draws it: one texture, its pixels replaced)
+std::string travel_tex_key;            // (whose picture it holds)
+constexpr int kTravelPicW = 480, kTravelPicH = 270;
+/// The age whose places the page lists: the one chosen, else Link's as the game side says it (1 adult, else 0: unknown is the
+/// child's). Travelling to the other age's place makes Link that age, as the tools' Switch age does
+int travel_age() { return travel_pick >= 0 ? travel_pick : link_age.load(std::memory_order_relaxed) == 1 ? 1 : 0; }
+/// The list for the age now (made again when it changed)
+void travel_list() {
+    const int adult = travel_age();
+    if (travel.adult == adult) return;
+    travel = {};
+    travel.adult = adult;
+    for (const OotTpArea& a : oot_tp_areas) {
+        if (a.adult != adult) continue;
+        travel.areas.push_back({a.title, (int)travel.place.size()});
+        for (int i = a.first; i < a.first + a.count; i++) travel.place.push_back(i);
+    }
+    travel_choice = std::clamp(travel_choice, 0, std::max(0, (int)travel.place.size() - 1));
+    travel_follow = true;
+}
+int travel_area_of(int i) {
+    int area = 0;
+    while (area + 1 < (int)travel.areas.size() && i >= travel.areas[area + 1].first) ++area;
+    return area;
+}
+/// The chosen place's picture copied out (under the lock), and whether it has one; its file asked for once when not read yet
+bool travel_picture(int place, TeleportPicture* out, bool* reading) {
+    *reading = false;
+    if (place < 0 || place >= OOT_TP_PLACES) return false;
+    const std::string key = oot_tp_places[place].key;
+    std::lock_guard lk(teleport_captures_mu);
+    const auto it = teleport_captures.find(key);
+    if (it != teleport_captures.end()) {
+        *out = it->second;
+        return true;
+    }
+    int& state = teleport_files[key];
+    if (state == 2) return false;
+    *reading = true;
+    if (state == 0) {
+        state = 1;
+        PictureJob j;
+        j.kind = PictureJob::Read, j.name = key;
+        picture_job(std::move(j));
+    }
+    return false;
+}
+/// Whether a place has a picture, as far as the files read so far say (the list's mark)
+bool travel_has_picture(int place) {
+    std::lock_guard lk(teleport_captures_mu);
+    const std::string key = oot_tp_places[place].key;
+    if (teleport_captures.count(key)) return true;
+    int& state = teleport_files[key];
+    if (state == 0) {   // (asked for: the list marks it once it is read)
+        state = 1;
+        PictureJob j;
+        j.kind = PictureJob::Read, j.name = key;
+        picture_job(std::move(j));
+    }
+    return false;
+}
+/// The chosen place's picture as a texture ImGui draws (kTravelPicW x kTravelPicH, scaled to it), or null without one
+ImTextureData* travel_texture(int place) {
+    TeleportPicture pic;
+    bool reading = false;
+    if (!travel_picture(place, &pic, &reading) || !pic.w || !pic.h) return nullptr;
+    if (!travel_tex) travel_tex = ui::user_texture(kTravelPicW, kTravelPicH), travel_tex_key.clear();
+    const std::string key = oot_tp_places[place].key;
+    if (travel_tex_key != key) {   // (its pixels replaced: all of it uploaded again at the next drawing)
+        unsigned char* px = (unsigned char*)travel_tex->GetPixels();
+        for (int y = 0; y < kTravelPicH; y++)
+            for (int x = 0; x < kTravelPicW; x++) {
+                const unsigned char* q = &pic.rgba[((size_t)((uint64_t)y * pic.h / kTravelPicH) * pic.w + (uint64_t)x * pic.w / kTravelPicW) * 4];
+                unsigned char* d = px + ((size_t)y * kTravelPicW + x) * 4;
+                d[0] = q[0], d[1] = q[1], d[2] = q[2], d[3] = 255;
+            }
+        ui::user_texture_changed(travel_tex);
+        travel_tex_key = key;
+    }
+    return travel_tex;
+}
+
 // (a value too long for its row, a GPU's name: the selected row's slides through it, a character a step, resting at
 // each end; the other rows end it with "...". The drawing (fit) says how far it can slide, menu_tick moves it)
 int marquee_pos = 0, marquee_max = 0;
@@ -3165,8 +3432,8 @@ const std::vector<int>& bindable_keys() {
     }
     return k;
 }
-int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 the inventory, 5 the restart question (2: was the
-                       // debug tools' own page, now on the Debug tab)
+int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 the inventory, 5 the restart question, 6 the
+                       // Travel page (2: was the debug tools' own page, now on the Debug tab)
 int csel = 0, ccol = menu_hit::kCtlPrimary;   // the page's row (options, then bindings and reset) and binding column
 const int kTop = tab_row_count(TAB_PAGE);   // (Layout preset and Button prompts: a preset shows in the grid at once)
 int listening = 0;     // waiting for the new input: 1 a gamepad's, 2 a key
@@ -3491,8 +3758,8 @@ std::string restart_line(ui::Ctx& c, float px, float width) {
 /// and Change quantity are not shown (the Inventory page edits every amount)
 struct DebugGroup { const char* title; int from, to; };   // (debug_tools_order[from, to))
 // (-1 is the saved Damage taken option, not a cheat action: beside Heart protection in Player)
-constexpr int debug_tools_order[] = {0, -1, 1, 11, 9, 10, 12, 8, 2, 3, 7, 4};
-constexpr DebugGroup debug_groups[] = {{"Player", 0, 7}, {"Travel", 7, 10}, {"Camera & world", 10, 12}};
+constexpr int debug_tools_order[] = {0, -1, 1, 11, 9, 10, 12, 8, 13, 2, 3, 7, 4};
+constexpr DebugGroup debug_groups[] = {{"Player", 0, 7}, {"Travel", 7, 11}, {"Camera & world", 11, 13}};
 constexpr int kDebugGroups = sizeof debug_groups / sizeof debug_groups[0];
 constexpr int kDebugGeneralRows = 2;
 constexpr int kDebugTools = sizeof debug_tools_order / sizeof debug_tools_order[0];
@@ -4540,6 +4807,147 @@ void draw_teleport(ui::Ctx& c) {
     ui::prompt_bar(c, prompts, 5);   // (the prompts, on top of the help and the cards)
 }
 
+/// (hookshot) The Travel page (page 6): the places of one age by area in the column, the chosen place's picture, name and area
+/// beside it (over the column's foot on a narrow window: the picture left out), Travel below
+void draw_travel(ui::Ctx& c) {
+    const float s = c.s;
+    travel_list();
+    const int n = (int)travel.place.size(), areas = (int)travel.areas.size();
+    int with = 0;
+    for (int i = 0; i < n; i++) with += travel_has_picture(travel.place[i]);
+    char count[64];
+    snprintf(count, sizeof count, "%d of %d · %d with pictures", n ? travel_choice + 1 : 0, n, with);
+    const float hh = title_banner(c, "Travel", count);
+    float cx0, cx1, hx0, hx1;
+    bool narrow;
+    columns(c, &cx0, &cx1, &hx0, &hx1, &narrow);
+    column(c, cx0, cx1, hh);
+    const ui::Prompt prompts[] = {{ui::kUpDown, "Move"}, {ui::kTabs, "Area"}, {ui::kKey, "Child / Adult", "Tab"},
+        {ui::kConfirm, "Travel"}, {ui::kKey, "Retake picture", "Bksp"}, {ui::kBack, "Back"}};
+    const float bar = ui::prompt_bar_top(c);
+    const float left = cx0 + 24 * s, right = cx1 - 24 * s;
+    // (the ages, at the column's top: the one listed lit; a click on the other lists its places)
+    const float ay = hh + 14 * s, ah = 34 * s;
+    {
+        const char* const ages[2] = {"Child", "Adult"};
+        float x = left;
+        for (int a = 0; a < 2; a++) {
+            const float bw = ui::size_of(c.f.strong, 18 * s, ages[a]).x + 44 * s;
+            ui::button(c, ImVec2(x, ay), ImVec2(x + bw, ay + ah), ages[a], a == travel.adult);
+            hits.add(x, ay, x + bw, ay + ah, menu_hit::kButton, 10 + a);
+            x += bw + 10 * s;
+        }
+        const int now = link_age.load(std::memory_order_relaxed);
+        if (now >= 0 && now != travel.adult)
+            ui::text_mid(c, c.f.body, 15 * s, x + 8 * s, ay + ah * 0.5f, ui::kAccent, "Link becomes this age");
+    }
+    const float top = ay + ah + 14 * s;
+    const float strip = 58 * s, detail = bar - 14 * s - strip;
+    const float bottom = std::max(top, detail - 6 * s), pitch = 40 * s, head = 38 * s;
+    // (the y of each line from the list's top: an area's heading, then its places)
+    std::vector<float> area_y(areas + 1);
+    float total = 0;
+    for (int k = 0; k < areas; ++k) {
+        area_y[k] = total;
+        const int end = k + 1 < areas ? travel.areas[k + 1].first : n;
+        total += head + (end - travel.areas[k].first) * pitch;
+    }
+    area_y[areas] = total;
+    auto line_y = [&](int i) { const int k = travel_area_of(i); return area_y[k] + head + (i - travel.areas[k].first) * pitch; };
+    const float view = bottom - top;
+    travel_page_rows = std::max(1, (int)(view / pitch) - 1);
+    float& at = travel_scroll_px;
+    float& want = travel_want_px;
+    if (travel_wheel) want -= travel_wheel * pitch, travel_wheel = 0;
+    if (total <= view) want = 0;
+    else if (!travel_follow) want = std::clamp(want, 0.0f, total - view);
+    else if (n) {
+        const int k = travel_area_of(travel_choice);
+        const float y0 = travel_choice == travel.areas[k].first ? area_y[k] : line_y(travel_choice) - pitch * 0.5f;
+        const float y1 = line_y(travel_choice) + pitch * 1.5f;
+        if (y0 < want) want = y0;
+        if (y1 > want + view) want = y1 - view;
+        want = std::clamp(want, 0.0f, total - view);
+    }
+    at += (want - at) * ease_step;
+    if (std::fabs(want - at) < 0.5f) at = want;
+    if (total > view) scroll_bar(c, cx0 + 12 * s, top, bottom, (int)total, (int)view, at);
+    c.d->PushClipRect(ImVec2(left - 12 * s, top), ImVec2(right + 12 * s, bottom), true);
+    for (int k = 0; k < areas; ++k) {
+        const float hy = top + area_y[k] - at + head * 0.5f;
+        if (hy > bottom + head || hy < top - head) continue;
+        ui::text_mid(c, c.f.heading, 19 * s, left, hy, ui::kInkBright, travel.areas[k].name);
+        const float tw = ui::size_of(c.f.heading, 19 * s, travel.areas[k].name).x;
+        c.d->AddLine(ImVec2(left + tw + 14 * s, hy + s), ImVec2(right, hy + s), ui::alpha(ui::kAccent, 0.45f), std::max(1.0f, s));
+    }
+    for (int i = 0; i < n; ++i) {
+        const ImVec2 a(left, top + line_y(i) - at), b(right, a.y + pitch - 6 * s);
+        if (b.y < top || a.y > bottom) continue;
+        const bool selected = i == travel_choice;
+        c.d->AddRectFilled(a, b, selected ? ui::kCellNameSel : ui::kCellName, 3 * s);
+        c.d->AddRect(a, b, ui::kEdge, 3 * s, std::max(1.0f, s));
+        if (selected) c.d->AddRectFilled(a, ImVec2(a.x + 4 * s, b.y), ui::kGoldHi);
+        const float mid = (a.y + b.y) * 0.5f;
+        if (travel_has_picture(travel.place[i]))   // (a small square: this place has its picture)
+            c.d->AddRectFilled(ImVec2(b.x - 22 * s, mid - 4 * s), ImVec2(b.x - 14 * s, mid + 4 * s), selected ? ui::kGoldHi : ui::kAccent, s);
+        c.d->PushClipRect(a, ImVec2(b.x - 30 * s, b.y), true);
+        ui::text_mid(c, selected ? c.f.strong : c.f.body, 17 * s, a.x + 16 * s, mid, selected ? ui::kInkBright : ui::kInk,
+                     oot_tp_places[travel.place[i]].label);
+        c.d->PopClipRect();
+        if (selected) ui::glow(c, a, b);
+        hits.add(a.x, std::max(a.y, top), b.x, std::min(b.y, bottom), menu_hit::kListLine, i);
+    }
+    c.d->PopClipRect();
+    const int place = n ? travel.place[travel_choice] : -1;
+    const char* area = n ? travel.areas[travel_area_of(travel_choice)].name : "";
+    if (!narrow && place >= 0) {   // (beside the column: the picture, or how one comes, and what Travel does)
+        const float pw = hx1 - hx0, ph = pw * 9.0f / 16.0f, py = hh + 18 * s;
+        const ImVec2 pa(hx0, py), pb(hx1, py + ph);
+        ui::box(c, pa, pb);
+        bool reading = false;
+        TeleportPicture none;
+        if (ImTextureData* tex = travel_texture(place)) c.d->AddImage(tex->GetTexRef(), pa + ImVec2(2 * s, 2 * s), pb - ImVec2(2 * s, 2 * s));
+        else {
+            travel_picture(place, &none, &reading);
+            const float cy = (pa.y + pb.y) * 0.5f;
+            ui::text_mid_centre(c, c.f.strong, 17 * s, (pa.x + pb.x) * 0.5f, cy - 12 * s, ui::kSoft, reading ? "Reading the picture..." : "No picture yet");
+            if (!reading)
+                ui::text_mid_centre(c, c.f.body, 15 * s, (pa.x + pb.x) * 0.5f, cy + 14 * s, ui::kDim, "Stay here a few seconds with the menu closed");
+        }
+        help_box(c, hx0, hx1, pb.y + 14 * s, oot_tp_places[place].label,
+                 "Link arrives through the game's own map change, as when he walks in. A small square in the list marks a place "
+                 "with a picture; Backspace takes this one again at the next stay there.",
+                 area, nullptr, 0, false, pb.y + 10 * s, bar - 12 * s);
+    }
+    if (detail >= top && place >= 0) {   // (the choice, its area and age, and Travel: what Enter does)
+        c.d->AddLine(ImVec2(left, detail), ImVec2(right, detail), ui::alpha(ui::kEdge, 0.8f));
+        const float my = detail + strip * 0.5f + 2 * s;
+        const float bw = ui::size_of(c.f.strong, 20 * s, "Travel").x + 56 * s;
+        const ImVec2 a(right - bw, my - 18 * s), b(right, my + 18 * s);
+        c.d->PushClipRect(ImVec2(left, detail), ImVec2(a.x - 12 * s, detail + strip), true);
+        ui::text_mid(c, c.f.strong, 18 * s, left, my - 10 * s, ui::kInkBright, oot_tp_places[place].label);
+        char where[96];
+        snprintf(where, sizeof where, "%s · %s", area, travel.adult ? "adult" : "child");
+        ui::text_mid(c, c.f.body, 15 * s, left, my + 12 * s, ui::kAccent, where);
+        c.d->PopClipRect();
+        ui::button(c, a, b, "Travel", false);
+        hits.add(a.x, a.y, b.x, b.y, menu_hit::kButton, 0);
+    }
+    ui::prompt_bar(c, prompts, 6);
+}
+
+/// (hookshot) Over the game, the menu closed: "Travel picture saved: <place>" for a moment, low in the middle (the HUD keeps
+/// its corners)
+void draw_travel_notice(ui::Ctx& c) {
+    const float s = c.s;
+    const float tw = ui::size_of(c.f.strong, 17 * s, notice_text).x, w = tw + 48 * s, h = 40 * s;
+    const ImVec2 a((c.w - w) * 0.5f, c.h - h - 64 * s), b(a.x + w, a.y + h);
+    c.d->AddRectFilled(a, b, ui::kCellDark, 4 * s);
+    c.d->AddRect(a, b, ui::kEdge, 4 * s, std::max(1.0f, s));
+    c.d->AddRectFilled(a, ImVec2(b.x, a.y + 2 * s), ui::kGoldHi);
+    ui::text_mid_centre(c, c.f.strong, 17 * s, (a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f + s, ui::kInkBright, notice_text);
+}
+
 void draw_quick_debug(ui::Ctx& c) {
     const float s = c.s, width = std::min(1040 * s, c.w - 2 * c.safe);
     const float left = (c.w - width) * .5f, right = left + width;
@@ -4660,6 +5068,7 @@ void draw_menu(ui::Ctx& c) {
     else if (page == 5) draw_ask(k);
     else if (page == 1) draw_controls(k);
     else if (page == 3) draw_teleport(k);
+    else if (page == 6) draw_travel(k);
     else if (page == 4) draw_inventory(k);
     else if (quick_debug && cur_tab == TAB_DEBUG) draw_quick_debug(k);
     else if (tune_mode) draw_tune_bar(k);
@@ -5490,16 +5899,7 @@ bool intel_compiles_side_by_side() {   // (RX_VK_NO_INTEL_SERIAL in the row: men
 bool intel_quick_compute() { return opts.intel_quick != 0 && intel_compiler_row(); }   // (RX_VK_COMPUTE_QUICK_FIRST in it: menu_init)
 bool resolution_auto() { return opts.resolution == 0; }
 int resolution_scale() {
-    const int drawn = ur::snap_render(upscaler(), opts.resolution);
-    {   // (said when it changes: the choice kept and what the Upscaler shown draws at, e.g. 58% kept, 50% drawn by the game's own)
-        static int said = -1;
-        if (said != drawn * 16 + opts.resolution) {
-            said = drawn * 16 + opts.resolution;
-            logf("vk: Render resolution: %d%% chosen, drawn at %d%% with Upscaler %d", upscaler_rows::percent(opts.resolution),
-                 upscaler_rows::percent(drawn), upscaler());
-        }
-    }
-    const float s = upscaler_rows::percent(drawn) / 100.0f;
+    const float s = upscaler_rows::percent(ur::snap_render(upscaler(), opts.resolution)) / 100.0f;
     return s > 0 ? (int)(twelfths(s) * 10000.0f / 12.0f + 0.5f) : 0;   // (the twelfth game_size labels)
 }
 
@@ -5529,6 +5929,22 @@ void menu_set_gpu_count(int count) {
 }
 
 bool menu_is_open() { return open_now.load(std::memory_order_relaxed); }
+int menu_take_capture_request() {   // (hookshot: not while the menu covers the picture)
+    const int want = teleport_capture_want.exchange(-1, std::memory_order_relaxed);
+    return open_now.load(std::memory_order_relaxed) ? -1 : want;
+}
+/// (hookshot) The replay's thread, at a present: the picture's pixels copied and handed to the picture worker, which keeps and
+/// writes them. No file is touched here
+void menu_store_capture(int place, const uint8_t* rgba, uint32_t w, uint32_t h) {
+    if (place < 0 || place >= OOT_TP_PLACES) return;
+    PictureJob j;
+    j.kind = PictureJob::Store, j.place = place;
+    j.pic.w = w, j.pic.h = h;
+    j.pic.rgba.assign(rgba, rgba + (size_t)w * h * 4);
+    picture_job(std::move(j));
+}
+// (hookshot: only while the tools are on, and once the page was opened)
+bool menu_teleport_captures_on() { return cheats_on() && travel_pictures_on.load(std::memory_order_relaxed); }
 bool scene_tonemap_on() { return dev.hdr && opts.hdr == 2 && opts.hdr_tonemap == 1; }
 // (the tools off on the Debug tab: flight, the free camera and heart protection put away; -1, heart protection never set, is the
 // host's own HOS_OOT_PROTECT_HEARTS)
@@ -5666,11 +6082,21 @@ int menu_item_count(int i) { return i >= 0 && i < kItems ? item_counts[i].load(s
 int menu_link_age() { return link_age.load(std::memory_order_relaxed); }
 void menu_option_set(int id, int value) {
     if (id == OOT_CHEAT_AGE_ID) {   // (Link's age: the Switch age row shows it)
-        if (link_age.exchange(value, std::memory_order_relaxed) != value && page == 0 && cur_tab == TAB_DEBUG) menu_refresh = true;
+        if (link_age.exchange(value, std::memory_order_relaxed) != value && ((page == 0 && cur_tab == TAB_DEBUG) || page == 6))
+            menu_refresh = true;   // (and the Travel page's list, of Link's age)
         return;
     }
     if (id == OOT_CHEAT_RUPEES_ID) {   // (Link's rupees: the Rupees row shows them)
         if (link_rupees.exchange(value, std::memory_order_relaxed) != value && page == 0 && cur_tab == TAB_DEBUG) menu_refresh = true;
+        return;
+    }
+    if (id == OOT_TP_MAP_ID) return teleport_map_now.store(value, std::memory_order_relaxed);   // (hookshot: the place nearest Link)
+    if (id == OOT_TP_CAPTURE_ID) {   // (hookshot: Link stayed near a place: its picture wanted when it has none)
+        if (value >= 0 && value < OOT_TP_PLACES) {
+            PictureJob j;
+            j.kind = PictureJob::Arrived, j.place = value;
+            picture_job(std::move(j));
+        }
         return;
     }
     if (id >= OOT_CHEAT_ITEM_BASE && id < OOT_CHEAT_ITEM_BASE + kItems) {   // (the game side's inventory counts)
@@ -5891,6 +6317,14 @@ void teleport_mouse(const MkwVkPointer& ptr, int mx, int my, bool* press, bool& 
     if (ptr.pressed & HOS_MOUSE_RIGHT) press[5] = true;
     if (ptr.wheel) teleport_wheel += ptr.wheel, teleport_follow = false, changed = true;
 }
+void travel_open() {   // (the Debug tab's Travel row: the page, Link's own age first; pictures are taken from now on)
+    page = 6, travel_pick = -1, travel.adult = -1, travel_list(), travel_follow = true;
+    if (!travel_pictures_on.exchange(true, std::memory_order_relaxed)) {
+        PictureJob j;
+        j.kind = PictureJob::Begin;
+        picture_job(std::move(j));
+    }
+}
 /// A debug tool's row on the Debug tab (Row::cheat i): Left and Right, and confirm (press[7]: A, Enter, a click). Teleport and
 /// Inventory open their pages; back from them comes to the Debug tab, the row still selected
 void cheat_press(int i, const bool* press, bool& changed) {
@@ -5931,6 +6365,7 @@ void cheat_press(int i, const bool* press, bool& changed) {
         changed = true;
     }
     if (press[7] && i == 8) page = 3, teleport_follow = true, changed = true;
+    if (press[7] && i == 13) travel_open(), changed = true;
     if (press[7] && i == 10) page = 4, choose_inventory_filter(0), changed = true;
     if (i == 9 && (press[3] || press[4])) {   // (Kid | Adult: Left Kid, Right Adult, a switch when Link is the other age)
         const int age = link_age.load(std::memory_order_relaxed);
@@ -6411,6 +6846,52 @@ void menu_tick() {
             }
             if (item_choice != chosen) inventory_reveal();   // (a click on a card: its page)
         }
+    } else if (open_now.load() && page == 6) {   // (hookshot) the Travel page
+        travel_list();
+        const int n = (int)travel.place.size(), areas = (int)travel.areas.size();
+        press[9] |= pad(HOS_PAD_WEST);   // (Y on a pad, as Backspace: the picture taken again)
+        bool switch_age = press[12] || pad(HOS_PAD_NORTH);   // (Tab, or X on a pad: the other age's places)
+        if (press[12]) tab_left = tab_right = false;   // (Tab is the tabs' key elsewhere: here the age's alone)
+        if (mouse) {
+            const menu_hit::Hit hit = hits.at((float)mx, (float)my);
+            if (ptr.pressed & HOS_MOUSE_LEFT) {
+                if (hit.part == menu_hit::kListLine && hit.index >= 0 && hit.index < n)
+                    travel_choice = hit.index, travel_follow = true, changed = true;
+                else if (hit.part == menu_hit::kButton && hit.index == 0) press[7] = true;
+                else if (hit.part == menu_hit::kButton && hit.index >= 10 && hit.index - 10 != travel.adult) switch_age = true;
+            }
+            if (ptr.pressed & HOS_MOUSE_RIGHT) press[5] = true;
+            if (ptr.wheel) travel_wheel += ptr.wheel, travel_follow = false, changed = true;
+        }
+        if (switch_age) {
+            travel_pick = !travel.adult, travel_choice = 0;
+            travel_list();
+            changed = true;
+        } else if (press[5]) page = 0, changed = true;   // (to the Debug tab, Travel still selected)
+        else if (press[7] && n) {
+            cheat_action.store(OOT_PLACE_ACTION + travel.place[travel_choice] * 2 + travel.adult);
+            open_now = false, page = 0;   // (back to the game: the map change starts with an event)
+            changed = true;
+        } else if (press[9] && n) {
+            PictureJob j;
+            j.kind = PictureJob::Forget, j.place = travel.place[travel_choice];
+            picture_job(std::move(j));
+            travel_tex_key.clear();
+            changed = true;
+        } else if (n) {
+            const int was = travel_choice;
+            if (press[15]) travel_choice = 0;
+            else if (press[16]) travel_choice = n - 1;
+            else if (press[13] || press[14]) travel_choice = std::clamp(travel_choice + (press[14] ? 1 : -1) * travel_page_rows, 0, n - 1);
+            else if (press[1] || press[2]) travel_choice = (travel_choice + n + (press[2] ? 1 : -1)) % n;
+            if (press[3] || press[4] || tab_left || tab_right) {   // (to the first place of the previous or next area)
+                int area = travel_area_of(travel_choice);
+                const bool back = press[3] || tab_left;
+                if (!back || travel_choice == travel.areas[area].first) area = (area + areas + (back ? -1 : 1)) % areas;
+                travel_choice = travel.areas[area].first;
+            }
+            if (travel_choice != was) travel_follow = true, changed = true;
+        }
     } else if (open_now.load() && page == 3) {   // the teleport list
         if (mouse) teleport_mouse(ptr, mx, my, press, changed);
         if (press[5]) page = 0, changed = true;   // (to the Debug tab, Teleport still selected)
@@ -6617,7 +7098,8 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     const bool start = startup_on.load(std::memory_order_acquire);
     const bool fps = opts.show_fps && !start;   // (no game frames yet: not "0 FPS" over the start-up screen)
     const bool open = open_now.load(std::memory_order_relaxed);
-    if (!start && !fps && !open) {   // (nothing shows: no ImGui frame, no render pass)
+    const bool notice = !open && !start && prof_now() < notice_until.load(std::memory_order_relaxed);   // (hookshot: a Travel picture)
+    if (!start && !fps && !open && !notice) {   // (nothing shows: no ImGui frame, no render pass)
         // (but a new window size or Menu size since the last bake: one frame with nothing drawn that bakes the menu's glyphs
         // and measures its page for the new size, so the next open has no hitch whatever was resized while nothing showed)
         if (prebake_needed(w, h) && ui::begin(w, h)) {
@@ -6642,6 +7124,7 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     if (start) draw_startup(c);   // (under the menu)
     if (open) draw_menu(c);
     if (fps) draw_fps(c, open);
+    if (notice) draw_travel_notice(c);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
     ui::record(cmd, index, w, h);
 }
