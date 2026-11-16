@@ -5874,6 +5874,7 @@ void enqueue(Job&& j) {
     if (j.kind == JOB_PRESENT) {   // (the game waits here while the present before it is not replayed: a frame ahead at most)
         bh_st.depth += (int64_t)q_jobs.size() + (q_busy ? 1 : 0);
         if (q_presents >= presents_ahead()) {
+            FpsWait room_wait(fps_stats::kWaitRender);   // (the FPS counter's Breakdown: the render thread a frame behind)
             const int64_t t0 = bh_now();
             q_space.wait(lk, [] { return q_presents < presents_ahead(); });
             bh_st.room_ns += bh_now() - t0, bh_st.room_n++;
@@ -6052,6 +6053,7 @@ void present(const nvn_tex* t, const int crop[4]) {
             static std::atomic<int64_t> n{0}, waited{0}, ns{0}, late{0};
             std::unique_lock lk(submit_order_mu);
             if (bh_cpu_wait_open()) {
+                FpsWait main_wait(fps_stats::kWaitMain);   // (the FPS counter's Breakdown: the game's main thread, not the renderer)
                 const int64_t t0 = bh_now();
                 if (!bh_signal_cv.wait_for(lk, after_ms, [] { return !bh_cpu_wait_open(); })) late++;
                 ns += bh_now() - t0, waited++;
