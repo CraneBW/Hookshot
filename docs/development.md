@@ -485,6 +485,7 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_PASS_TRACE=1` | The passes of the last frames, logged at a flash or a dark frame (`RX_VK_PASS_TRACE_AT=<n>`: every n-th present) |
 | `RX_VK_PROBE=1` or `2` | The centre texel after every pass: `probe_<frame>.txt` at a flash (1), or `probe_all_<n>.txt` at speed (2); `python -I scripts/probe.py` reads them |
 | `RX_VK_DUMP_FAILED=<dir>` | The native code of every program that does not translate, for `nx2/lower_test.py` (game data: keep it local) |
+| `RX_VK_SHADER_DIR=<folder>` | Each of the renderer's built-in shaders (`gpu/vk/shaders/*_spv.h`, `host_shaders/`) taken from `<folder>/<name>.spv` when that file is SPIR-V (`clear_vert.spv` for `clear_vert_spv.h`; `gpu/vk/vk_builtin_spv.h`), each logged once; a missing file is the compiled-in one, a file that isn't SPIR-V is named in the log and the compiled-in one used. For trying a shader edit without a renderer build: `glslangValidator -V <source> -o <folder>/<name>.spv`, then start the game again. Not taken from `hookshot_env.txt` (a `_DIR` switch) |
 
 ### Time and profiles
 
