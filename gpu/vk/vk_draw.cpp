@@ -10955,6 +10955,10 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         auto& fallbacks = pre->fallbacks;
         for (;;) {
             if (prepare_stopped()) return;
+            {   // (the game went on without them: no new one, the GPU and the CPU left to it; the ones in flight are let go of)
+                std::lock_guard lk(pre->mu);
+                if (pre->abandoned) return;
+            }
             const size_t i = pre->next++;
             if (i >= total) return;
             if (i < computes.size()) {
@@ -11040,12 +11044,14 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         if (next.load() >= total + threads.size()) break;
         const auto now = std::chrono::steady_clock::now();
         if (done.load() != last_done) last_done = done.load(), last_change = now;
-        else if (stall_s > 0 && next.load() >= total && now - last_change > std::chrono::seconds(stall_s)) {
+        // (whether or not every pipeline was handed out: with every worker inside the driver none was, and the start waited
+        // for good on AMD's RX 6600 / 6600 XT, the CPU idle)
+        else if (stall_s > 0 && now - last_change > std::chrono::seconds(stall_s)) {
             std::lock_guard lk(pre->mu);
             pre->abandoned = true;
             gone_on = true;
             prepare_left_workers_note();
-            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest go on behind it", done.load(),
+            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest are made in play", done.load(),
                  total, stall_s);
             break;
         }
