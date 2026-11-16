@@ -909,6 +909,42 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
 
 For numbers, compare the runtime with one made by `rt` from no pack: same base, same caches, one difference.
 
+#### Sharing a PC: the job queue
+
+Several agents (and you) often share one PC: its GPU, its CPUs, its memory and its disk. Builds and game runs on such a PC
+go through `scripts/job_queue.py`, which runs each when it fits and keeps measurements apart from everything else; on a PC of
+your own it costs nothing.
+
+```
+python -I scripts/job_queue.py run build --mode build -- python -I nx2/make_game.py ...   # a build, when it fits
+python -I scripts/job_queue.py run shots --mode shared -- <your run in that folder>
+python -I scripts/job_queue.py run fps --mode timing -- <your measurement>
+python -I scripts/job_queue.py status               # who plays, what runs, what waits and for what
+```
+
+| Mode | For | Beside it |
+|---|---|---|
+| `build` | `make_game.py`, `dev_packs.py base` / `pack`: heavy on the CPU and memory | 2 at once; never a timed run |
+| `light` | game-free checks, a renderer-only build, copies | 4 at once |
+| `shared` | the game for anything that is not a number: screenshots, logs, checks, A/B flashes in one session | 3 at once (each its own game and data folder) |
+| `gpu` | the game alone on the GPU, not a measurement | builds |
+| `timing` | fps, frame times, hitches: alone on the GPU and on its own CPUs, its memory never swapped out, not while you play | nothing heavy |
+| `timing-cpu` | a measured build | GPU runs on the other CPUs |
+| `profile` | a profile recorded in the game | as `timing` |
+
+The rules worth knowing (the script's notes have all of them):
+
+- **Measure with `timing`, everything else with `shared`.** A build beside a timed run once doubled the spread between
+  sessions; a timed run waits for running builds and holds new ones off, gets one L3 cache domain of the CPU (the others
+  go to everything else while it measures) and notes in `job_queue.py history` how busy the rest of the PC was. Keep each
+  GPU job short (one game and config): one long batch holds the queue for everyone.
+- **A job never adds an `OOT_`, `RX_` or `A64_` variable.** `make_game.py lift_key` hashes every one of them: the older queue's
+  `OOT_STATUS_LOCK=<job name>` gave each job its own lift key, so no build under it ever took another's translation from
+  `HOOKSHOT_LIFT_STORE`.
+- **Nothing on a RAM file system.** Builds, game folders, work folders and test output go on a disk, never in `/tmp` or
+  another tmpfs: two 5 GB test folders in `/tmp` once held 10 GB of memory and swap. A job's `TMPDIR` on a tmpfs moves to
+  `~/.cache/hookshot-queue/tmp/<job>`.
+
 ## The pipeline state list
 
 Every release ships a list of pipelines, merged from the sources in `assets/pipeline_states/`:
@@ -1230,3 +1266,5 @@ where no translation is available.
 
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.
+
+`frame_rate_cap=-1` selects 30 FPS in the existing host pacer. This forces real-time stepping without changing the saved Game speed setting; returning to 60 restores that choice. `HOS_FPS_MAX` is read once and overrides the menu, including `HOS_FPS_MAX=30`.
