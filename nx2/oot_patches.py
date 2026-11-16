@@ -960,6 +960,12 @@ def patch_file(s, name, protect_hearts=False):
         out = center
         counts["disable camera centering"] += 1
         lines.append("oot_patches: disable camera centering switch in " + name)
+    if protect_hearts and "if (hos_oot_trace_save(c)) return;" not in out:
+        signature = "void f_80bc72d0(Ctx *__restrict A64_NOESC c) {\n"
+        if signature in out:
+            out = out.replace(signature, signature + "    if (hos_oot_trace_save(c)) return;\n", 1)
+            out = out.replace('#include "a64.h"\n', '#include "a64.h"\nextern int hos_oot_trace_save(Ctx *c);\n', 1)
+            lines.append("oot_patches: save request trace in " + name)
     opening = patch_opening(out) if protect_hearts else None
     if opening is not None:
         n = opening.count(OPENING_REQUEST) + opening.count(OPENING_TIMELINE) + opening.count(OPENING_QUERY)

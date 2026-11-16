@@ -558,6 +558,27 @@ static void removed_switch_notes(void) {
 }
 
 int hos_oot_protect_hearts;
+/* Trace the request before the save manager queues it. */
+int hos_oot_trace_save(Ctx *c) {
+    int rx_option(int id, int otherwise);
+    const uint64_t caller = c->x[30];
+    const uint64_t parent = caller == 0x80bc7764ULL ? recomp_load64(c, c->x[31] + 24) : 0;
+    if (env_on("HOS_OOT_TRACE_SAVES")) hos_log("save trace: reason=%u mode=%u caller=%#llx request_site=%#llx", (unsigned)c->x[1], (unsigned)c->x[2],
+            (unsigned long long)caller, (unsigned long long)(parent ? parent : caller));
+    const unsigned reason = (uint32_t)c->x[1];
+    /* A crossing can queue both arrival requests in addition to the transition request. */
+    const int transition = (parent == 0x80bc7710ULL && reason == 6) ||
+        (parent == 0x80bc7864ULL && reason == 2) ||
+        (parent == 0x832a9764ULL && reason == 1);
+    if (caller == 0x80bc7764ULL && transition &&
+        (uint32_t)c->x[2] == 0 && !rx_option(HOS_OPT_TRANSITION_AUTOSAVE, 1)) {
+        if (env_on("HOS_OOT_TRACE_SAVES")) hos_log("save trace: transition autosave suppressed");
+        c->x[0] = 0;
+        return 1;
+    }
+    return 0;
+}
+
 volatile int hos_oot_live_action;   /* (test runs) the live input file's "!cheat <action>": host/nn_hid.c */
 
 int hos_oot_hearts_enabled(void) {
