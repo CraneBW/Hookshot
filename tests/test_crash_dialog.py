@@ -73,9 +73,13 @@ int main(int argc, char **argv) {
     const char *cmd = argv[1];
     if (!strcmp(cmd, "args")) {
         HosCrashArgs a;
-        const int m = hos_crash_args(argc - 1, argv + 1, &a);
+        const int m = hos_crash_args(argc - 2, argv + 2, &a);   /* (argv[2]: main's argv[0]) */
         printf("%d|%llu|%s|%s|%s|%s\n", m, (unsigned long long)a.pid, a.run_id, a.record ? a.record : "", a.dir ? a.dir : "",
                a.log ? a.log : "NULL");
+    } else if (!strcmp(cmd, "options")) {   /* (the helper's command line: the run's settings file after the log) */
+        HosCrashArgs a;
+        const int m = hos_crash_args(argc - 2, argv + 2, &a);   /* (argv[2]: main's argv[0]) */
+        printf("%d|%s\n", m, a.options ? a.options : "NULL");
     } else if (!strcmp(cmd, "wanted")) {   /* headless off pgo gamescope run [args...] */
         const char *run = strcmp(argv[6], "none") ? argv[6] : NULL;
         printf("%d\n", hos_crash_watch_wanted(argc - 6, argv + 6, atoi(argv[2]), atoi(argv[3]), atoi(argv[4]), atoi(argv[5]), run));
@@ -188,6 +192,8 @@ void hos_log(const char *fmt, ...) {
     fputc('\n', stderr);
 }
 void hos_log_flush(void) {}
+/* (host/options_path.c: the run's settings file; none here, so the helper reads the game folder's, as a helper given none) */
+const char *hos_options_file(void) { return ""; }
 static void note(const char *kind, const char *text) {
     const char *out = getenv("CRASH_TEST_OUT");
     FILE *f = out ? fopen(out, "ab") : NULL;
@@ -421,6 +427,14 @@ def logic_checks(exe, menu, tmp, form):
         assert run(exe, "args", "hookshot", "--crash-show", name, "/g", "-").startswith("-1|"), name
     for game in (["hookshot"], ["hookshot", "image.bin"], ["hookshot", "--user", "u", "--crash-watchx"]):
         assert run(exe, "args", *game).startswith("0|"), game
+    # (the run's settings file, in the user folder (host/options_path.c), after the log; left out, the game folder's)
+    opts = "/u/hookshot_options.ini"
+    assert run(exe, "options", *good).strip() == "1|NULL"
+    assert run(exe, "options", *good, opts).strip() == "1|" + opts
+    assert run(exe, "options", *good, "-").strip() == "1|NULL"
+    assert run(exe, "options", *good, "").startswith("-1|"), "an empty settings file"
+    assert run(exe, "options", *good, opts, "x").startswith("-1|"), "one too many"
+    assert run(exe, "options", "hookshot", "--crash-show", "crash-20261114T101112Z.txt", "/g", "-", opts).strip() == "2|" + opts
     print("PASS: the helper's command line: whole or refused, and never the game's own")
     # which starts get a helper
     assert run(exe, "wanted", 0, 0, 0, 0, RUN).strip() == "1"
@@ -639,9 +653,10 @@ def entries(out):
 def behaviour(cc, tmp):
     exe = tmp / "driver"
     (tmp / "driver.c").write_text(DRIVER, encoding="utf-8")
-    subprocess.run([cc, "-x", "c", "-std=gnu11", "-O1", "-Wall", "-Wextra", "-DHOS_CRASH_DIALOG_TEST", "-I", str(ROOT / "host"),
-                    str(tmp / "driver.c"), str(ROOT / "host/hos_crash_dialog.c"), str(ROOT / "host/hos_crash_record.c"),
-                    str(ROOT / "host/hos_report_run.c"), "-x", "none", "-o", str(exe), "-pthread", "-ldl"], check=True, timeout=180)
+    # (-x c before each file: g++ takes a single -x c for the first file only, and compiles the rest as C++)
+    sources = [tmp / "driver.c", ROOT / "host/hos_crash_dialog.c", ROOT / "host/hos_crash_record.c", ROOT / "host/hos_report_run.c"]
+    subprocess.run([cc, "-std=gnu11", "-O1", "-Wall", "-Wextra", "-DHOS_CRASH_DIALOG_TEST", "-I", str(ROOT / "host"),
+                    *(x for f in sources for x in ("-x", "c", str(f))), "-o", str(exe), "-pthread", "-ldl"], check=True, timeout=180)
     home = tmp / "home" / "private-user"
     home.mkdir(parents=True)
     base = {k: v for k, v in os.environ.items() if not k.startswith(("HOS_", "RX_", "HOOKSHOT_"))}
@@ -654,7 +669,9 @@ def behaviour(cc, tmp):
         folder.mkdir(exist_ok=True)
         out = folder / "out.txt"
         env = dict(base, CRASH_TEST_OUT=str(out), CRASH_TEST_BUTTONS=buttons, **(extra or {}))
-        subprocess.run([str(exe), str(folder), mode, *lines], env=env, timeout=30)
+        # (stderr not a file: hos_crash_record_start takes a regular file there for the game's log, as the game's own stderr is,
+        # over the driver's logs/hookshot_log.txt, and this check's output may be one)
+        subprocess.run([str(exe), str(folder), mode, *lines], env=env, timeout=30, stderr=subprocess.DEVNULL)
         deadline = time.time() + (20 if ends else 2)
         while time.time() < deadline:
             done = [e for e in entries(out) if e[0] == "END"]
@@ -749,6 +766,7 @@ def behaviour(cc, tmp):
     assert "on your clipboard" in got[5][1] and "Open the report" in got[5][1].split("\n")[-1], got[5][1]
     assert "It is saved as " + str(reports[-1]) + "." in got[5][1], "the box names the saved report's path"
     # nothing took the text: the box says so, names the file and opens it
+    (folder / "out.txt").unlink()
     _, got = game("crash", folder=folder, buttons="0,0", extra={"CRASH_TEST_CLIP": "0"})
     kinds = [e[0] for e in got]
     assert kinds == ["BOX", "CLIP", "OPEN", "BOX", "OPEN", "BOX", "END"], kinds
@@ -776,7 +794,7 @@ def main():
         (tmp / "fixture.c").write_text(FIXTURE, encoding="utf-8")
         (tmp / "menu.cpp").write_text(MENU_REDACT, encoding="utf-8")
         subprocess.run([args.cxx, "-x", "c", "-std=c11", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror", "-I",
-                        str(ROOT / "host"), str(tmp / "fixture.c"), "-x", "none", "-o", str(exe)], check=True, timeout=120)
+                        str(ROOT / "host"), str(tmp / "fixture.c"), "-o", str(exe)], check=True, timeout=120)
         subprocess.run([args.cxx, "-std=c++20", "-O1", *([] if os.name == "nt" else ["-pthread"]), "-I", str(ROOT / "gpu/vk"),
                         str(tmp / "menu.cpp"), str(ROOT / "gpu/vk/vk_bug_report.cpp"), "-o", str(menu)], check=True, timeout=180)
         logic_checks(exe, menu, tmp, form)
