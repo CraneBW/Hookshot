@@ -437,7 +437,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
 bool prepare_is_update();
 void prepare_background();
 void state_list_run();                        // (an update: the state list's pipelines noted before precompile_run)
-/// (HL_SHIPPED_STATES, on unless 0) the shipped pipeline state list changed since state_list_prepare last went through it: the
+/// (RX_VK_SHIPPED_STATES, on unless 0) the shipped pipeline state list changed since state_list_prepare last went through it: the
 /// start calls state_list_run when the shaders needed no preparing, so that precompile_run builds its pipelines
 bool state_list_pending();
 /// (hookshot) A prediction a start began and did not finish (closed, or ended in it): the next start runs it again

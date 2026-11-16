@@ -2076,7 +2076,7 @@ void state_record(const Program& p, const NvnState& s, const Targets& at, VkPrim
     if (!state_file) state_open_locked();
     if (state_file && state_seen.insert(h).second) fwrite(&r, sizeof r, 1, state_file), fflush(state_file);
 }
-/// (HL_SHIPPED_STATES) The shipped list's contents by a hash, and the hash state_list_prepare last went through, in
+/// (RX_VK_SHIPPED_STATES) The shipped list's contents by a hash, and the hash state_list_prepare last went through, in
 /// hookshot_pipeline_states_shipped.done: a list that came after the shaders were prepared (a list shipped later, or a folder
 /// prepared before it had one) was never noted, the prepare being done for that translator and seed, and its pipelines were all
 /// made in play. 0: no list
@@ -2100,11 +2100,11 @@ uint64_t shipped_list_done() {
     return h;
 }
 bool shipped_list_pending() {
-    static const bool on = !getenv("HL_SHIPPED_STATES") || atoi(getenv("HL_SHIPPED_STATES")) != 0;
+    static const bool on = !getenv("RX_VK_SHIPPED_STATES") || atoi(getenv("RX_VK_SHIPPED_STATES")) != 0;
     if (!on || getenv("RX_VK_NO_STATE_LIST")) return false;
     const uint64_t h = shipped_list_hash();
     const bool pending = h && h != shipped_list_done();
-    if (pending) logf("hl pipe: the shipped pipeline state list is new since the shaders were prepared: its pipelines are noted now");
+    if (pending) logf("vk: the shipped pipeline state list is new since the shaders were prepared: its pipelines are noted now");
     return pending;
 }
 /// (a compute program's first dispatch of this run: dispatch) the program in the list once, by its key alone, as a kCompute record
