@@ -28,9 +28,9 @@ def main():
     option = replay.split("t.option =", 1)[1].split("};", 1)[0]
     numeric = re.findall(r"\bid\s*==\s*(\d+)\b", option)
     cases = names + numeric
-    # Skip-title already owns 44; Walk and Item wheel are on concurrent branches.
+    # Skip-title already owns 44; Walk and Item wheel are on concurrent branches (60 is Shadow resolution's: the wheel's is 72).
     for name, value in (("HOS_OPT_SKIP_TITLE", 44), ("HOS_OPT_WALK_MODE", 49), ("HOS_OPT_WALK_SPEED", 50),
-                        ("HOS_OPT_ITEM_WHEEL", 60)):
+                        ("HOS_OPT_ITEM_WHEEL", 72)):
         if name not in names:
             cases.append(str(value))
     source = "\n".join(declarations) + "\nint option_id(int id) { switch (id) {\n"
