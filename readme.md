@@ -470,7 +470,8 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
   **30 FPS** reduces rendering work for handhelds and slower PCs while keeping real-time game speed. It is the last option
   in the row so existing saved caps keep their meaning. At 30, Game speed follows real time even if Per frame is selected.
   A cap **past 60 is experimental**: the game keeps real time, but some cutscenes and bosses still count frames and can
-  misbehave (Gohma running into the wall, the intro's narration running ahead: #1742). 60 is the safe choice.
+  misbehave (the intro's narration running ahead: #1742). 60 is the safe choice.
+  Gohma's ceiling-positioning fault is fixed, tested in complete fights at about 98-99 FPS and at 60.
   **Uncapped** renders as fast as the PC can (the game still keeps real time). A display that waits for its refresh still
   holds the frames to its refresh rate: V-Sync on, or the driver's FIFO mode. `HOS_FPS_MAX=30` or `<61-1000>` sets a cap for one
   run.
