@@ -379,7 +379,8 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Threaded rendering | Auto, On, Off (after a restart). Auto is On with 8 or more processor threads for the game | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
-| | Audio output | Auto, Stereo, 5.1 (after a restart) | Auto |
+| | Output device | Default or a named Windows playback device; applies live | Default |
+| | Speaker layout | Auto, Stereo, 5.1, Mono (layout changes after a restart; Mono/Stereo live on stereo output) | Auto |
 | | Microphone | Off, Default, or each microphone by name | Default |
 | Gameplay | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
@@ -584,7 +585,11 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
   follow a curve so they sound about even: 50% is a quarter of the level (-12 dB). **Mute in background** silences the
   game while another window has the focus; an overlay such as Steam's or Discord's does not count as another window
   while the game was in front.
-- **Audio output** is the speakers the game mixes its sound for. Auto is 5.1 when your default output device has 5.1
+- **Output device**, under Audio, selects the Windows playback endpoint by its persistent ID, with Default following
+  the system output. Changes briefly restart the audio stream. A missing endpoint falls back to Default and is retried;
+  its saved choice is retained. `HOS_AUDIO_DEVICE` overrides selection for that run without changing the saved choice.
+  Named playback selection is Windows-only; Linux retains the default output.
+- **Speaker layout** is the speakers the game mixes its sound for. Auto is 5.1 when the selected/default output device has 5.1
   or more speakers, else stereo; Stereo or 5.1 chooses one whatever the device has (5.1 on stereo speakers is mixed
   down). Auto counts the speakers Windows names, not the channels: an audio interface whose outputs are not set up as
   surround speakers (a Focusrite Scarlett's 8 outputs, for one) is stereo, so voices and the ocarina do not go to an
