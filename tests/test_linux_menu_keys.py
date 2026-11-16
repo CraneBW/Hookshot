@@ -34,6 +34,8 @@ FIXTURE = r"""
 #define VK_LBUTTON 1
 #define VK_RBUTTON 2
 #define VK_MBUTTON 4
+#define VK_XBUTTON1 5
+#define VK_XBUTTON2 6
 #define VK_BACK 8
 #define VK_TAB 9
 #define VK_RETURN 13
