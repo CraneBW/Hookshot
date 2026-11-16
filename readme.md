@@ -409,6 +409,7 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Mouse camera | As the stick, Native | As the stick |
 | | Mouse sensitivity | 0.10 to 5.00 | 1.00 |
 | | Invert mouse vertical | Off, On | Off |
+| | Invert mouse horizontal | Off, On | Off |
 | | Auto run | Off, On | Off |
 | | Walk mode | Hold, Toggle | Hold |
 | | Walk speed | 15% to 90%, in steps of 5 | 45% |

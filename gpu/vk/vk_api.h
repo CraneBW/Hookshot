@@ -78,6 +78,11 @@ enum { HOS_OPT_TRANSITION_AUTOSAVE = 59 };
 enum { HOS_OPT_GFX_FOLIAGE = 65, HOS_OPT_GFX_OBJECTS, HOS_OPT_GFX_GRASS, HOS_OPT_GFX_SHADOWS, HOS_OPT_GFX_CONTACT_SHADOWS,
        HOS_OPT_GFX_BASE_QUALITY };
 enum { HOS_OPT_GFX_UNCAPPED = 71 };   /* Debug's Uncap detail sliders (vk_menu.cpp gfx_limits) */
+/* (HOS_OPT_MOUSE_INVERT_X, 61: Controls' Invert mouse horizontal, 1 on: the mouse's left and right swapped, as option
+   8, Invert mouse vertical, swaps its up and down. host/mouse_native.c (the camera's yaw) and host/nn_hid.c (the mouse
+   as the right stick) read it by its number, as they read 8. The existing option callback: no new member. 59 is the
+   transition autosave's and 60 is Shadow resolution's (the item wheel's is 72).) */
+enum { HOS_OPT_MOUSE_INVERT_X = 61 };
 
 /* (hookshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of hookshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

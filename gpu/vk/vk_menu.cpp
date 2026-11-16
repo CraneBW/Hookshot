@@ -1615,6 +1615,11 @@ Row rows[] = {
      "count. The - and = keys change it in game too.", nullptr, false, true},
     {TAB_CONTROLS, "Invert mouse vertical", &opts.mouse_invert, 0, 1, 1, tx_onoff, "Swaps up and down for the mouse.",
      hn_mouse_invert, false, true},
+    // (with Mouse camera on Native the game's own camera inversion, which turns the right stick around, never reaches
+    // the mouse: this row is how its left and right are swapped, in both modes. No line about which way the camera
+    // then turns: As the stick turns it as the game turns it for the right stick, which need not be Native's way)
+    {TAB_CONTROLS, "Invert mouse horizontal", &opts.mouse_invert_x, 0, 1, 1, tx_onoff,
+     "Swaps left and right for the mouse.", nullptr, false, true},
     {TAB_CONTROLS, "Movement", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     {TAB_CONTROLS, "Auto run", &opts.auto_run, 0, 1, 1, tx_auto_run,
      "Sprint without holding A (or its key). Hold it until Link sprints, then let go: he keeps going. Let go of the "
