@@ -1370,6 +1370,17 @@ def compile_cost(src, costs):
     return costs.get(name, src_size(src)) * (HOT_COST if name.startswith("code_hot") else 1)
 
 
+def start_order(jobs, vk_jobs, history):
+    """The order the compiles start in: the Vulkan back end's files the longest first, by this PC's build_times.json
+    (per_file_seconds) or else by size. In name order vk_draw.cpp, the longest, started near the end and ran alone. The
+    other jobs keep their place (the game's are sorted already: compile_cost), and the link keeps jobs' and vk_jobs' own order"""
+    # (a history with none of the back end's files gives them all the same flat guess: their sizes order them better)
+    measured = any(os.path.basename(j[1]) in history for j in vk_jobs)
+    seconds = per_file_seconds(vk_jobs, history) if measured else [src_size(j[1]) for j in vk_jobs]
+    longest = {j[2]: s for j, s in zip(vk_jobs, seconds)}
+    return [j for j in jobs if j[2] not in longest] + sorted((j for j in jobs if j[2] in longest), key=lambda j: -longest[j[2]])
+
+
 def compile_one(job):
     cc, src, obj, fl, deps = job
     key = PLANNED.get((src, obj)) or object_key(src, fl, deps)
@@ -1778,22 +1789,24 @@ def main():
                 PLANNED[(src, obj)] = key_of(src, fl, deps)
         got = object_store.fetch(OBJ_STORE, OBJ_CACHE, [PLANNED[(j[1], j[2])] for j in jobs if (j[1], j[2]) in PLANNED])
         print("object store %s: %d objects from it" % (OBJ_STORE, got), flush=True)
+    history = times_from(counted) if counted else {}
     if counted:
         work_jobs, keys = plan_jobs(jobs)
         PLANNED.update(keys)
         save_hashes(out)   # (the sources this plan hashed, for the next build: A5)
-        estimate = per_file_seconds(work_jobs, times_from(counted))
+        estimate = per_file_seconds(work_jobs, history)
         pending = list(estimate)
         for job, seconds in zip(work_jobs, estimate):
             expected.setdefault(job[1], []).append(seconds)
         print("@@plan %d %d" % (len(work_jobs), len(jobs)), flush=True)
         print("@@eta %d" % eta_left(pending, eta_jobs), flush=True)
+    order = start_order(jobs, vk_jobs, history)
     print("%d files, %d jobs, %s" % (len(jobs), a.jobs, " ".join(f for f in fl if f.startswith("-D") or f.startswith("-O"))),
           flush=True)
     t0, failed = time.time(), []
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
         # (as each ends, not in order: the builder app shows progress from these lines, and the biggest file comes first)
-        submitted = {ex.submit(compile_one, job): job for job in jobs}
+        submitted = {ex.submit(compile_one, job): job for job in order}
         try:
             for future in concurrent.futures.as_completed(submitted):
                 src, secs, err = future.result()
