@@ -247,6 +247,12 @@ Do not append new runs here. Frame rates come from the named run's log at the st
 | 2026-11-09 | main 7eac5bf | as above | as above | as above | fullscreen (`HOS_FULLSCREEN=1`) | Hyrule Castle road | fullscreen works, no device lost |
 | 2026-11-09 | v2.0.11-142 (7dbdcdc) | as above | as above | as above | 3840x2160, DLSS Quality | Water Temple 1F, Hyrule Castle road, Deku Tree 2F | Water Temple walls missing with the 23.3 GB dump, drawn with stand-in textures (#1308) or a complete dump. Slingshot and bow aiming: no fps change (51-52 fps, #1305). Pause / unpause: no freeze |
 
+## Limits of the original RTX 4070 Ti runs
+
+- Real mouse aiming with Mouse camera = Native after https://github.com/NotRexed/Hookshot/pull/1462 (the camera states were traced, but not tested with a real mouse).
+- Frame generation at 120 Hz or above (the displays here top out at 75 Hz).
+- HDR output on an HDR monitor (the surface is offered, the picture was not judged on one).
+
 ## Steam Deck investigation, 2026-11-12
 
 The seven Deck runs above record an investigation, with temporary settings, rather than a runtime patch or a new
@@ -300,9 +306,3 @@ power limit was not raised. Original save/settings hashes were unchanged. The te
 save copies were removed. The local experimental script, raw reports, game files and caches are not part of this
 documentation contribution. OLED Decks, Windows, other GPUs, physical input, audio and extended play were not
 tested in these runs.
-
-## Limits of the original RTX 4070 Ti runs
-
-- Real mouse aiming with Mouse camera = Native after https://github.com/NotRexed/Hookshot/pull/1462 (the camera states were traced, but not tested with a real mouse).
-- Frame generation at 120 Hz or above (the displays here top out at 75 Hz).
-- HDR output on an HDR monitor (the surface is offered, the picture was not judged on one).
