@@ -150,7 +150,7 @@ def main():
         exe = Path(tmp) / "gpu-write-part"
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror",
                         # (_CRT_SECURE_NO_WARNINGS: the MSVC CRT's getenv deprecation, as the game's own Windows build passes)
-                        "-D_CRT_SECURE_NO_WARNINGS", str(p), "-o", str(exe)], check=True)
+                        "-D_CRT_SECURE_NO_WARNINGS", "-I", str(ROOT / "gpu" / "vk"), str(p), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
     print("a GPU buffer write re-uploads the part of the storage it covers")
 

@@ -116,7 +116,7 @@ def main():
     flag = "st.subgroups = spirv_uses_subgroups(spirv);"
     for source, made in ((shader, "st.module = make_module(spirv);\n            " + flag + "\n            kept.push_back(spirv);\n"
                                   "            st.vk_stage = VK_SHADER_STAGE_COMPUTE_BIT;"),
-                         (cache, "st.module = make_module(spirv);\n            " + flag + "\n            ok = ok && st.module;")):
+                         (cache, flag + "\n            ok = ok && st.module;")):
         if made not in source:
             raise SystemExit("a compute stage's module is made without its subgroup flag (translated, or from the program cache)")
 
