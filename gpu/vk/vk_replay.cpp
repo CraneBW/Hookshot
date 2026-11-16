@@ -1865,7 +1865,16 @@ struct UbGrowGuard {
     }
 };
 // (the dry pass calls on_point at each point it keeps while an early replay_handle runs; the replay thread's only)
-struct SegEarlyHook { std::function<void(const ParPoint&)> on_point; };
+struct SegEarlyHook {
+    std::function<void(const ParPoint&)> on_point;
+    /// whether on_point would take the point at this work count and place: the point's state (NvnState, ~27 KB) is copied
+    /// only for those (RX_VK_DRY_WANTED, default on, =0: every point's, as before)
+    std::function<bool(int64_t, const uint8_t*)> wants;
+};
+bool dry_wanted_only() {
+    static const bool on = !getenv("RX_VK_DRY_WANTED") || atoi(getenv("RX_VK_DRY_WANTED")) != 0;
+    return on;
+}
 SegEarlyHook* seg_early_hook = nullptr;
 size_t ub_first_of_recording = 0;  // (the current recording's first entry)
 uint64_t rec_value_now = 0;
@@ -2883,8 +2892,14 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                     st_lean_left++;   // (a point no boundary can be at, RX_VK_DRY_LEAN: its state not copied)
                 } else if (dry_work % point_every == 0) {
                     if (lean_points) st_lean_kept++;
-                    par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});
-                    if (seg_early_hook) seg_early_hook->on_point(par_points.back());   // (RX_VK_SEG_EARLY)
+                    // (the early path takes one point a boundary, the first at or after its planned place: a point none takes was a
+                    // copy of the whole state, 58 of them a big command buffer, the vector growing by moves of the same)
+                    if (seg_early_hook && dry_wanted_only() && !seg_early_hook->wants(dry_work, p + h.size)) {
+                        // (not a boundary)
+                    } else {
+                        par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});
+                        if (seg_early_hook) seg_early_hook->on_point(par_points.back());   // (RX_VK_SEG_EARLY)
+                    }
                 }
                 if (dry_work == presync_kick_at) presync_early_start();   // (a command buffer big enough to be cut, likely)
             } else if (!worker) {
@@ -2955,7 +2970,30 @@ int64_t part_work = 0;
 // which a wait on the timeline value it signals at its end kept them from. A parallel replay's segments are recorded
 // at once, kMaxBatch of them at most: fewer than the slots)
 constexpr int kMaxParts = 32;
-constexpr int kMaxBatch = 6;   // (three recording threads: more segments only took slots and submits)
+constexpr int kMaxBatch = 12;   // (the arrays' size; seg_cap() is the number a command buffer is cut into at most)
+/// (RX_VK_FINE_SEGMENTS=1, off by default) a big command buffer cut into more segments than there
+/// are recorders: the last ones are short, and a recorder that is done takes the next, so the replay thread's own (last) segment, which
+/// starts when the dry pass is over, is a smaller share (PC 3050, castle-move: 4.7 -> 3.6 ms, the frame 36.0 -> 37.7 fps). Up to 10
+/// segments of ~128 draws and dispatches, not one round of at most one a recorder (as set by RX_VK_SEG_MAX, RX_VK_PARALLEL_SEG,
+/// each alone). Off: at most 6 segments of ~160, as before
+bool fine_segments() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_FINE_SEGMENTS");
+        const bool on = e && atoi(e) != 0;   // (measured only under 16 hardware threads: off until run here)
+        logf("vk: a big command buffer's segments: %s (RX_VK_FINE_SEGMENTS)", on ? "up to 10 of ~128 draws, more than recorders" : "up to 6 of ~160 draws");
+        return on;
+    }();
+    return v;
+}
+/// (RX_VK_SEG_MAX=<n>) at most that many segments a command buffer: 10 with fine_segments, else 6 (three recording threads, more
+/// segments only took slots and submits)
+int seg_cap() {
+    static const int v = [] {
+        const char* e = getenv("RX_VK_SEG_MAX");
+        return e ? std::clamp(atoi(e), 2, kMaxBatch) : fine_segments() ? 10 : 6;
+    }();
+    return v;
+}
 // (a short command buffer a parallel replay records on this thread: one segment's worth, and a segment is not split)
 thread_local bool split_off = false;
 
@@ -3433,8 +3471,9 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
     jobs[0]->s = state;
     jobs[0]->g = {h, nullptr, &jobs[0]->s, ub0, 0, serial0};
     SegEarlyHook hook;
+    hook.wants = [&](int64_t work, const uint8_t* at) { return (int)open + 1 < nplan && work >= plan[open] && at != jobs[open]->g.p; };
     hook.on_point = [&](const ParPoint& q) {
-        if ((int)open + 1 >= nplan || q.work < plan[open] || q.p == jobs[open]->g.p) return;
+        if (!hook.wants(q.work, q.p)) return;
         Job* j = jobs[open].get();
         j->g.end = q.p;
         {
@@ -3641,7 +3680,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     }
     // (segments of ~RX_VK_PARALLEL_SEG draws and dispatches (default 160), taken in order by the threads and submitted
     // as each is done with those before it: the GPU starts on the first while the rest are recorded)
-    static const int64_t per = getenv("RX_VK_PARALLEL_SEG") ? std::max(32, atoi(getenv("RX_VK_PARALLEL_SEG"))) : 160;
+    static const int64_t per = getenv("RX_VK_PARALLEL_SEG") ? std::max(32, atoi(getenv("RX_VK_PARALLEL_SEG"))) : fine_segments() ? 128 : 160;
     // (too little work for two segments: recorded here, as with parallel replay off. The dry pass would apply the stream's
     // state for nothing, and its one segment would walk the stream again here on this thread. RX_VK_NO_DRY_SHORT=1: as
     // before, the dry pass and the segment)
@@ -3674,7 +3713,7 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
     static double dry_ms, seg_ms, segs_n;
     static int64_t timed;
     dry_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_dry0).count();
-    const int nseg = (int)std::clamp<int64_t>(total / per, 1, kMaxBatch);
+    const int nseg = (int)std::clamp<int64_t>(total / per, 1, seg_cap());
     std::vector<Segment> seg;
     seg.push_back({h, nullptr, &start, ub0, 0});
     for (int k = 1; k < nseg; k++) {
