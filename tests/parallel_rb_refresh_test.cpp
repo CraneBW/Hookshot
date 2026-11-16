@@ -127,6 +127,9 @@ BufferRef bind_storage(const Desc& d, uint64_t addr, uint64_t size, uint64_t* ba
     static const uint64_t bare_read = 64ull << 20;   // (the device's reach)
     const uint64_t salign = 16;                      // (minStorageBufferOffsetAlignment)
     bool bare = false;
+// (the memory ledger's scope, RX_VK_LEDGER: nothing here)
+enum { kUseStorage = 8 };
+struct LedgerUse { explicit LedgerUse(uint32_t) {} };
 #include "rb_draw.inc"
     (void)t0;
     *base_out = base;

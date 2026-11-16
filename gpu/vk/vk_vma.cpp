@@ -5,12 +5,15 @@
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 #include "vk_internal.h"
+#include "vk_ledger.h"
 #include <vk_mem_alloc.h>
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
 #include <functional>
+#include <map>
+#include <unordered_map>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -22,8 +25,112 @@
 #include "vk_work.h"   // (last: RX_VK_RECORDER=defer drains before the destructions and the invalidate below)
 
 namespace mkwvk {
-
 VmaAllocator vma;
+
+// ---- allocations by kind and memory class, RX_VK_RES_LOG=1 ----
+thread_local MemKind mem_kind_tag = MemKind::Other;
+bool res_log_on() {   // (RX_VK_LEDGER counts the allocations by kind too: vk_ledger.cpp)
+    static const bool v = (getenv("RX_VK_RES_LOG") && atoi(getenv("RX_VK_RES_LOG")) != 0) || ledger_on();
+    return v;
+}
+namespace {
+constexpr int kClasses = 4;   // (0 VRAM, 1 VRAM the CPU maps (BAR), 2 system cached, 3 system uncached)
+std::mutex acct_mu;
+struct AcctEntry { uint8_t kind, cls; uint64_t size; };
+std::unordered_map<VmaAllocation, AcctEntry> acct;
+uint64_t acct_bytes[(int)MemKind::Count][kClasses];
+uint64_t acct_count[(int)MemKind::Count][kClasses];
+void note_alloc(VmaAllocation a, MemKind kind) {
+    if (!res_log_on() || !a) return;
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(vma, a, &info);
+    const VkMemoryPropertyFlags f = dev.memory.memoryTypes[info.memoryType].propertyFlags;
+    const uint8_t cls = (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? ((f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ? 1 : 0)
+                                                                    : ((f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) ? 2 : 3);
+    std::lock_guard lk(acct_mu);
+    acct[a] = {(uint8_t)kind, cls, info.size};
+    acct_bytes[(int)kind][cls] += info.size, acct_count[(int)kind][cls]++;
+}
+void note_free(VmaAllocation a) {
+    if (!res_log_on() || !a) return;
+    std::lock_guard lk(acct_mu);
+    auto it = acct.find(a);
+    if (it == acct.end()) return;
+    acct_bytes[it->second.kind][it->second.cls] -= it->second.size, acct_count[it->second.kind][it->second.cls]--;
+    acct.erase(it);
+}
+MemKind image_kind(const VkImageCreateInfo& ci) {
+    if (mem_kind_tag != MemKind::Other) return mem_kind_tag;
+    return (ci.usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) ? MemKind::Target
+                                                                                                           : MemKind::Texture;
+}
+}  // namespace
+void mem_kinds_log() {
+    if (!res_log_on()) return;
+    static const char* const names[] = {"other", "textures", "render targets", "mirrors", "write-back shadows", "captures",
+                                        "streams", "staging", "readback", "scratch", "BC cache"};
+    char line[1600];
+    int n = snprintf(line, sizeof line, "vk: allocations by kind, MB (VRAM / VRAM mapped / system cached / system uncached, count):");
+    std::lock_guard lk(acct_mu);
+    uint64_t tot[kClasses]{};
+    for (int k = 0; k < (int)MemKind::Count && n < (int)sizeof line - 160; k++) {
+        uint64_t c = 0;
+        for (int j = 0; j < kClasses; j++) c += acct_count[k][j], tot[j] += acct_bytes[k][j];
+        if (!c) continue;
+        n += snprintf(line + n, sizeof line - n, " %s %llu / %llu / %llu / %llu (%llu);", names[k],
+                      (unsigned long long)(acct_bytes[k][0] >> 20), (unsigned long long)(acct_bytes[k][1] >> 20),
+                      (unsigned long long)(acct_bytes[k][2] >> 20), (unsigned long long)(acct_bytes[k][3] >> 20),
+                      (unsigned long long)c);
+    }
+    snprintf(line + n, sizeof line - n, " all %llu / %llu / %llu / %llu", (unsigned long long)(tot[0] >> 20),
+             (unsigned long long)(tot[1] >> 20), (unsigned long long)(tot[2] >> 20), (unsigned long long)(tot[3] >> 20));
+    logf("%s", line);
+}
+
+void mem_kind_totals(uint64_t bytes[][4], uint64_t count[][4]) {
+    std::lock_guard lk(acct_mu);
+    for (int k = 0; k < (int)MemKind::Count; k++)
+        for (int j = 0; j < kClasses; j++) bytes[k][j] = acct_bytes[k][j], count[k][j] = acct_count[k][j];
+}
+
+// ---- (HOS_HOST_SPLIT, host/hos_hostsplit.c) the census of the process's memory outside the game's: host-visible buffers named ----
+// A buffer the back end maps (the captures, the BC cache, staging, readbacks) is a range of this process's address space that the
+// driver made: tagged with its kind and memory class, it is told apart there from the driver's own memory. Only an executable with
+// the export (and the switch on) counts them.
+void host_tag(const void* ptr, uint64_t size, const char* name) {
+#ifdef _WIN32
+    using Tag = void (*)(const void*, uint64_t, const char*);
+    static const Tag tag = (Tag)(void*)GetProcAddress(GetModuleHandleA(nullptr), "hos_mem_tag");
+    if (tag) tag(ptr, size, name);
+#else
+    (void)ptr, (void)size, (void)name;
+#endif
+}
+void host_untag(const void* ptr) {
+#ifdef _WIN32
+    using Untag = void (*)(const void*);
+    static const Untag untag = (Untag)(void*)GetProcAddress(GetModuleHandleA(nullptr), "hos_mem_untag");
+    if (untag) untag(ptr);
+#else
+    (void)ptr;
+#endif
+}
+namespace {
+void tag_mapped(const VmaAllocationInfo& info, MemKind kind) {
+    static const bool named = getenv("HOS_HOST_SPLIT") != nullptr || ledger_on();
+    if (!named || !info.pMappedData) return;
+    static const char* const names[] = {"other", "textures", "render targets", "mirrors", "write-back shadows", "captures",
+                                        "streams", "staging", "readback", "scratch", "BC cache"};
+    const VkMemoryPropertyFlags f = dev.memory.memoryTypes[info.memoryType].propertyFlags;
+    const char* where = (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? "BAR" : (f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) ? "cached" : "uncached";
+    char name[40];
+    snprintf(name, sizeof name, "vk %s, %s", names[(int)kind], where);
+    host_tag(info.pMappedData, info.size, name);
+}
+}  // namespace
+
+std::atomic<int> vram_alloc_failures{0};   // (images VRAM refused, read by the texture budget)
+
 
 bool vma_init(PFN_vkGetInstanceProcAddr gipa) {
     VmaVulkanFunctions f{};
@@ -237,7 +344,7 @@ bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& al
     if (dedicated) {   // (a memory object of its own, which freeing gives back whole: a pool's block is kept by VMA when it empties)
         VmaAllocationCreateInfo dai = ai;
         dai.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
-        if (vmaCreateImage(vma, &ci, &dai, &image, &allocation, nullptr) == VK_SUCCESS) return true;
+        if (vmaCreateImage(vma, &ci, &dai, &image, &allocation, nullptr) == VK_SUCCESS) return note_alloc(allocation, image_kind(ci)), true;
     }
     static const bool no_pool = env_on("RX_VK_NO_IMAGE_POOL");
     if (VmaPool pool = no_pool ? VK_NULL_HANDLE
@@ -246,22 +353,23 @@ bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& al
         VmaAllocationCreateInfo pai = ai;
         pai.pool = pool;
         pai.usage = VMA_MEMORY_USAGE_UNKNOWN;
-        if (vmaCreateImage(vma, &ci, &pai, &image, &allocation, nullptr) == VK_SUCCESS) return true;
+        if (vmaCreateImage(vma, &ci, &pai, &image, &allocation, nullptr) == VK_SUCCESS) return note_alloc(allocation, image_kind(ci)), true;
     }
-    if (vmaCreateImage(vma, &ci, &ai, &image, &allocation, nullptr) == VK_SUCCESS) return true;
+    if (vmaCreateImage(vma, &ci, &ai, &image, &allocation, nullptr) == VK_SUCCESS) return note_alloc(allocation, image_kind(ci)), true;
     if (ai.flags & VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT) {
         static std::atomic<int> told_budget{0};
         if (told_budget++ < 10) logf("vk: image over budget, retrying without WITHIN_BUDGET");
         VmaAllocationCreateInfo vai = ai;
         vai.flags &= ~VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
-        if (vmaCreateImage(vma, &ci, &vai, &image, &allocation, nullptr) == VK_SUCCESS) return true;
+        if (vmaCreateImage(vma, &ci, &vai, &image, &allocation, nullptr) == VK_SUCCESS) return note_alloc(allocation, image_kind(ci)), true;
     }
     // (hookshot) VRAM is full (a 4 GB card at a high resolution, #96): an image left unmade is a black screen, so it goes
     // to system memory instead, slow but drawn
     if (env_on("RX_VK_IMAGES_VRAM_ONLY")) return false;
     VmaAllocationCreateInfo sai{};
     sai.usage = VMA_MEMORY_USAGE_AUTO;
-    if (vmaCreateImage(vma, &ci, &sai, &image, &allocation, nullptr) != VK_SUCCESS) return false;
+    if (vmaCreateImage(vma, &ci, &sai, &image, &allocation, nullptr) != VK_SUCCESS) return vram_alloc_failures++, false;
+    note_alloc(allocation, image_kind(ci));
     static std::atomic<int> told{0};
     if (told++ < 4) logf("vk: VRAM full: a %ux%u image (format %d) in system memory", ci.extent.width, ci.extent.height, (int)ci.format);
     return true;
@@ -334,8 +442,39 @@ void reap(std::function<void()> fn) {
     reap_cv.notify_one();
 }
 void destroy_image(VkImage image, VmaAllocation allocation) {
+    note_free(allocation);
     if (!image && !allocation) return;
     reap([image, allocation] { vmaDestroyImage(vma, image, allocation); });
+}
+uint64_t big_image_bytes() {   // (RX_VK_BIG_IMAGE_MB, 16 by default; 0: none forced dedicated)
+    static const uint64_t big = (uint64_t)(getenv("RX_VK_BIG_IMAGE_MB") ? std::max(0, atoi(getenv("RX_VK_BIG_IMAGE_MB"))) : 16) << 20;
+    return big;
+}
+void log_alloc_where(const char* what, VmaAllocation allocation) {
+    if (!allocation) return;
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(vma, allocation, &info);
+    const VkMemoryType& t = dev.memory.memoryTypes[info.memoryType];
+    const VkMemoryPropertyFlags f = t.propertyFlags;
+    logf("vk: %s: %llu KB in memory type %u, heap %u (%s)%s%s%s", what, (unsigned long long)(info.size >> 10), info.memoryType,
+         t.heapIndex, (dev.memory.memoryHeaps[t.heapIndex].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) ? "device" : "system",
+         (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? " device-local" : "", (f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ? " host-visible" : "",
+         (f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) ? " cached" : "");
+}
+void vma_ledger_stats(uint64_t out[8]) {
+    for (int i = 0; i < 8; i++) out[i] = 0;
+    for (int k = 0; k < 2; k++) {
+        const VmaPool pool = k ? target_image_pool : image_pool;
+        if (!pool) continue;
+        VmaDetailedStatistics d{};
+        vmaCalculatePoolStatistics(vma, pool, &d);
+        out[2 * k] += d.statistics.blockBytes, out[2 * k + 1] += d.statistics.allocationBytes;
+    }
+    VmaBudget b[VK_MAX_MEMORY_HEAPS]{};
+    vmaGetHeapBudgets(vma, b);
+    for (uint32_t h = 0; h < dev.memory.memoryHeapCount; h++)
+        if (dev.memory.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            out[4] += b[h].statistics.blockBytes, out[5] += b[h].statistics.allocationBytes, out[6] += b[h].usage, out[7] += b[h].budget;
 }
 uint64_t allocation_size(VmaAllocation allocation) {
     VmaAllocationInfo info{};
@@ -356,6 +495,8 @@ bool create_buffer(uint64_t size, VkBufferUsageFlags usage, bool host_visible, V
     if (dedicated && !blocks) ai.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
     VmaAllocationInfo info{};
     if (vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, &info) != VK_SUCCESS) return false;
+    tag_mapped(info, mem_kind_tag);
+    note_alloc(allocation, mem_kind_tag);
     if (mapped) *mapped = info.pMappedData;
     return true;
 }
@@ -372,6 +513,8 @@ bool create_buffer_cached(uint64_t size, VkBufferUsageFlags usage, VkBuffer& buf
     if (dedicated) ai.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;   // (its own memory object: no part of a 64 MB block left unused)
     VmaAllocationInfo info{};
     if (vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, &info) != VK_SUCCESS) return false;
+    tag_mapped(info, mem_kind_tag);
+    note_alloc(allocation, mem_kind_tag);
     if (mapped) *mapped = info.pMappedData;
     return true;
 }
@@ -401,6 +544,7 @@ bool invalidate_mapped_checked(VmaAllocation allocation, uint64_t size) {
     return !size || vmaInvalidateAllocation(vma, allocation, 0, size) == VK_SUCCESS;
 }
 void destroy_buffer(VkBuffer buffer, VmaAllocation allocation) {
+    note_free(allocation);
     vmaDestroyBuffer(vma, buffer, allocation);
 }
 bool create_device_buffer(uint64_t size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& allocation, bool dedicated) {
@@ -412,7 +556,9 @@ bool create_device_buffer(uint64_t size, VkBufferUsageFlags usage, VkBuffer& buf
     ai.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     if (dev.memory_budget) ai.flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
     if (dedicated) ai.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
-    return vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, nullptr) == VK_SUCCESS;
+    if (vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, nullptr) != VK_SUCCESS) return false;
+    note_alloc(allocation, mem_kind_tag);
+    return true;
 }
 /// (hookshot, RX_VK_MIRROR_SPARSE) A buffer with sparse residency and no memory: its blocks are bound one by one
 /// (vk_memory.cpp, sparse_mirror.h). req: its size, block (alignment) and memory types

@@ -1419,6 +1419,12 @@ uint64_t translator_stamp() {
         add(mma_order_b.data(), sizeof(uint32_t) * mma_order_b.size());
         add(mma_order_c.data(), sizeof(uint32_t) * mma_order_c.size());
     }
+    // (hookshot: and whether a float add is the GPU's own atomic (make_profile): a program made with OpAtomicFAddEXT is no use
+    // to a GPU without it. Added only when it is, so that the stamp of every GPU that keeps the loop is what it was)
+    if (dev.float_atomic_add) {
+        const uint32_t float_add = 1;
+        add(&float_add, sizeof float_add);
+    }
     // (and whether a float add is the GPU's own atomic (make_profile): a program made with OpAtomicFAddEXT is no use to a GPU
     // without it, nor one made with RX_VK_NATIVE_FADD=0's loop wanted back once it is native again)
     const uint32_t float_add = profile().support_float32_atomic_add ? 1u : 0u;
@@ -2784,6 +2790,26 @@ const Program* program_find(uint64_t key, uint64_t variant) {
     for (auto& p : it->second)
         if (p->variant == variant && p->ready.load(std::memory_order_acquire) && !p->failed) return p.get();
     return nullptr;
+}
+
+bool program_variant_kept(uint64_t key, uint64_t variant) {
+    std::unordered_set<uint64_t> have;
+    loaded_variants(key, &have);
+    if (have.count(variant)) return true;
+    std::lock_guard lk(disk_mu);
+    const auto it = disk_records.find(key);
+    if (it == disk_records.end() || !disk_in) return false;
+    for (const DiskRecord& d : it->second) {
+        std::vector<uint8_t> data(std::min<size_t>(d.size, 1 << 16));   // (the answers come first)
+        _fseeki64(disk_in, d.at, SEEK_SET);
+        if (fread(data.data(), 1, data.size(), disk_in) != data.size()) continue;
+        Reader rd{data.data(), data.data() + data.size()};
+        Program q;
+        rd.get<uint32_t>();
+        rd.list(q.answers);
+        if (!rd.bad && answers_hash(q) == variant) return true;
+    }
+    return false;
 }
 
 void shader_stats(int64_t* translated, int64_t* failed) {

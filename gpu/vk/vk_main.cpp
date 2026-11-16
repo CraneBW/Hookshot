@@ -33,6 +33,7 @@ static_assert(mkwvk::kQueueGraphics == VK_QUEUE_GRAPHICS_BIT && mkwvk::kQueueCom
 #include "vk_reflex.h"
 #include "vk_antilag.h"
 #include "vk_progress.h"
+#include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 #include "vk_programs.h"
 #include "mesh_mode.h"
 #include "crash_markers.h"   // (mkwvk_close_asked: a close is not a crash)
@@ -96,7 +97,7 @@ std::string options_path() {
     }
     return game_folder_path() + "hookshot_options.ini";
 }
-int64_t prof_ns[PROF_COUNT];
+SplitCount prof_ns[PROF_COUNT];
 Device dev;
 PFN_vkGetInstanceProcAddr instance_proc() { return vkx::instance_proc_addr(); }
 /// (hookshot) The driver as it names itself (VkPhysicalDeviceDriverProperties: "NVIDIA 580.95.05", "radv Mesa 25.2.4"), else its
@@ -431,6 +432,7 @@ bool create_device() {
     optional(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME, dev.stencil_export);
     optional(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, dev.memory_budget);
     optional(VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME, dev.view_2d_of_3d);
+    dev.pci_bus_info = has_extension(exts, VK_EXT_PCI_BUS_INFO_EXTENSION_NAME);   // (properties only: nothing to enable)
     // (hookshot) on by default: with a marker before each draw and dispatch the device has not been lost (five
     // runs); without them it was, every run, shortly after OoT's first gameplay frames (nvlddmkm event 153; the
     // extension alone, RX_VK_CHECKPOINTS=ext, did not keep it). The race they hide is not found yet.
@@ -458,6 +460,31 @@ bool create_device() {
     bool atomic_float = false;
     if (fadd_wanted) optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, atomic_float);
     optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, dev.swap_mutable);   // (hookshot: the overlays, vk_imgui.cpp)
+    if (getenv("RX_VK_TL") || getenv("RX_VK_TL_S")) optional(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME, dev.calibrated_ts);   // (stream R2: the timeline's GPU side)
+#ifndef _WIN32
+    // (Linux) tl_gpu_dump asks for the device's and the host clock's time (vk_tl_clock.h: CLOCK_MONOTONIC, the shim's
+    // QueryPerformanceCounter); a domain the device does not list may not be asked for, so the GPU side (and RX_VK_TL_PROBE) is off
+    if (dev.calibrated_ts) {
+        const auto domains_fn = (PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT)instance_proc()(dev.instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT");
+        uint32_t nd = 0;
+        VkTimeDomainEXT domains[16];
+        if (domains_fn && domains_fn(dev.physical, &nd, nullptr) == VK_SUCCESS) {
+            nd = std::min<uint32_t>(nd, 16);
+            if (domains_fn(dev.physical, &nd, domains) < 0) nd = 0;
+        } else {
+            nd = 0;
+        }
+        std::string names;
+        for (uint32_t i = 0; i < nd; i++) names += std::string(i ? ", " : "") + tl_time_domain_name(domains[i]);
+        if (tl_time_domains_usable(domains, nd)) {
+            logf("vk: tl: GPU side calibrated against %s (domains: %s)", tl_time_domain_name(tl_host_time_domain()), names.c_str());
+        } else {
+            logf("vk: tl: GPU side off: the device lists no %s time domain beside DEVICE (domains: %s)", tl_time_domain_name(tl_host_time_domain()),
+                 names.empty() ? "none" : names.c_str());
+            dev.calibrated_ts = false;
+        }
+    }
+#endif
     dlss_device_extensions(want, exts);   // (hookshot: NVIDIA DLSS's, vk_dlss.cpp)
     dlss_fg_device_extensions(want, exts);   // (hookshot: NVIDIA DLSS Frame Generation's through NGX, asked of NGX)
     bool fsr_descriptor_buffer = false;   // (hookshot, linux: only with a Vulkan FSR 4 library beside the game, vk_fsr4.cpp)
@@ -479,8 +506,10 @@ bool create_device() {
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     q.queueFamilyIndex = dev.queue_family;
+    const float replay_priorities[2] = {getenv("RX_VK_QUEUE_PRIO") ? (float)atof(getenv("RX_VK_QUEUE_PRIO")) : 1.0f, 1.0f};   // (stream R2: RX_VK_QUEUE_PRIO, a diagnostic)
     q.queueCount = 1;
-    q.pQueuePriorities = &priority;
+    if (getenv("RX_VK_TL_PROBE") && atoi(getenv("RX_VK_TL_PROBE")) >= 2 && families[dev.queue_family].queueCount >= 2) q.queueCount = 2;   // (stream R2)
+    q.pQueuePriorities = replay_priorities;
     // (hookshot) The presents on a queue of a compute family of their own, beside the replay's (RX_VK_PRESENT_QUEUE=1 / 0: on /
     // off; on by default with NVIDIA's driver on Windows, where it was measured). On the replay's queue vkQueuePresentKHR blocked
     // with dev.present_mu held, ~0.8 ms a present with frame interpolation at 4x and up to 8, and the game's main and presentation
@@ -811,6 +840,8 @@ bool create_device() {
     programs_load_decide(dev.mesh_shader && !dev.mesh_fallback && !dev.task_mesh_fallback);
     guard_shader_modules();   // (hookshot)
     vkGetDeviceQueue(dev.device, dev.queue_family, 0, &dev.queue);
+    dev.probe_queue = VK_NULL_HANDLE;
+    if (q.queueCount >= 2) vkGetDeviceQueue(dev.device, dev.queue_family, 1, &dev.probe_queue);
     dev.sparse_queue = VK_NULL_HANDLE;
     if (dev.sparse_buffers) {
         if (own_family_sparse) dev.sparse_queue = dev.queue;
