@@ -395,6 +395,22 @@ public partial class MainWindow : Window
         Application.Current.Shutdown();
     }
 
+    // ---- Mods + Editor (ToolsPage): the game folder's mods and its saves; Back comes back to the page it was opened from, and
+    // Save and play starts the game as Play does there ----
+    void OpenTools(string folder, FrameworkElement from, Action<string> play)
+    {
+        ToolsPage.Back = () => ShowPage(from);
+        ToolsPage.Play = play;
+        ToolsPage.Open(Tools.Find(), folder);
+        ShowPage(ToolsPage);
+    }
+
+    void LaunchToolsClick(object sender, RoutedEventArgs e) =>
+        OpenTools(launchFolder, LaunchPage, folder => { StartGame(folder); Application.Current.Shutdown(); });
+
+    void ReadyToolsClick(object sender, RoutedEventArgs e) =>
+        OpenTools(finished, ReadyPage, folder => { ShowPage(ReadyPage); StartGame(folder); WindowState = WindowState.Minimized; });
+
     void LaunchFolderClick(object sender, RoutedEventArgs e) =>
         Process.Start(new ProcessStartInfo(launchFolder) { UseShellExecute = true });
 
@@ -655,7 +671,7 @@ public partial class MainWindow : Window
 
     void ShowPage(FrameworkElement page)
     {
-        foreach (var p in new FrameworkElement[] { FilesPage, BuildPage, ReadyPage, ProblemPage, LaunchPage })
+        foreach (var p in new FrameworkElement[] { FilesPage, BuildPage, ReadyPage, ProblemPage, LaunchPage, ToolsPage })
             p.Visibility = p == page ? Visibility.Visible : Visibility.Collapsed;
         page.Opacity = 0;
         page.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(250)));

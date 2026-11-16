@@ -1,6 +1,7 @@
 <Window x:Class="HookshotBuilder.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:HookshotBuilder"
         Title="Hookshot" Width="960" Height="600" ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen" Background="Transparent" AllowDrop="True"
         UseLayoutRounding="True" SnapsToDevicePixels="True" FontFamily="{StaticResource Ui}">
@@ -306,6 +307,14 @@
                 <TextBlock x:Name="PlayText" Text="Play" FontSize="16" FontWeight="Bold" Foreground="{StaticResource GoInk}"/>
               </StackPanel>
             </Button>
+            <!-- (Mods + Editor: the mods and the save editor, ToolsPage) -->
+            <Button Style="{StaticResource Quiet}" Height="50" Padding="22,0" Margin="12,0,0,0" AutomationProperties.Name="Mods + Editor" Click="ReadyToolsClick">
+              <StackPanel Orientation="Horizontal">
+                <Path Data="M2,2 L7,2 L7,7 L2,7 Z M9,2 L14,2 L14,7 L9,7 Z M2,9 L7,9 L7,14 L2,14 Z M9,9 L14,9 L14,14 L9,14 Z" Fill="{StaticResource InkSoft}"
+                      VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBlock Text="Mods + Editor" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
+              </StackPanel>
+            </Button>
             <Button x:Name="OpenButton" Style="{StaticResource Quiet}" Height="50" Margin="12,0,0,0" Content="Open folder" Click="OpenFolder"/>
           </StackPanel>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
@@ -338,6 +347,14 @@
                 <TextBlock Text="Play" FontSize="16" FontWeight="Bold" Foreground="{StaticResource GoInk}"/>
               </StackPanel>
             </Button>
+            <!-- (Mods + Editor: the mods and the save editor, ToolsPage) -->
+            <Button Style="{StaticResource Quiet}" Height="50" Padding="22,0" Margin="12,0,0,0" AutomationProperties.Name="Mods + Editor" Click="LaunchToolsClick">
+              <StackPanel Orientation="Horizontal">
+                <Path Data="M2,2 L7,2 L7,7 L2,7 Z M9,2 L14,2 L14,7 L9,7 Z M2,9 L7,9 L7,14 L2,14 Z M9,9 L14,9 L14,14 L9,14 Z" Fill="{StaticResource InkSoft}"
+                      VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBlock Text="Mods + Editor" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
+              </StackPanel>
+            </Button>
           </StackPanel>
           <Button x:Name="LaunchFolder" Style="{StaticResource LinkButton}" Foreground="{StaticResource InkFaint}" HorizontalAlignment="Center"
                   Margin="0,22,0,0" Content="Open the game folder" Click="LaunchFolderClick"/>
@@ -349,6 +366,9 @@
         </StackPanel>
 
         <!-- ===== when something goes wrong ===== -->
+        <!-- ===== Mods + Editor (ToolsPage.xaml), from the ready page or the launcher ===== -->
+        <local:ToolsPage x:Name="ToolsPage" Visibility="Collapsed"/>
+
         <Grid x:Name="ProblemPage" Visibility="Collapsed">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
