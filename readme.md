@@ -332,7 +332,9 @@ have them, the DLSS model where DLSS does not run. HDR paper white and
 HDR peak brightness show only while HDR is on, the HDR tone mapper only with HDR set to Native.
 
 The Graphics tab groups its rows under section titles: Resolution and upscaling, Frame generation and latency, Screen,
-HDR, Detail, and GPU and memory (last: the rows to change when something is wrong). The table lists them in that order.
+HDR, Detail, and GPU and memory (last: the rows to change when something is wrong). The Gameplay tab's are Game,
+Text and language, Screen, and System (Discord status, Bug report, Restart and Quit); the Controls tab's Controller,
+Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order.
 
 | Tab | Option | Choices | Default |
 |---|---|---|---|
@@ -376,33 +378,37 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | FPS counter details | Opens the FPS counter details page: Version and hardware at every level (Off, On; Off), then a line each of the Dev level (VRAM, Textures, Draws, Dispatches, Render passes, Draws skipped, Texture uploads, Pipelines built, GPU slot waits, Queue submits, Write-backs) and the CPU and GPU lines (Off, On; On) | Version and hardware off, every line on |
 | | Menu size | Small, Medium, Large | Medium |
 | | Game speed | Per frame, Real time | Real time |
+| | Microphone | Off, Default, or each microphone by name | Default |
+| Gameplay | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
+| | Skip title screen | Off, On (after a restart) | Off |
+| | Skip opening | Off, On (skips the new-game opening: the story movie and Navi waking Link; later cutscenes and the title screen stay) | Off |
 | | Text speed | Normal, 2x, 4x, Instant | Normal |
 | | Text size | Original, 110%, 125%, 150%, 175% (dialogue, Navi and signs) | Original |
-| | Skip title screen | Off, On (after a restart) | Off |
-| | Microphone | Off, Default, or each microphone by name | Default |
 | | Game language | The game's 16 languages, each by its own name (after a restart) | The one built with |
 | | Menu language | Auto (the game's language), or English, Português (Brasil), Español (Latinoamérica), Español (España), Français, Deutsch, Italiano, Nederlands, Polski, Русский, 日本語, 한국어, 简体中文, 繁體中文 | Auto |
+| | FPS counter | Off, FPS, Frame time, Graph, Breakdown | Off |
+| | FPS counter position | Top right, Top left, Bottom right, Bottom left | Top right |
+| | Menu size | Small, Medium, Large | Medium |
 | | Discord status | Off, On ("Playing Hookshot" and the time played in your Discord status, while Discord runs on this PC) | On |
-| | Skip opening | Off, On (skips the new-game opening: the story movie and Navi waking Link; later cutscenes and the title screen stay) | Off |
 | | Bug report | Saves a report into a new folder in `bug-reports` (below) | |
-| Controls | Controller in background | Off, On | Off |
-| | Mouse camera | As the stick, Native | As the stick |
-| | Disable camera centering | Off, On | Off |
-| | Mouse sensitivity | 0.10 to 5.00 | 1.00 |
-| | Invert mouse vertical | Off, On | Off |
-| | Invert camera X | Off, On | Off |
-| | Invert camera Y | Off, On | Off |
-| | Camera speed | 50% to 400%, in steps of 25 | 100% |
-| | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |
-| | Auto run | Off, On | Off |
-| | Rumble strength | Off, 25% to 150%, in steps of 25 | 100% |
+| Controls | Controls | Opens the Controls page | |
 | | Layout preset | Nintendo (Def), Xbox / PC, Swap Face, Custom (on the Controls page) | Nintendo (Def) |
 | | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck (on the Controls page) | Auto |
+| | Controller in background | Off, On | Off |
+| | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |
+| | Rumble strength | Off, 25% to 150%, in steps of 25 | 100% |
 | | Motion | Opens the Motion page: Motion controls (Off, On; On), Motion sensitivity X (10% to 600%) and Y (10% to 300%; 100%), Invert motion X and Y (Off, On; Off), Motion deadzone (Low, Standard, High; Standard) | |
+| | Camera speed | 50% to 400%, in steps of 25 | 100% |
+| | Invert camera X | Off, On | Off |
+| | Invert camera Y | Off, On | Off |
+| | Disable camera centering | Off, On | Off |
+| | Mouse camera | As the stick, Native | As the stick |
+| | Mouse sensitivity | 0.10 to 5.00 | 1.00 |
+| | Invert mouse vertical | Off, On | Off |
+| | Auto run | Off, On | Off |
 | | Walk mode | Hold, Toggle | Hold |
 | | Walk speed | 15% to 90%, in steps of 5 | 45% |
-| | Controls | Opens the Controls page | |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
 | Debug | Debug tools | Off, On (the tools below it while on) | Off |
