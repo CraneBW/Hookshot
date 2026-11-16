@@ -141,6 +141,8 @@ bool shader_key_on();
 /// the next start after a translator change can tell by a sample of programs how many of them come out differently)
 void program_fingerprinted(uint64_t fp);
 size_t program_cache_kept();   // (hookshot) program keys in the cache now, SIZE_MAX: no cache
+/// (hookshot) RX_VK_MESH_FB_LAYOUT, read once (mesh_mode.h mesh_rule::fb_layout): the compute fallback's record layout
+uint32_t mesh_fallback_layout();
 size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const std::function<void(Program&)>& fn,
                                bool computes = true, bool fallbacks = false);   // (computes: and every kept compute program)
 /// The precompile of every shader of the game (hookshot_shaders.bin, from nx2/shader_census.py): how many programs it names, 0: none
