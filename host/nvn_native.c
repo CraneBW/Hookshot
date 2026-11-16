@@ -924,8 +924,19 @@ static void texels(Ctx *c, int write, int strided) {
                 (unsigned long long)chain[0], (unsigned long long)chain[1], (unsigned long long)chain[2],
                 (unsigned long long)chain[3], (unsigned long long)chain[4], (unsigned long long)chain[5]);
     }
+    /* (hookshot) Both wait for the replay before they touch the texture (vk_replay.cpp finish(), then replay_mu): behind
+       the submissions another thread is replaying, and for the GPU. The virtual core is given up for that, as
+       nvnQueueFinish gives it up for the same wait: nothing here runs guest code. With the core kept, the thread that
+       writes a texture while a save loads on a Steam Deck LCD (a ModuleSystemWorker, or sead::MainThread) held its core
+       for 0.5 to 5.4 s behind the first submissions (pools imported, shaders translated), and in 4 of 8 sampled launches
+       a thread that runs on that core only waited for all of it, the audio's among them; over 2 s that is the escape
+       (`vcores: ... ran without a core`). HOS_TEXELS_HOLD_CORE=1: the core kept, as before */
+    static int holds = -1;
+    if (holds < 0) holds = env_on("HOS_TEXELS_HOLD_CORE");
+    const int away = holds ? 0 : hos_vcore_away();
     if (write) rx_nvn_write_texels(t, level, layer0, r, data, row, img), watch_texels_source(t, data, img);
     else rx_nvn_read_texels(t, level, layer0, r, data, row, img);
+    if (away) hos_vcore_back();
 }
 NV(nvnTextureReadTexels) { texels(c, 0, 0); }
 NV(nvnTextureReadTexelsStrided) { texels(c, 0, 1); }
