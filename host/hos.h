@@ -14,6 +14,7 @@
 #define HOS_H
 #include "a64.h"
 #include <stdarg.h>
+#include <stddef.h>
 
 /* HOS_HLE_STATS=1 (off by default): each HLE function counts its calls, and hos_hostcall.c logs every 5 s how often each
    ran. Off, a call costs a test of the switch and a branch more: the counted arm is a tail call, so the function saves
@@ -67,6 +68,14 @@ int hos_game_is_mkw(void);
 #define HOS_GAME_TITLE "Hookshot"
 uint64_t hos_used_memory(uint64_t base);   /* (hos_mem.c) base + heap + the game's mapped pages: the used memory it is told */
 int hos_commit(uint64_t addr, uint64_t size);          /* (mkw_glue.c) guest pages made usable by host APIs: 1, or 0 if refused */
+/* (mkw_glue.c) host memory the game cannot go on without: never NULL (but for 0 bytes). At the commit limit a failed
+   allocation is tried again for up to 5 s, as a guest commit is; then the out-of-memory line and notice, and the game stops.
+   what names it in the log. hos_out_of_memory: that line and notice, once a run (wait: shown here, or waited for, before the
+   caller stops the game) */
+void *hos_xmalloc(size_t size, const char *what);
+void *hos_xcalloc(size_t count, size_t size, const char *what);
+void *hos_xrealloc(void *old, size_t size, const char *what);
+void hos_out_of_memory(int wait);
 int hos_mem_region(uint64_t addr, uint64_t size);      /* (hos_mem.c) the control bridge: 0 if not wholly in mapped guest memory */
 /* (Hookshot) 1: the heap and the address regions are reserved when the game asks for them and committed where they are
    first touched (mkw_glue.c commit_on_touch), instead of whole. A system call given a guest buffer needs hos_commit on
