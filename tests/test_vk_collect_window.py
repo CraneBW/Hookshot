@@ -136,6 +136,8 @@ int cap_only_gpu() { return 0; }
 bool cap_excl_hit(uint64_t, uint64_t) { return false; }
 void cap_born_take(std::vector<std::pair<uint64_t, uint64_t>>&) {}
 void memory_stamp(uint64_t, uint64_t) {}
+uint32_t early_check_collect_begin() { return 0; }   // (RX_VK_LOG_EARLY_CHECK off)
+void early_check_cpu_pages(const uint32_t*, int64_t, bool, uint32_t) {}
 @WALK@
 @COLLECT@
 @SCAN@
