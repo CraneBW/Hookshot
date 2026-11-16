@@ -100,10 +100,14 @@ The emulator's save is backed up before it's replaced. The launcher doesn't expo
 
 | Installation | Your saves | The launcher's backups |
 |---|---|---|
-| Windows, pictured nightly Launcher, installed | `%APPDATA%\Hookshot\save\` | `%LOCALAPPDATA%\Hookshot\oot-save-backups` |
+| Windows, pictured nightly Launcher, installed | `%APPDATA%\Hookshot\save\` (normally `%USERPROFILE%\AppData\Roaming\Hookshot\save\`) | `%LOCALAPPDATA%\Hookshot\oot-save-backups` |
 | Windows, pictured nightly Launcher, portable | `LongshotLauncher-data\user\save\` beside the launcher | `LongshotLauncher-data\save-backups\` beside the launcher |
-| Windows, Launcher v1.0.0-rc.3 or game started directly | `<game folder>\user\save\` (the game folder is `%USERPROFILE%\Games\Hookshot` unless you chose another) | `%LOCALAPPDATA%\Hookshot\oot-save-backups`; a portable launcher's backups are in `LongshotLauncher-data\save-backups\` beside it |
+| Windows, Launcher v1.0.0-rc.3 or game started directly without `--user` | `<game folder>\user\save\` (the game folder is `%USERPROFILE%\Games\Hookshot` unless you chose another) | `%LOCALAPPDATA%\Hookshot\oot-save-backups`; a portable launcher's backups are in `LongshotLauncher-data\save-backups\` beside it |
 | Linux and Steam Deck | `~/.local/share/hookshot/save/` | `~/.local/share/hookshot/save-backup/` (a launcher from before [LongshotLauncher#80](https://git.notrexed.dev/Hookshot/HookshotLauncher/pulls/80), and `scripts/hookshot_saves.py`: `~/.local/share/oot-save-backups`) |
+
+On Windows with the installed nightly Launcher, paste `%APPDATA%\Hookshot\save\` into File Explorer's address bar
+and press **Enter**. `%APPDATA%` is your **Roaming** folder; `%LOCALAPPDATA%` is **Local**, where the launcher keeps backups.
+Starting `hookshot.exe` directly without `--user` does not use the launcher's shared save folder.
 
 To keep your own copy, copy the save folder while the game is closed. Keep save files private.
 
