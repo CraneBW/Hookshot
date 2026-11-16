@@ -303,6 +303,13 @@ static int host_take_text(int focus, uint32_t *out, int max) {
 
 /* (hookshot) the game's freed address space inside [lo, hi), decommitted (hos_mem.c): the back end's ranges no import holds */
 uint64_t hos_region_release_gaps(uint64_t lo, uint64_t hi);
+/* (hookshot) the Mods tab: host/mods.c, host/cheats.c */
+int hos_mod_info(int i, const char **name, const char **detail, const char **note, int *enabled);
+void hos_mod_edit(int i, int op);
+uint64_t hos_mods_changed(void);
+int hos_cheat_info(int i, const char **name, const char **mod, const char **note, int *kind, int *on);
+void hos_cheat_set(int i, int on);
+
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -315,6 +322,7 @@ static const MkwVkHost vk_host = {
     host_take_text,
     hos_region_release_gaps,
     hos_options_file,
+    hos_mod_info, hos_mod_edit, hos_mods_changed, hos_cheat_info, hos_cheat_set,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */

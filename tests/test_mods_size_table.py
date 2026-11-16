@@ -255,7 +255,7 @@ def routing_checks(cc, tmp, zstandard, host):
     posix = (ROOT / "host/posix/win32_posix.c").read_text(encoding="utf-8")
     src = tmp / "src"
     src.mkdir(parents=True)
-    for f in ("mods.c", "prompts.c", "texts.c"):   # (beside a hos.h of the test's: hos_log, and what the live prompts read: none
+    for f in ("mods.c", "prompts.c", "texts.c", "zs.c"):   # (beside a hos.h of the test's: hos_log, and what the live prompts read: none
                                                    # here; texts.c: mods.c asks it for a path no mod and no prompt has)
         (src / f).write_bytes((host / f).read_bytes())
     (src / "hos.h").write_text("#pragma once\n#include <stddef.h>\n#include <stdint.h>\nvoid hos_log(const char *f, ...);\n"
@@ -302,6 +302,7 @@ void hos_text_picture_unlock(void) {}
 uint64_t hos_call_guest_kept(uint64_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
     (void)fn; (void)a0; (void)a1; (void)a2; (void)a3; return 0;
 }
+const char *hos_romfs_dir;   /* (no game RomFS here: mods.c merges no table of its own, the last mod's is the base) */
 int rx_option(int id, int otherwise) { (void)id; return otherwise; }
 void hos_mods_init(const char *image_path);
 int hos_mods_romfs(const char *rel, char *out, size_t cap);
@@ -321,7 +322,7 @@ int main(int argc, char **argv) {
     exe = tmp / "fixture"
     subprocess.run([cc, "-std=gnu11", "-D_GNU_SOURCE", "-DZSTD_DISABLE_ASM", "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0",
                     "-I", str(ROOT / "host"), "-I", str(ROOT / "host/posix"), "-I", str(ZSTD), str(src / "mods.c"),
-                    str(src / "prompts.c"), str(src / "texts.c"), str(tmp / "posix.c"), str(tmp / "main.c"),
+                    str(src / "prompts.c"), str(src / "texts.c"), str(src / "zs.c"), str(ROOT / "host/restbl.c"), str(tmp / "posix.c"), str(tmp / "main.c"),
                     *(str(ZSTD / f) for f in ZSTD_SOURCES), "-o", str(exe)], check=True)
 
     documented_example_checks(exe, tmp / "documented-example")
