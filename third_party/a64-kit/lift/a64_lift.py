@@ -729,16 +729,49 @@ def ff_min():
 
 def ff_eligible(text):
     """an instruction's C text may sit inside a fast float region: no store, control flow or system state; only pure calls"""
-    if any(b in FF_FP_OK.sub("", text) for b in FF_BAD):
+    rest = FF_FP_OK.sub("", text)   # (hookshot: once, not once for each of FF_BAD's words)
+    if any(b in rest for b in FF_BAD):
         return False
     return all(n in FF_PURE or n.startswith(("a64_fpx_", "a64_vfpx_")) for n in FF_CALL.findall(text))
+
+
+# (hookshot) the emit asks these of every instruction of every function, ~13 million times in a lift of OoT, of far fewer
+# distinct instruction texts: each answer is kept by its text (the same C, byte for byte; the lift a third quicker on Windows)
+_ff_joins = {}
+_ff_convs = {}
+_fp_frames = {}
+
+
+def ff_joins(text, dead):
+    """ff_eligible of an instruction's text with the flag stores dead there dropped (dead: the mask, None for none), by both"""
+    j = _ff_joins.get((text, dead))
+    if j is None:
+        j = _ff_joins[(text, dead)] = ff_eligible(drop_flag_stores(text, dead) if dead is not None else text)
+    return j
+
+
+def ff_convs(text):
+    """the float ops ff_region can make fast in one instruction's text (FF_CONV's matches)"""
+    n = _ff_convs.get(text)
+    if n is None:
+        n = _ff_convs[text] = len(FF_CONV.findall(text))
+    return n
+
+
+def fp_is_frame_kept(text):
+    """fp_is_frame, kept by the text (two regex searches each, asked of every instruction)"""
+    f = _fp_frames.get(text)
+    if f is None:
+        f = _fp_frames[text] = fp_is_frame(text)
+    return f
 
 
 def ff_region(items):
     """a run's C text ([(pc, text)], every text ff_eligible): the fast and exact copies, or the exact text alone when the
     run has too few float ops to pay for its check. (text, number of ops made fast)"""
     exact = "\n".join(t for _, t in items)
-    n = len(FF_CONV.findall(exact))
+    # (FF_CONV's matches are in one instruction's text each, so the run's count is their sum)
+    n = sum(ff_convs(t) for _, t in items)
     if n < ff_min():
         return exact, 0
     fast = FF_CONV.sub(lambda m: "a64_ff_v%s(" % m.group(1) if m.group(1) else "a64_ff_%s(" % m.group(2), exact)
@@ -2020,7 +2053,7 @@ class Lifter:
             if ff and kind == "op" and pc not in self.after and not (pc in labels or (pc == e and e in labels)):
                 t, f = texts[(w, pc) if pc_relative(w) else w]
                 if not f & (a64emit.UNHANDLED | a64emit.TERMINATOR):
-                    joins = ff_eligible(drop_flag_stores(t, dead[pc]) if pc in dead else t)
+                    joins = ff_joins(t, dead[pc] if pc in dead else None)
             if not joins:
                 flush()
             if pc in labels or (pc == e and e in labels):
@@ -2039,7 +2072,7 @@ class Lifter:
                 elif flags & a64emit.TERMINATOR:
                     raise SystemExit("a64emit closed a block at %#x (%08x): classify() must handle it" % (pc, w))
                 else:
-                    if frame and not fp_is_frame(text):
+                    if frame and not fp_is_frame_kept(text):
                         frame = False
                     if pc in dead:
                         text = drop_flag_stores(text, dead[pc])
