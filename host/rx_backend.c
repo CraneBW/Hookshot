@@ -69,7 +69,78 @@ int hos_gpu_guest_ranges(uint64_t (*out)[2], int max);
 /* The soft write watch's marks (rt/a64.h A64_MARK, hos_mark_written) over the GPU-visible ranges, read and cleared:
    the Vulkan back end's own collection (gpu/render's rx_collect_written works only with the WebGPU renderer started).
    One consumer: with Vulkan the WebGPU renderer never runs. */
+/* (Hookshot, TICK-061, C2) RX_VK_COLLECT_FAST=1 (off by default): the same scan with unaligned loads at the ranges' edges.
+   collect_in below skips clean marks 256, 32 or 8 at a time only from a page number aligned to that size, so each of the
+   ~1,500 capture ranges (and ~760 the replay collects) began and ended with up to ~17 single-page atomic loads: the scan took
+   0.05-0.07 ms for ~830 KB of marks, twice a submit, six submits a frame. Here the blocks are read wherever the walk is (the
+   marks are bytes: no alignment is needed, memcpy into words is an unaligned load), and only a non-zero byte of a non-zero
+   block is exchanged.
+   Same result: a page is taken when its mark reads non-zero and the exchange that clears it returns non-zero (acquire), in
+   ascending page order within a range and in range order, as collect_in. A mark the game sets after the block was read is left
+   for the next scan, as collect_in leaves a mark set after its own load of that byte (the scan was never a snapshot: it reads
+   marks one after another while the game runs). The block reads are plain loads of bytes others store atomically, as
+   collect_in's skip checks always were (x86-64: a byte load is atomic). tests/test_collect_fast.py compares the page lists. */
+static int collect_fast_on(void) {
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("RX_VK_COLLECT_FAST");
+        v = e && atoi(e) != 0;
+    }
+    return v;
+}
+static inline void collect_take(uint64_t p, uint32_t **out, size_t *n, size_t *cap) {
+    if (__atomic_exchange_n(&a64_dirty[p], 0, __ATOMIC_ACQUIRE)) {
+        if (*n == *cap) *out = realloc(*out, (*cap *= 2) * sizeof **out);
+        (*out)[(*n)++] = (uint32_t)p;
+    }
+}
+static int64_t collect_in_fast(const uint64_t (*ranges)[2], int nranges, uint32_t **pages) {
+    size_t n = 0, cap = 4096;
+    uint32_t *out = malloc(cap * sizeof *out);
+    for (int r = 0; r < nranges; r++) {
+        const uint64_t lo = ranges[r][0], hi = ranges[r][1] < hos_guest_size() ? ranges[r][1] : hos_guest_size();
+        uint64_t p1 = (hi + 4095) >> 12;
+        if (p1 > A64_DIRTY_PAGES) p1 = A64_DIRTY_PAGES;
+        uint64_t p = lo >> 12;
+        while (p < p1) {
+            if (p + 256 <= p1) {   /* (256 pages a look; the marked bytes taken from the block as read) */
+                uint64_t w[32], any = 0;
+                memcpy(w, &a64_dirty[p], 256);
+                for (int k = 0; k < 32; k++) any |= w[k];
+                if (any)
+                    for (int k = 0; k < 32; k++)
+                        for (int b = 0; w[k] && b < 8; b++)
+                            if ((w[k] >> (8 * b)) & 0xFF) collect_take(p + 8 * k + b, &out, &n, &cap);
+                p += 256;
+                continue;
+            }
+            if (p + 32 <= p1) {   /* (32 pages a load; the marked bytes of a block taken from the block as read) */
+                uint64_t w[4];
+                memcpy(w, &a64_dirty[p], 32);
+                if (w[0] | w[1] | w[2] | w[3])
+                    for (int k = 0; k < 4; k++)
+                        for (int b = 0; w[k] && b < 8; b++)
+                            if ((w[k] >> (8 * b)) & 0xFF) collect_take(p + 8 * k + b, &out, &n, &cap);
+                p += 32;
+                continue;
+            }
+            if (p + 8 <= p1) {
+                uint64_t w;
+                memcpy(&w, &a64_dirty[p], 8);
+                for (int b = 0; w && b < 8; b++)
+                    if ((w >> (8 * b)) & 0xFF) collect_take(p + b, &out, &n, &cap);
+                p += 8;
+                continue;
+            }
+            if (__atomic_load_n(&a64_dirty[p], __ATOMIC_RELAXED)) collect_take(p, &out, &n, &cap);
+            p++;
+        }
+    }
+    *pages = out;
+    return (int64_t)n;
+}
 static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **pages) {
+    if (collect_fast_on()) return collect_in_fast(ranges, nranges, pages);
     size_t n = 0, cap = 4096;
     uint32_t *out = malloc(cap * sizeof *out);
     for (int r = 0; r < nranges; r++) {
@@ -77,6 +148,15 @@ static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **p
         uint64_t p1 = (hi + 4095) >> 12;
         if (p1 > A64_DIRTY_PAGES) p1 = A64_DIRTY_PAGES;
         for (uint64_t p = lo >> 12; p < p1;) {
+            if (!(p & 255) && p + 256 <= p1) {   /* (256 pages at a time while none is marked: the ranges are mostly clean) */
+                uint64_t w[32], any = 0;
+                memcpy(w, &a64_dirty[p], 256);
+                for (int k = 0; k < 32; k++) any |= w[k];
+                if (!any) {
+                    p += 256;
+                    continue;
+                }
+            }
             if (!(p & 31) && p + 32 <= p1) {   /* (32 pages at a time while none is marked) */
                 uint64_t w[4];
                 memcpy(w, &a64_dirty[p], 32);
@@ -107,6 +187,38 @@ static int64_t host_collect(uint32_t **pages) {
     static uint64_t (*ranges)[2];
     if (!ranges) ranges = malloc(sizeof *ranges * 4096);
     return collect_in(ranges, hos_gpu_guest_ranges(ranges, 4096), pages);
+}
+/* (Hookshot, TICK-054) HOS_NVN_HOLD_CHECK=1 (nvn_native.c): what a held submit's capture would have held, taken at the submit:
+   the marks over the GPU ranges read and cleared, and the pages' bytes copied (at most 16 K pages, 64 MB). At the flush,
+   hos_hold_check counts the pages marked again since (the game wrote them between the submit and the flush) and those whose
+   bytes differ from the copy, then marks them all again so that the flush's capture takes them, as it would have. */
+int64_t hos_hold_snapshot(uint32_t **pages, uint8_t **copy) {
+    static uint64_t (*ranges)[2];
+    if (!ranges) ranges = malloc(sizeof *ranges * 4096);
+    const int64_t n = collect_in(ranges, hos_gpu_guest_ranges(ranges, 4096), pages);
+    *copy = NULL;
+    if (n > 0 && n <= 16384) {
+        *copy = malloc((size_t)n * 4096);
+        if (*copy) {
+            const uint8_t *base = hos_guest_base();
+            for (int64_t i = 0; i < n; i++) memcpy(*copy + i * 4096, base + ((uint64_t)(*pages)[i] << 12), 4096);
+        }
+    }
+    return n;
+}
+void hos_hold_check(uint32_t *pages, int64_t n, uint8_t *copy, int64_t *again, int64_t *differ) {
+    const uint8_t *base = hos_guest_base();
+    *again = *differ = 0;
+    for (int64_t i = 0; i < n; i++) {
+        const uint32_t p = pages[i];
+        if (__atomic_load_n(&a64_dirty[p], __ATOMIC_ACQUIRE)) {
+            (*again)++;
+            if (copy && memcmp(copy + i * 4096, base + ((uint64_t)p << 12), 4096)) (*differ)++;
+        }
+    }
+    for (int64_t i = 0; i < n; i++) __atomic_store_n(&a64_dirty[pages[i]], 1, __ATOMIC_RELEASE);
+    free(pages);
+    free(copy);
 }
 /* (only within the given guest ranges: the submit-time capture of the mirrored pools, a small part of the 20 ms the
    whole collection takes) */
@@ -158,17 +270,20 @@ int hos_vk_take_key_press(int key) {
 #define host_take_key_press NULL
 #endif
 
-static const MkwVkHost vk_host = {
+static MkwVkHost vk_host = {   /* (not const: trace_gpu set when HL_TRACE is on) */
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
     nvn_tex_level_offset, nvn_fmt_bpb, nvn_tex_level_tiles, nvn_tex_linear_stride, nvn_depth_minus_w, hos_gpu_pools,
     hos_gpu_maps_generation, nvn_vmap_generation, hos_reserved_cpus, host_collect_in, host_guest_alloc,
     host_watch_guest_writes, hos_pad_raw, hos_binding, hos_bind, host_aspect_ratio, host_take_key_press,
     hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status, hos_log_flush, hos_prompts_face,
-    host_romfs_dir,
+    host_romfs_dir, NULL,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
+static void (*vk_precopy_kick)(void);   /* (TICK-054) the renderer's pre-copy thread kicked (RX_VK_PRECOPY_KICK=1) */
+/* (TICK-054) HOS_PRECOPY_KICK=1 (host/nn_os_sync.c): the capture's pre-copy thread starts a round now */
+void rx_precopy_kick(void) { if (vk_precopy_kick) vk_precopy_kick(); }
 static HMODULE vk_module;   /* (the last back end loaded: rx_close_asked) */
 
 /* The game registers its first textures and samplers before the window's thread starts the renderer (NVN is up
@@ -231,6 +346,18 @@ static void flush_early(void) {
     ReleaseSRWLockExclusive(&early_lock);
 }
 
+/* (TICK-015) the back end's second export: a game pool's NVN flags (which pools the CPU may read back) */
+static void (*vk_pool_flags)(uint64_t gpu, uint64_t size, uint32_t flags);
+void rx_nvn_pool_flags(uint64_t gpu, uint64_t size, uint32_t flags) {
+    if (vk && vk_pool_flags) vk_pool_flags(gpu, size, flags);
+}
+/* (Hookshot, RX_VK_POOL_FINALIZE) and a live pool's finalize (only a pool object still live: nvn_native.c checks its magic), so the
+   back end can retire the import chunks no live pool is left in */
+static void (*vk_pool_finalized)(uint64_t gpu, uint64_t size);
+void rx_nvn_pool_finalized(uint64_t gpu, uint64_t size) {
+    if (vk && vk_pool_finalized) vk_pool_finalized(gpu, size);
+}
+
 /* dll: mkw_vk.dll (our Vulkan back end) or mkw_eden.dll (Eden's renderer driven natively, gpu/eden): one export */
 static const MkwVkRenderer *load_vulkan(const char *dll) {
     char path[MAX_PATH];
@@ -238,6 +365,14 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     char *slash = n ? (strrchr(path, '\\') ? strrchr(path, '\\') : strrchr(path, '/')) : NULL;   /* (linux: '/') */
     if (!slash) return NULL;
     strcpy(slash + 1, dll);
+    /* (TICK-054) RX_VK_GONE_RING on by default (=0: off): its switch is read in gpu/vk/vk_texture.cpp, which TICK-053 works on;
+       set for the back end here, before it loads, when the user has not set it (the back end and this exe share the UCRT's
+       environment: the renderer logs it at its first parallel replay) */
+#ifdef _WIN32
+    if (!getenv("RX_VK_GONE_RING")) _putenv("RX_VK_GONE_RING=1");
+#else
+    setenv("RX_VK_GONE_RING", "1", 0);   /* (0: kept when the user set it) */
+#endif
     HMODULE m = LoadLibraryA(path);
     if (!m) {
         hos_log("rx: RX_BACKEND=vulkan, but %s did not load (%lu): WebGPU", path, GetLastError());
@@ -245,6 +380,14 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     }
     vk_module = m;
     mkwvk_init_fn init = (mkwvk_init_fn)(void *)GetProcAddress(m, "mkwvk_init");
+    vk_pool_flags = (void (*)(uint64_t, uint64_t, uint32_t))(void *)GetProcAddress(m, "mkwvk_pool_flags");   /* (TICK-015; optional) */
+    vk_pool_finalized = (void (*)(uint64_t, uint64_t))(void *)GetProcAddress(m, "mkwvk_pool_finalized");   /* (RX_VK_POOL_FINALIZE; optional) */
+    vk_precopy_kick = (void (*)(void))(void *)GetProcAddress(m, "mkwvk_precopy_kick");   /* (TICK-054; optional) */
+    {   /* (HL_TRACE: the back end's writes into guest memory, for the crash report; host/hl_trace.c) */
+        extern volatile uint32_t hl_trace_mask;
+        void hl_trace_gpu(uint32_t what, uint64_t guest, uint64_t size, uint64_t pool, uint64_t value, uint64_t done);
+        if (hl_trace_mask) vk_host.trace_gpu = hl_trace_gpu;
+    }
     const MkwVkRenderer *r = init ? init(&vk_host) : NULL;
     if (!r || r->version != MKWVK_API_VERSION) {
         hos_log("rx: the Vulkan back end did not start: WebGPU");
@@ -310,13 +453,13 @@ void rx_nvn_present(const nvn_tex *t, const int crop[4]) {
     InterlockedIncrement(&presents);
     vk ? vk->nvn_present(t, crop) : wgr_nvn_present(t, crop);
 }
-/* (hookshot, nx2/oot_jitter.py) NVIDIA DLSS's camera jitter: this frame's sub-pixel offset of the scene's projection, in clip
+/* (hookshot, nx2/oot_jitter.py) the temporal upscaler's camera jitter (NVIDIA DLSS, AMD FSR 4: gpu/vk/vk_temporal.cpp): this frame's sub-pixel offset of the scene's projection, in clip
    space (what P[0][2] and P[1][2] get), into out, for the projection matrix at guest address projection (row major, as the
-   game fills its views' uniform buffers from it); 0 when there is none: DLSS off (or a renderer without it: rx_option
+   game fills its views' uniform buffers from it); 0 when there is none: DLSS and FSR off (or a renderer without them: rx_option
    HOS_OPT_DLSS_JITTER_W and _H, the scene's size in pixels, are 0), or a projection that is not one of the picture's
    (gpu/vk/dlss_math.h dlss_jitter_clip: a shadow map's, the HUD's). The renderer reads the offset back from
-   the camera's uniform buffer (gpu/vk/vk_dlss.cpp), so this only has to pick sub-pixel offsets that cover a pixel evenly:
-   the Halton (2, 3) sequence, over as many frames as DLSS's scale wants (HOS_OPT_DLSS_JITTER_PHASES: gpu/vk/dlss_math.h
+   the camera's uniform buffer (gpu/vk/vk_temporal.cpp), so this only has to pick sub-pixel offsets that cover a pixel evenly:
+   the Halton (2, 3) sequence, over as many frames as the upscaler's scale wants (HOS_OPT_DLSS_JITTER_PHASES: gpu/vk/dlss_math.h
    dlss_jitter_phases, 8 for DLAA up to 64). */
 int hos_dlss_jitter_clip(uint64_t projection, float out[2]) {
     static LONG at = -1;

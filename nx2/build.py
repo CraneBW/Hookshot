@@ -13,7 +13,7 @@ check that the whole lifted game closes over itself: any unresolved symbol fails
 Heavy: 44 chunks of ~25 MB, ~100-200 s and ~2-3.5 GB each at -O1. The PC is shared with games: run it when the
 machine is idle, and keep --jobs low otherwise.
 
---standalone builds work/sa/build/hookshot.exe instead: the standalone lift (work/sa/gen, `lift.py --standalone --write`)
+--standalone builds work/sa/build/Hookshot.exe (Linux: hookshot) instead: the standalone lift (work/sa/gen, `lift.py --standalone --write`)
 + the native runtime in host/ (TOTKPort's hos/, adapted). Objects are cached by their key in work/objcache, shared by
 both builds: the two lifts share their chunk boundaries, so every chunk without a hooked function is the same source
 and is not compiled twice.
@@ -62,8 +62,18 @@ PGO = os.environ.get("RX_PGO", "")
 LINUX = not toolchain.windows()   # (hookshot: RX_TARGET=windows on Linux builds the Windows game, with llvm-mingw)
 POSIX = os.path.join(kit.HERE, "..", "host", "posix")
 SYSROOT = os.environ.get("HOOKSHOT_SYSROOT", "")
-EXE = "hookshot" if LINUX else "hookshot.exe"
+EXE = "hookshot" if LINUX else "Hookshot.exe"   # (Hookshot: the Windows game is Hookshot.exe; Linux keeps hookshot)
 VK_LIB = "hookshot_vk.so" if LINUX else "hookshot_vk.dll"
+
+
+def icon_res():
+    """The game exe's icon resource: Hookshot's own (assets/hookshot.res, tools/release/make_icon.py), else a work/hookshot.res
+    nx2/make_icon.py made (a release's play profile can bring upstream's), else none"""
+    for p in (os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "hookshot.res"),
+              os.path.join(kit.WORK, "hookshot.res")):
+        if os.path.exists(p):
+            return p
+    return None
 
 
 def check_vk_symbols(so):
@@ -139,6 +149,13 @@ def HOT_ORDER():
 HOST_LIBS = ["-lpthread", "-ldl", "-lm"] if LINUX else \
     ["-lwinhttp", "-luser32", "-lwinmm", "-ladvapi32", "-lole32", "-lshell32", "-lgdi32", "-ldbghelp"]
 GPU = os.path.join(kit.HERE, "..", "gpu")
+# (Hookshot) the native engine (engine/native, C++20: docs/native-engine): its own headers and the standard library only;
+# host/hl_host.c and one host/hl_<module>.c a module are the OS layer's side of it
+NATIVE = os.path.normpath(os.path.join(kit.HERE, "..", "native"))
+
+
+def native_sources():
+    return sorted(os.path.join(d, f) for d, _, fs in os.walk(os.path.join(NATIVE, "src")) for f in fs if f.endswith(".cpp"))
 # FFmpeg (libavcodec's VP8/VP9 decoders, swscale) for nn::codec's video decoders (host/nn_video.c): the static build
 # in the Eglantine clone's package cache
 FFMPEG = None   # (found in the CPM caches below, once cpm_dirs is defined)
@@ -200,6 +217,10 @@ def ngx_sdk(sdk, linux):
 NGX_SDK = ngx_sdk(os.environ.get("HOOKSHOT_NGX_SDK", ""), LINUX)
 # (llvm-mingw: what NVIDIA's library asks of Microsoft's runtime, linked in with it. Not compiled otherwise)
 NGX_MSVC_RT = "vk_ngx_msvc_rt.cpp"
+# HOOKSHOT_FSR=1: the Vulkan back end with AMD FSR 4 (gpu/vk/vk_fsr4.cpp), from AMD's FSR API headers (third_party/fidelityfx,
+# MIT). AMD's signed DLLs are not part of the build: the user's, loaded at run time. Off without it (make_game.py --fsr sets
+# it; the camera jitter it needs is in every build: nx2/oot_jitter.py)
+FSR = os.environ.get("HOOKSHOT_FSR", "") == "1"
 
 
 def ngx_link(sdk, mingw):
@@ -490,6 +511,8 @@ def ffmpeg_version_key():
 # instead of Windows' write watch (GetWriteWatch over the 6 GB MKW's GPU sees took ~20 ms a scan, in one thread or
 # four: the race's replay waited ~12 ms a frame for it). RX_SOFT_WRITE_WATCH=0: Windows' write watch (a full rebuild)
 WRITE_TRACK = [] if os.environ.get("RX_SOFT_WRITE_WATCH") == "0" else ["-DA64_WRITE_TRACK"]
+if WRITE_TRACK and os.environ.get("A64_GRAN") == "1":   # (Hookshot, sprint 5: a write mark per 512 bytes too, nx2/rtgen.py)
+    WRITE_TRACK = WRITE_TRACK + ["-DA64_GRAN"]
 
 # (hookshot) the host CPU the lifted game and the runtime are built for: x86-64-v3 (AVX2, FMA, BMI1/2, LZCNT,
 # MOVBE; Haswell and Zen 1 on). With FMA the FPX1 fast paths cover double-precision FMA (RECOMP_FPX_FMA64; it took
@@ -711,7 +734,7 @@ def main():
         os.makedirs(gen, exist_ok=True)
     rt64 = rtgen.write(os.path.join(out, "rt64"))
     cc = toolchain.need(toolchain.find("clang"))
-    fl = flags(gen, rt64, a.opt, not a.no_polls) + (["-DA64_POLL_CTX"] if a.dll else [])   # (the shim's poll takes the context: rtgen.py)
+    fl = flags(gen, rt64, a.opt, not a.no_polls)
     # (which Hookshot this is, for the log's first line and the Insert menu: given to those two files only, so a new
     # release name rebuilds them and nothing else)
     stamp_def = version.define()
@@ -722,8 +745,7 @@ def main():
     shim_deps = deps + open(os.path.join(NX2_RT, "mkw_host.h"), "rb").read()
     eden_gen, eden_out = os.path.join(kit.WORK, "gen"), os.path.join(kit.WORK, "build")
     migrate_stamps(eden_gen, os.path.join(eden_out, "obj"),
-                   flags(eden_gen, os.path.join(eden_out, "rt64"), a.opt, not a.no_polls) +
-                   (["-DA64_POLL_CTX"] if a.dll else []), deps)   # (as fl below: the flags its objects were built with)
+                   flags(eden_gen, os.path.join(eden_out, "rt64"), a.opt, not a.no_polls), deps)
     migrate_stamps(gen, obj_dir, fl, deps)
     chunks = sorted(f for f in os.listdir(gen) if f.startswith("code_") and f.endswith(".c"))
     if a.only:
@@ -755,6 +777,9 @@ def main():
     # (hookshot) code_hot.c, the lift's hot functions together (A64_HOT_FUNCS + A64_HOT_CHUNK=1): at RX_HOT_OPT
     # (default O2), so the hot callees inline into their hot callers
     hot_fl = [("-" + os.environ.get("RX_HOT_OPT", "O2")) if f == "-" + a.opt else f for f in fl]
+    # (Hookshot, sprint 5) RX_HOT_FLAGS=<flags, space separated>: more compiler flags for the hot pieces alone (a measurement:
+    # a tuning target, inlining thresholds); they are in the objects' keys like the others
+    hot_fl = hot_fl + os.environ.get("RX_HOT_FLAGS", "").split()
     # (hookshot) RX_PGO=gen: code_hot.c counts its branches (host/pgo_rt.c writes them; -O1 builds much sooner, and the counters are
     # placed before the optimiser, so a profile from it fits the -O2 build). RX_PGO=<merged .prof>: built with that profile
     if PGO == "gen":
@@ -779,19 +804,47 @@ def main():
         sum(1 for x in srcs if os.path.basename(x).startswith("code_"))), flush=True)
     # the runtime: ordinary C at -O2, with its own headers (any host/*.h change rebuilds all of it)
     host_fl = target() + CPU + (["-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + \
-        ["-I" + HOST, "-I" + rt64, "-I" + gen, "-Wno-everything", "-O2", "-g0", "-mcx16", "-DA64_POLLING"] + WRITE_TRACK
+        ["-I" + HOST, "-I" + rt64, "-I" + gen, "-I" + os.path.join(NATIVE, "include"),
+         "-Wno-everything", "-O2", "-g0", "-mcx16", "-DA64_POLLING"] + WRITE_TRACK
     host_deps = deps + b"".join(open(os.path.join(HOST, f), "rb").read() for f in sorted(os.listdir(HOST))
                                 if f.endswith(".h"))
+    # (the native engine's C surface, hl/c: what host/hl_*.c include)
+    host_deps += b"".join(open(os.path.join(NATIVE, "include", "hl", "c", f), "rb").read()
+                          for f in sorted(os.listdir(os.path.join(NATIVE, "include", "hl", "c"))) if f.endswith(".h"))
     if LINUX:
         host_deps += b"".join(open(os.path.join(POSIX, f), "rb").read() for f in sorted(os.listdir(POSIX)) if f.endswith(".h"))
         host_deps += open(os.path.join(GPU, "vk", "vk_api.h"), "rb").read()
     host_deps += open(os.path.join(GPU, "vk", "dlss_math.h"), "rb").read()   # (host/rx_backend.c's DLSS jitter)
     host_deps += ffmpeg_version_key()
+    # (Hookshot) zstd's decoder (third_party/zstd, plain C) in the game's executable too: host/hl_stream.c decodes the
+    # game's resource files with it (the Vulkan back end has its own copy, below). Only hl_stream.c sees its headers
+    ZSTD = os.path.normpath(os.path.join(kit.HERE, "..", "third_party", "zstd", "lib"))
+    ZSTD_DECODER = ("common/debug.c", "common/entropy_common.c", "common/error_private.c", "common/fse_decompress.c",
+                    "common/xxhash.c", "common/zstd_common.c", "decompress/huf_decompress.c", "decompress/zstd_ddict.c",
+                    "decompress/zstd_decompress.c", "decompress/zstd_decompress_block.c")
+    zstd_deps = b"".join(open(os.path.join(d, f), "rb").read() for d in (ZSTD, os.path.join(ZSTD, "common"), os.path.join(ZSTD, "decompress"))
+                         for f in sorted(os.listdir(d)) if f.endswith(".h"))
     jobs += [(cc, s, os.path.join(obj_dir, "host_" + os.path.basename(s)[:-2] + ".o"),
               host_fl + ["-I" + os.path.join(OPUS, "include")] +
               (["-I" + os.path.join(FFMPEG, "include")] if FFMPEG else []) +
               (FFMPEG_LX[0] if LINUX and FFMPEG_LX else []) +
-              ([stamp_def] if os.path.basename(s) == "hos_main.c" else []), host_deps) for s in host_srcs]
+              (["-I" + ZSTD] if os.path.basename(s) == "hl_stream.c" else []) +
+              ([stamp_def] if os.path.basename(s) == "hos_main.c" else []),
+              host_deps + (zstd_deps if os.path.basename(s) == "hl_stream.c" else b"")) for s in host_srcs]
+    if host_srcs:
+        zflags_exe = target() + CPU + ["-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-DZSTD_DISABLE_ASM",
+                                       "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0"]
+        for f in ZSTD_DECODER:
+            jobs.append((cc, os.path.join(ZSTD, *f.split("/")), os.path.join(obj_dir, "zstd_" + os.path.basename(f)[:-2] + ".o"),
+                         zflags_exe, zstd_deps))
+    # (Hookshot) the native engine, in the game's executable
+    if host_srcs:
+        ncxx = toolchain.need(toolchain.find("clang++"))
+        nflags = target() + CPU + ["-std=c++20", "-O2", "-g0", "-DNDEBUG", "-Wall", "-Wextra", "-I" + os.path.join(NATIVE, "include")]
+        ndeps = tree_headers(os.path.join(NATIVE, "include"))
+        for src in native_sources():
+            name = os.path.relpath(src, os.path.join(NATIVE, "src")).replace(os.sep, "_")[:-4]
+            jobs.append((ncxx, src, os.path.join(obj_dir, "native_" + name + ".o"), nflags, ndeps))
     # libopus 1.5.2 (third_party/opus, from TOTKPort): nn::codec's hardware Opus decoder (host/nn_codec.c)
     # (hookshot: built for the same CPU target as the rest (CPU), so its float code can be vectorized where the target has
     # AVX2: the vendored copy has no x86 intrinsics files of its own)
@@ -839,6 +892,14 @@ def main():
         for f in sorted(translator) + [os.path.join(vk, n) for n in ("vk_shader.cpp", "vk_bank.cpp", "vk_state.h", "vk_api.h")]:
             with open(f, "rb") as src:
                 stamp.update(os.path.relpath(f, vk).replace("\\", "/").encode() + src.read().replace(bytes((13, 10)), bytes((10,))))
+        # (TICK-008: what the pipeline notes (hookshot_pipelines.bin) are laid out by: the draw state they hold and the record. Apart from the
+        # shader stamp, so that a change of the shader translation carries the notes over instead of dropping them)
+        layout = hashlib.sha1()
+        for f in [os.path.join(vk, n) for n in ("vk_state.h", "vk_api.h", "vk_draw.h")] + [os.path.join(GPU, "render", "rx_nvn.h")]:
+            if os.path.isfile(f):
+                with open(f, "rb") as src:
+                    layout.update(os.path.basename(f).encode() + src.read().replace(bytes((13, 10)), bytes((10,))))
+        state_stamp = "-DHOOKSHOT_STATE_STAMP=0x%sull" % layout.hexdigest()[:16]   # (TICK-008: vk_draw.cpp only)
         shader_stamp = "-DHOOKSHOT_SHADER_STAMP=0x%sull" % stamp.hexdigest()[:16]
         vflags = target() + CPU + (["-fPIC", "-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + [   # (hookshot: the replay is the frame's limit now)
             # (what the code takes for granted, which newer C++ libraries bring in by themselves and older ones do not: issue 48)
@@ -860,6 +921,11 @@ def main():
         ngx_flags = ["-DHOOKSHOT_NGX", "-I" + os.path.join(NGX_SDK, "include")] if NGX_SDK else []
         if NGX_SDK:
             print("the Vulkan back end: with NVIDIA DLSS (NVIDIA's NGX SDK in %s)" % NGX_SDK, flush=True)
+        # (AMD FSR 4, a build's option too: only vk_fsr4.cpp sees AMD's headers; without them it is the stubs that say FSR is
+        # not there)
+        fsr_flags = ["-DHOOKSHOT_FSR", "-I" + os.path.join(kit.HERE, "..", "third_party", "fidelityfx")] if FSR else []
+        if FSR:
+            print("the Vulkan back end: with AMD FSR 4 (AMD's FSR API headers, third_party/fidelityfx)", flush=True)
         # (Eden's recompiler and sirit see only their own headers: a change to the back end's vk_*.h does not
         # rebuild their ~500 files; the back end itself depends on everything, suyu's texture decoders included)
         vk_lib_deps = tree_headers(os.path.join(vk, "eden"), os.path.join(vk, "sirit"), os.path.join(vk, "compat"),
@@ -874,7 +940,7 @@ def main():
                        "-DIMGUI_DISABLE_WIN32_FUNCTIONS", "-DIMGUI_DISABLE_DEMO_WINDOWS", "-DIMGUI_DISABLE_DEBUG_TOOLS"]
         imgui_deps = b"".join(open(os.path.join(d, f), "rb").read() for d in (imgui, os.path.join(imgui, "backends"), zstd)
                               for f in sorted(os.listdir(d)) if f.endswith(".h"))
-        imgui_users = ("vk_imgui.cpp", "vk_menu.cpp")
+        imgui_users = ("vk_imgui.cpp", "vk_menu.cpp", "vk_overlay.cpp")   # (Hookshot: the performance overlay draws in the menu's frame)
         for f in ("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp", "backends/imgui_impl_vulkan.cpp"):
             vk_jobs.append((cxx, os.path.join(imgui, *f.split("/")),
                             os.path.join(obj_dir, "vk_imgui_" + os.path.basename(f)[:-4] + ".o"), vflags + imgui_flags, imgui_deps))
@@ -896,9 +962,11 @@ def main():
             lib = os.path.relpath(src, vk).split(os.sep)[0] in ("eden", "sirit")
             vk_jobs.append((cxx, src, os.path.join(obj_dir, "vk_" + name + ".o"),
                             vflags + ([shader_stamp] if os.path.basename(src) == "vk_shader.cpp" else []) +
+                            ([state_stamp] if os.path.basename(src) == "vk_draw.cpp" else []) +
                             ([stamp_def] if os.path.basename(src) == "vk_menu.cpp" else []) +
                             (ngx_flags if os.path.basename(src) == "vk_dlss.cpp" else []) +
-                            (imgui_flags if os.path.basename(src) in imgui_users else []),
+                            (imgui_flags if os.path.basename(src) in imgui_users else []) +
+                            (fsr_flags if os.path.basename(src) == "vk_fsr4.cpp" else []),
                             vk_lib_deps if lib else vdeps + (logo_text if os.path.basename(src) == "vk_imgui.cpp" else b"") +
                             (imgui_deps if os.path.basename(src) in imgui_users else b"")))
         if NGX_SDK and not LINUX and toolchain.mingw():
@@ -990,11 +1058,14 @@ def main():
     if a.standalone and not a.only and not vk_only and LINUX:
         exe = os.path.join(out, EXE)   # (+ hookshot.map: crash offsets -> f_<guest address>)
         t = time.time()
-        # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name)
+        # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name, and the
+        # frame-timeline marks the renderer looks up, hos_jt_mark_ext: HOS_JOBTRACE, vk_replay.cpp jt_mark)
         r = subprocess.run([cc] + target() + ["-fuse-ld=lld", "-o", exe, "-Wl,-Map=" + exe + ".map", "-Wl,--gc-sections",
-                                              "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
+                                              "-Wl,--export-dynamic-symbol=hos_posix_*", "-Wl,--export-dynamic-symbol=hos_jt_mark_ext",
+                                              "@" + rsp] + HOT_ORDER() +
                            (["-fprofile-instr-generate"] if PGO == "gen" else []) +
-                           (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS,
+                           (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS + (["-l:libstdc++.a"] if SYSROOT else ["-lstdc++"]),   # (engine/native's C++: static with the
+                           # AppImage's sysroot, so the player's system needs no particular libstdc++)
                            capture_output=True, text=True)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
@@ -1007,12 +1078,12 @@ def main():
             import shutil
             shutil.copyfile(sdl, os.path.join(out, "libSDL2-2.0.so.0"))
     elif a.standalone and not a.only and not vk_only:
-        exe = os.path.join(out, "hookshot.exe")   # (+ hookshot.map: crash offsets -> f_<guest address>)
+        exe = os.path.join(out, EXE)   # (+ Hookshot.map: crash offsets -> f_<guest address>)
         t = time.time()
         r = subprocess.run([cc] + toolchain.native_target() + toolchain.native_link() +
                            ["-o", exe, toolchain.link_opt("/map:" + exe[:-4] + ".map"), toolchain.link_opt("/stack:8388608"), "@" + rsp] + HOT_ORDER() + HOST_LIBS +
                            ([toolchain.link_opt("/nodefaultlib:clang_rt.profile.lib")] if PGO == "gen" else []) +
-                           ([os.path.join(kit.WORK, "hookshot.res")] if os.path.exists(os.path.join(kit.WORK, "hookshot.res")) else []) +   # (nx2/make_icon.py)
+                           ([icon_res()] if icon_res() else []) +   # (Hookshot's icon, assets/hookshot.res; else nx2/make_icon.py's)
                            [win_manifest.write(os.path.join(out, "hookshot_manifest.res"))] +   # (UTF-8 paths: nx2/win_manifest.py)
                            ([toolchain.link_opt("/subsystem:windows"), toolchain.link_opt("/entry:mainCRTStartup")] if os.environ.get("RX_RELEASE") == "1" else []) +   # (no console window)
                            ([os.path.join(WGPU, "lib", "wgpu_native.dll.lib")] if wgpu else []) +

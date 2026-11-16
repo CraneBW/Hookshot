@@ -2,7 +2,7 @@
    when it is not the release this game folder was built with, the player is asked whether to update. Yes starts the Hookshot Builder
    that made the folder (hookshot_version.txt, written by nx2/make_game.py) with --update: it downloads the new release and builds the
    folder again from the game files the folder keeps, and the game closes. A folder with no hookshot_version.txt (built from the
-   repository, or before updates came in) is never asked about. HOOKSHOT_NO_UPDATE_CHECK=1 (hookshot_env.txt) turns it off */
+   repository, or before updates came in) is never asked about. HOOKSHOT_NO_UPDATE_CHECK=1 (hookshot_env.txt) turns it off; in this fork it is off unless HOOKSHOT_UPDATE_CHECK=1 */
 #if defined(_WIN32) || defined(__linux__)
 #include <ctype.h>
 #include <string.h>
@@ -28,8 +28,8 @@ static int safe_tag(const char *s) {
 #include <string.h>
 
 #define UPDATE_HOST L"api.github.com"
-#define UPDATE_PATH L"/repos/NotRexed/Hookshot/releases/latest"
-#define RELEASES_PAGE L"https://github.com/NotRexed/Hookshot/releases/latest"
+#define UPDATE_PATH L"/repos/Hookshot/Hookshot/releases/latest"
+#define RELEASES_PAGE L"https://git.notrexed.dev/Hookshot/Hookshot/releases/latest"
 
 /* (a line "name=value" of a small text file, in UTF-8: its value, trimmed) */
 static int read_value(const wchar_t *path, const char *name, char *out, size_t cap) {
@@ -95,6 +95,9 @@ static int latest_tag(char *tag, size_t cap) {
 
 void hos_update_check(void) {
     if (getenv("HOOKSHOT_NO_UPDATE_CHECK") && strcmp(getenv("HOOKSHOT_NO_UPDATE_CHECK"), "0")) return;
+    /* (this fork builds its own game from its own sources: NotRexed's releases are not its updates, so the offer is opt-in here,
+       HOOKSHOT_UPDATE_CHECK=1) */
+    if (!getenv("HOOKSHOT_UPDATE_CHECK") || !strcmp(getenv("HOOKSHOT_UPDATE_CHECK"), "0")) return;
     wchar_t dir[MAX_PATH], file[MAX_PATH + 64];
     DWORD n = hos_game_path_w(dir, MAX_PATH);
     if (!n || n >= MAX_PATH) return;
@@ -230,10 +233,10 @@ static int pipe_tag(const char *cmd, char *tag, size_t cap) {
 static int latest_tag(char *tag, size_t cap) {
     if (pipe_tag("curl -fsSL --max-time 4 --retry 2 -A Hookshot-update-check "
                  "-H \"Accept: application/vnd.github+json\" "
-                 "https://api.github.com/repos/NotRexed/Hookshot/releases/latest 2>/dev/null", tag, cap))
+                 "https://git.notrexed.dev/api/v1/repos/Hookshot/Hookshot/releases/latest 2>/dev/null", tag, cap))
         return 1;
     return pipe_tag("curl -fsSL --max-time 8 --retry 2 -A Hookshot-update-check "
-                    "https://github.com/NotRexed/Hookshot/releases/latest/download/hookshot-linux.txt 2>/dev/null", tag, cap);
+                    "https://git.notrexed.dev/Hookshot/Hookshot/releases/latest/download/hookshot-linux.txt 2>/dev/null", tag, cap);
 }
 
 /* the builder an update installed (builder/linux/linux_update.py): <data>/hookshot/builder/versions/<current>/AppRun. The
@@ -305,7 +308,7 @@ void hos_update_check(void) {
     if (strncmp(answer, "Update", 6)) return;
     if (!has_builder) {
         if (fork() == 0) {
-            execlp("xdg-open", "xdg-open", "https://github.com/NotRexed/Hookshot/releases/latest", (char *)0);
+            execlp("xdg-open", "xdg-open", "https://git.notrexed.dev/Hookshot/Hookshot/releases/latest", (char *)0);
             _exit(127);
         }
         return;

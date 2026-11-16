@@ -2,6 +2,7 @@
    commit (TOTK commits its whole 4 GB window up front; MKW's 512 GB window is only reserved), and stand-ins for the
    hooks of files not taken into host/ (the renderer and display, the profiler, mods, TOTK's own patches). */
 #include "hos.h"
+#include "hos_guestpages.h"
 #include <stdio.h>
 #include <stdlib.h>
 #define WIN32_LEAN_AND_MEAN
@@ -15,6 +16,29 @@
    The runtime commits what it hands out (image, system region, heap, address regions: hos_commit), because host
    APIs given guest buffers (ReadFile into a game buffer) fail on reserved pages without raising an exception. A
    guest or host access to a page nothing committed is committed on first touch, 64 KB at a time, by the handler. */
+int hos_lazy_commit(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("HOS_LAZY_COMMIT");
+#ifdef _WIN32
+        on = !(e && e[0] == '0');
+#else
+        on = e && e[0] == '1';   /* (the POSIX window has no commit-on-touch handler of this kind: off unless asked) */
+#endif
+    }
+    return on;
+}
+
+/* (HOS_GUEST_PAGES: not while a drop splits the reservation; the error kept for the caller) */
+static int hos_plain_commit(void *p, size_t n) {
+    hos_gp_hold(1);
+    const int ok = VirtualAlloc(p, (SIZE_T)n, MEM_COMMIT, PAGE_READWRITE) != NULL;
+    const DWORD err = GetLastError();
+    hos_gp_hold(0);
+    SetLastError(err);
+    return ok;
+}
+
 void hos_commit(uint64_t addr, uint64_t size) {
     if (!size) return;
     if (!hos_guest_range(addr, size)) {   /* (hookshot: guest pages only; the posix layer's commit changes any page's protection) */
@@ -22,7 +46,16 @@ void hos_commit(uint64_t addr, uint64_t size) {
         return;
     }
     const uint64_t lo = addr & ~0xFFFFULL, hi = (addr + size + 0xFFFF) & ~0xFFFFULL;
-    if (!VirtualAlloc(GP(lo), (SIZE_T)(hi - lo), MEM_COMMIT, PAGE_READWRITE)) {
+    /* (HOS_POOL_TRAP, hos_memsplit.c: trapped pages the kernel is given back their access first, and counted; the commit
+       below would make them read-write without the trap knowing. Nothing when the trap is off) */
+    { void hos_pool_trap_release(uint64_t, uint64_t, const char *); hos_pool_trap_release(lo, hi - lo, "hos_commit"); }
+    /* (HL_MEM_DROP, hl_drop.c: a decision under way over these pages ends first, and they are not dropped for a while:
+       the kernel must not meet a read-only page; a restore made from here is counted as the kernel's) */
+    hl_drop_kernel_begin(lo, hi);
+    /* (HOS_GUEST_PAGES: dropped granules the kernel is given are restored by their owner first, and the commit goes piece
+       by piece over a range the drops split) */
+    if (hos_gp_ready() && hos_gp_touches(GP(lo), (size_t)(hi - lo)) ? !hos_gp_commit(GP(lo), (size_t)(hi - lo))
+                                                                     : !hos_plain_commit(GP(lo), (size_t)(hi - lo))) {
         const DWORD err = GetLastError();
         hos_log("mem: commit of %#llx bytes at %#llx failed (error %lu)", (unsigned long long)(hi - lo),
                 (unsigned long long)lo, err);
@@ -35,6 +68,35 @@ void hos_commit(uint64_t addr, uint64_t size) {
             }
         }
     }
+    hl_drop_kernel_end();
+}
+
+/* HOS_GUEST_PAGES=1 (hos_guestpages.c): the window in two reservations, the system region and the image below
+   HOS_HEAP_BASE as before, the heap and the address regions over a placeholder, so that their granules can be given back
+   and restored atomically. 0 (the default, and whenever this fails): the one reservation of before. Not with the
+   hardware write watch (a placeholder cannot be write-watched) */
+int hos_reserve_guest_pages(int write_watch) {
+    if (!hos_gp_wanted()) return 0;
+    if (write_watch) {
+        hos_log("mem: guest pages: off (HOS_GUEST_PAGES needs the soft write watch build)");
+        return 0;
+    }
+    if (VirtualAlloc(GP(0), (SIZE_T)HOS_HEAP_BASE, MEM_RESERVE, PAGE_NOACCESS) != GP(0)) {
+        hos_log("mem: guest pages: off (the window's low part was not reserved, error %lu)", GetLastError());
+        return 0;
+    }
+    if (!hos_gp_reserve(GP(HOS_HEAP_BASE), (size_t)(HOS_GUEST_SPACE - HOS_HEAP_BASE))) {
+        VirtualFree(GP(0), 0, MEM_RELEASE);
+        hos_log("mem: guest pages: off (the placeholder was not made: the window is reserved as before)");
+        return 0;
+    }
+    hos_log("mem: guest pages: on: the heap and the address regions (%llu GB) over a placeholder, granules of %zu KB can be "
+            "dropped and restored (HOS_GUEST_PAGES=0: not)", (unsigned long long)((HOS_GUEST_SPACE - HOS_HEAP_BASE) >> 30),
+            hos_gp_granule() >> 10);
+    void hos_gp_check_start(void);   /* (hos_gpcheck.c: the counters, and HOS_GUEST_PAGES_TEST) */
+    hos_gp_check_start();
+    hl_drop_init();   /* (HL_MEM_DROP, hl_drop.c: the policy over the substrate) */
+    return 1;
 }
 
 DWORD WINAPI hos_out_of_memory_box(LPVOID unused) {
@@ -55,8 +117,56 @@ static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
     if (p < A64_MEM || p >= A64_MEM + HOS_GUEST_SPACE) return EXCEPTION_CONTINUE_SEARCH;
     const uint64_t guest = (uint64_t)(p - A64_MEM);
     if (guest < 0x100000) return EXCEPTION_CONTINUE_SEARCH;   /* (a null pointer: the game's own fault) */
+    /* (HOS_GUEST_PAGES: a dropped granule goes to its owner, which restores it; one it declines is a crash) */
+    if (hos_gp_ready()) {
+        const int r = hos_gp_fault((void *)p, rec->ExceptionInformation[0] == 1);
+        if (r > 0) return EXCEPTION_CONTINUE_EXECUTION;
+        if (r < 0) {
+            hos_log("mem: %#llx is in a dropped granule that was not restored", (unsigned long long)guest);
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+    }
     MEMORY_BASIC_INFORMATION mbi;
-    if (!VirtualQuery(p, &mbi, sizeof mbi) || mbi.State != MEM_RESERVE) return EXCEPTION_CONTINUE_SEARCH;
+    if (!VirtualQuery(p, &mbi, sizeof mbi)) return EXCEPTION_CONTINUE_SEARCH;
+    /* (committed by another thread between the fault and here, two threads touching the same fresh megabyte, or a granule
+       restored by another thread: run the instruction again) */
+    if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) && !(mbi.Protect & PAGE_GUARD) &&
+        guest >= HOS_HEAP_BASE && (hos_lazy_commit() || hos_gp_ready())) {
+        static _Thread_local const uint8_t *again;
+        if (again != p) { again = p; return EXCEPTION_CONTINUE_EXECUTION; }   /* (once an address: a real fault goes on to the report) */
+    }
+    if (mbi.State != MEM_RESERVE) return EXCEPTION_CONTINUE_SEARCH;
+    /* (Hookshot) the heap and the address regions, left reserved (hos_lazy_commit): 1 MB at a time, so that a heap
+       the game fills takes a fault a megabyte and not one every 64 KB */
+    if (guest >= HOS_HEAP_BASE && hos_lazy_commit()) {
+        static volatile LONG64 lazy_bytes;
+        static volatile LONG said;
+        const LONG64 total = InterlockedAdd64(&lazy_bytes, 0x100000);
+        if (total >> 30 > said && InterlockedExchange(&said, (LONG)(total >> 30)) < (LONG)(total >> 30))
+            hos_log("mem: %lld MB of the game's memory committed on first touch", (long long)(total >> 20));
+        /* (HOS_GUEST_PAGES: not while a drop splits the reservation, which fails commits in it meanwhile) */
+        hos_gp_hold(1);
+        if (VirtualAlloc(GP(guest & ~0xFFFFFULL), 0x100000, MEM_COMMIT, PAGE_READWRITE)) return hos_gp_hold(0), EXCEPTION_CONTINUE_EXECUTION;
+        /* (the megabyte around it cannot be committed as one: a part of it is not this reservation's to commit, as
+           memory the renderer has mapped over the window. The 64 KB around the touch then, and the page alone: a
+           run crashed here on 2026-11-13 with the megabyte alone tried) */
+        const DWORD err = GetLastError();
+        static volatile LONG told;
+        if (InterlockedIncrement(&told) <= 8)
+            hos_log("mem: the megabyte at %#llx was not committed as one (error %lu): the 64 KB around %#llx",
+                    (unsigned long long)(guest & ~0xFFFFFULL), err, (unsigned long long)guest);
+        if (VirtualAlloc(GP(guest & ~0xFFFFULL), 0x10000, MEM_COMMIT, PAGE_READWRITE)) return hos_gp_hold(0), EXCEPTION_CONTINUE_EXECUTION;
+        if (VirtualAlloc(GP(guest & ~0xFFFULL), 0x1000, MEM_COMMIT, PAGE_READWRITE)) return hos_gp_hold(0), EXCEPTION_CONTINUE_EXECUTION;
+        hos_gp_hold(0);
+        if (hos_gp_is_dropped(p)) return EXCEPTION_CONTINUE_EXECUTION;   /* (dropped since the look above: its owner next time) */
+        hos_log("mem: %#llx could not be committed on first touch (error %lu, state %#lx, protection %#lx, type %#lx, region "
+                "%#llx+%#llx, allocation %#llx with %#lx%s)",
+                (unsigned long long)guest, GetLastError(), mbi.State, mbi.Protect, mbi.Type,
+                (unsigned long long)((uint8_t *)mbi.BaseAddress - A64_MEM), (unsigned long long)mbi.RegionSize,
+                (unsigned long long)((uint8_t *)mbi.AllocationBase - A64_MEM), mbi.AllocationProtect,
+                hos_gp_ready() ? (hos_gp_is_dropped(p) ? ", dropped" : ", not dropped") : "");
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
     static volatile LONG touched;
     if (InterlockedIncrement(&touched) <= 16)
         hos_log("mem: %#llx committed on first touch (nothing handed it out)", (unsigned long long)guest);
@@ -155,6 +265,10 @@ static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {
                         (unsigned long long)peek_guest(base + row + 16), (unsigned long long)peek_guest(base + row + 24));
         }
     }
+    {   /* (HL_TRACE: the blocks the fault and the registers are in, the last events; hl_trace.c) */
+        void hl_trace_on_crash(Ctx *, uint64_t);
+        hl_trace_on_crash(c, addr - (uint64_t)A64_MEM);
+    }
     hos_log_flush();
     void hos_hostcall_stats(void);
     hos_hostcall_stats();   /* (HOS_HOSTCALL_STATS=1: the host calls made, and the last 256 of them) */
@@ -205,6 +319,9 @@ void hos_commit_init(void) {
     SetUnhandledExceptionFilter(report_crash);
     const char *after = getenv("HOS_STATS_AFTER");
     if (after && atoi(after) > 0) CreateThread(NULL, 0, stats_after, (void *)(uintptr_t)atoi(after), 0, NULL);
+    { void hos_memsplit_init(void); hos_memsplit_init(); }   /* (HOS_MEM_SPLIT, hos_memsplit.c) */
+    { void hos_hostsplit_init(void); hos_hostsplit_init(); }   /* (HOS_HOST_SPLIT, hos_hostsplit.c) */
+    { void hl_trace_gates(void); hl_trace_gates(); }         /* (HL_TRACE, hl_trace.c) */
 }
 
 /* ---- stand-ins --------------------------------------------------------------------------------------------- */
@@ -579,7 +696,7 @@ static DWORD WINAPI sample_all_thread(void *p) {
             }
             CloseHandle(snap);
             t0 = hos_now_ns();
-            hos_log("prof: all-thread sampling of %d threads into %s", nt, path);
+            hos_log("prof: all-thread sampling of %d threads into %s (t0 %lld ns)", nt, path, (long long)t0);
         }
         Sleep(2);
         const long ms = (long)((hos_now_ns() - t0) / 1000000);
@@ -588,6 +705,7 @@ static DWORD WINAPI sample_all_thread(void *p) {
             CONTEXT ctx = {0};
             ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
             const BOOL got = GetThreadContext(th[i], &ctx);
+            const int64_t at = hos_now_ns();   /* (the thread is stopped once its context is read) */
             char line[1024];
             int len = snprintf(line, sizeof line, "%ld %s|", ms, tn[i]);
             for (int depth = 0; got && depth < 16 && ctx.Rip && len < (int)sizeof line - 96; depth++) {
@@ -614,6 +732,11 @@ static DWORD WINAPI sample_all_thread(void *p) {
                 RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, ctx.Rip, f, &ctx, &hd, &frame, NULL);
             }
             ResumeThread(th[i]);
+            /* (TICK-039) HOS_SAMPLE_NS=1: the instant of this thread's sample in ns (hos_now_ns, the clock of HOS_JOBTRACE)
+               as a last ";@<ns>" frame, to match a sample to a trace's 50-200 us segments (the line's ms is 1 ms coarse) */
+            static int at_ns = -1;
+            if (at_ns < 0) at_ns = getenv("HOS_SAMPLE_NS") != NULL;
+            if (at_ns && len < (int)sizeof line - 24) snprintf(line + len, sizeof line - len, ";@%lld", (long long)at);
             fprintf(out, "%s\n", line);
         }
     }

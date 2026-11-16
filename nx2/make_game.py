@@ -50,7 +50,11 @@ import toolchain as _toolchain
 LINUX, CROSS = not _toolchain.windows(), _toolchain.windows() and os.name != "nt"
 # (SDL2.dll is sdl2-compat: it loads SDL3.dll from beside the exe. Left out of bin\ since v2.0.0, it said "Failed loading SDL3
 # library" three times and no controller worked: Discord #bug-reporting, 11-08)
-BESIDE = ["hookshot", "hookshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["hookshot.exe", "hookshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll"]
+BESIDE = ["hookshot", "hookshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["Hookshot.exe", "hookshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll"]
+# (Hookshot: the Windows game and its launcher were hookshot.exe before; a folder built then has them, removed once the new ones are in)
+OLD_EXES = [] if LINUX else ["hookshot.exe", "hookshot.map"]
+# (Linux) the game folder's launcher script (builder/linux/hookshot-folder); the game itself is bin/hookshot, which the engine and the launcher both expect
+LAUNCHER = "Hookshot"
 LANGUAGES = [("en-US", "English (US)"), ("en-GB", "English (UK)"), ("fr", "French (France)"), ("fr-CA", "French (Canada)"), ("de", "German"),
              ("it", "Italian"), ("es", "Spanish (Spain)"), ("es-419", "Spanish (Latin America)"), ("pt-BR", "Portuguese (Brazil)"), ("nl", "Dutch"),
              ("pl", "Polish"), ("ru", "Russian"), ("ja", "Japanese"), ("ko", "Korean"), ("zh-Hans", "Chinese (Simplified)"),
@@ -77,6 +81,27 @@ def no_throttle(handle=None):
 
 def say(*words):
     print("@@" + " ".join(str(w) for w in words), flush=True)
+
+
+def check_writable(out):
+    """The game folder must take new files before anything is read into it. A folder under Program Files (or another protected
+    place) only takes them with administrator rights, and the build used to stop minutes later inside nup.py with a bare
+    "PermissionError: [WinError 5]" on its .game folder"""
+    probe = os.path.join(out, ".hookshot_write_check")
+    try:
+        os.makedirs(out, exist_ok=True)
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+    except PermissionError as e:
+        protected = [os.environ.get(k) for k in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "SystemRoot")]
+        inside = any(d and os.path.normcase(os.path.abspath(out)).startswith(os.path.normcase(os.path.abspath(d)) + os.sep)
+                     for d in protected)
+        where = (" Windows protects folders under Program Files and Windows, and only lets administrators write there."
+                 if inside else "")
+        example = "~/Games/Hookshot" if LINUX else r"C:\Games\Hookshot"
+        fail("The game folder %s can't be written to (%s).%s In Hookshot Builder, choose a game folder of your own, for example "
+             "%s, and build again." % (out, e.strerror or e, where, example))
 
 
 def fail(text):
@@ -1031,6 +1056,31 @@ def shader_census_cmd(romfs, out):
     return PY + [os.path.join(HERE, "shader_census.py"), romfs, "--out", out]
 
 
+def apply_code_mods(a, out, exefs):
+    """The exeFS mods of the game folder's mods folder (nx2/exefs_mods.py) patched into the work copy of the game's modules, when the
+    builder's "Code mods" option is on (--code-mods on|off; left out, what the last build of this folder chose, so that the game's
+    update keeps it). Returns {module: [(lo, hi, mod name)]}, the bytes the patches changed (the list the engine reads is made from it
+    after the lift: main below). Only the work copy changes, never the kept one (.hookshot_exefs): the lift key hashes these bytes, so a patched
+    game is translated again and one without patches keeps the key it always had"""
+    import exefs_mods
+    choice = getattr(a, "code_mods", None)
+    if choice is not None:
+        exefs_mods.write_state(out, choice == "on")
+    if not exefs_mods.read_state(out):
+        return {}
+    ranges = {}
+    try:
+        done = exefs_mods.apply_mods(exefs, exefs_mods.mods_root(out), say=lambda t: print(t, flush=True), ranges=ranges)
+    except exefs_mods.PatchError as e:
+        fail("A code mod was refused: %s" % e)
+    if done:
+        print("code mods: %d patch file(s) applied: the game is translated again from the patched code (the native engine leaves every function "
+              "a patch touches to that code: the build log says \"NOT gated\" for each entry gate left out)" % len(done), flush=True)
+    else:
+        print("code mods: on, and no code patch in the mods folder", flush=True)
+    return ranges
+
+
 LIFT_KEY = ".lift_key"   # (in <work>/sa/gen: what the lifted C there was made from)
 
 
@@ -1155,6 +1205,62 @@ def ngx_built():
     return bool(sdk) and os.path.isfile(ngx_script().library(sdk, ngx_platform()))
 
 
+FSR_MARK = ".hookshot_fsr"   # (in a game folder built with AMD FSR 4: --update builds it with FSR again)
+
+
+def fsr_wanted(a, out):
+    """AMD FSR 4 in this build (--fsr; or --update of a folder built with it, unless --no-fsr): nothing to download, AMD's
+    MIT headers are in third_party/fidelityfx and its DLLs are the player's (the readme)"""
+    if getattr(a, "no_fsr", False):
+        return False
+    return bool(getattr(a, "fsr", False)) or bool(a.update and os.path.isfile(os.path.join(out, FSR_MARK)))
+
+
+def ffx_script():
+    """scripts/ffx_sdk.py as a module: AMD's FSR runtime, its files and SHA-256s"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ffx_sdk", os.path.join(ROOT, "scripts", "ffx_sdk.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def ffx_folder():
+    """Where --fetch-fsr-runtime keeps AMD's FSR runtime between builds: HOOKSHOT_FFX_SDK, else work/ffx-sdk here"""
+    return os.environ.get("HOOKSHOT_FFX_SDK") or os.path.join(ROOT, "work", "ffx-sdk")
+
+
+def fetch_fsr_runtime(a):
+    """--fetch-fsr-runtime (with --fsr, Windows; the Hookshot Builder's AMD FSR 4 tick): AMD's signed FSR SDK 2.4 Vulkan
+    runtime (scripts/ffx_sdk.py) into ffx_folder() before the build, once AMD's license was accepted (--accept-amd-license:
+    the builder asked first, as for NVIDIA's), each file checked against its SHA-256; only what is missing or not the file
+    expected is downloaded. Off unless asked: a build with --fsr alone downloads nothing"""
+    if not getattr(a, "accept_amd_license", False):
+        fail("AMD FSR 4 needs AMD's license accepted first (--accept-amd-license).")
+    ffx = ffx_script()
+    print(ffx.NOTICE, flush=True)
+    print("AMD's license accepted: getting AMD's FSR runtime into %s" % ffx_folder(), flush=True)
+    try:
+        ffx.fetch(ffx_folder(), say=lambda line: print(line, flush=True))
+    except (OSError, ValueError) as e:
+        fail("AMD's FSR runtime could not be downloaded (%s). Check the connection and build again, or leave out "
+             "--fetch-fsr-runtime and put AMD's DLLs beside the game yourself (the readme)." % e)
+
+
+def place_fsr_runtime(out):
+    """(AMD FSR 4, --fetch-fsr-runtime) AMD's runtime into the game folder, where gpu/vk/vk_fsr4.cpp looks. Returns the folder,
+    or None when nothing was fetched"""
+    ffx = ffx_script()
+    if LINUX or not ffx.complete(ffx_folder()):
+        return None
+    if ffx.others(out):
+        ffx.install(ffx_folder(), out, say=lambda line: print(line, flush=True))   # (it says what it left alone)
+        return None
+    dst = ffx.install(ffx_folder(), out)
+    print("AMD FSR 4: AMD's runtime in %s (AMD's, under AMD's license)" % dst, flush=True)
+    return dst
+
+
 def place_ngx_runtime(out):
     """(NVIDIA DLSS) a game built with NVIDIA's SDK (HOOKSHOT_NGX_SDK, as nx2/build.py takes it) gets DLSS's runtime in its ngx
     folder, where gpu/vk/vk_dlss.cpp looks first: nvngx_dlss.dll on Windows, libnvidia-ngx-dlss.so.<version> on Linux. Never
@@ -1187,10 +1293,19 @@ def parse_args():
     p.add_argument("--update", help="a game folder built before: built again from the game files it keeps (the game's update offer)")
     p.add_argument("--no-prepare-shaders", action="store_true",
                    help="leave the shaders' preparation to the game's first start (the builder's \"Prepare shaders now\" unticked)")
+    p.add_argument("--code-mods", choices=("on", "off"),
+                   help="apply the exeFS (code) mods of the game folder's mods folder before the translation (the builder's \"Code mods\"); "
+                        "left out: as this folder's last build chose")
     p.add_argument("--log", metavar="FILE", help="also save build output to a UTF-8 file (replaces the file if it exists)")
     # (NVIDIA DLSS, off unless asked: NVIDIA's SDK into HOOKSHOT_NGX_SDK first, under NVIDIA's license. scripts/ngx_sdk.py)
     p.add_argument("--fetch-ngx-sdk", action="store_true", help="download NVIDIA's DLSS SDK into HOOKSHOT_NGX_SDK before the build")
     p.add_argument("--accept-nvidia-license", action="store_true", help="NVIDIA's DLSS SDK license, accepted (with --fetch-ngx-sdk)")
+    # (AMD FSR 4, off unless asked: nothing is downloaded. gpu/vk/vk_fsr4.cpp)
+    p.add_argument("--fsr", action="store_true", help="build with AMD FSR 4 (AMD's DLLs are not included: see the readme)")
+    p.add_argument("--no-fsr", action="store_true", help="with --update: build without AMD FSR 4 even if the folder had it")
+    p.add_argument("--fetch-fsr-runtime", action="store_true",
+                   help="with --fsr (Windows): download AMD's FSR runtime (scripts/ffx_sdk.py) and put it in the game folder")
+    p.add_argument("--accept-amd-license", action="store_true", help="AMD's FSR SDK license, accepted (with --fetch-fsr-runtime)")
     a = p.parse_args()
     a.default_work = p.get_default("work")   # (main: the builder's own work folder, stop_stray_compilers)
     return a
@@ -1216,7 +1331,7 @@ def main(a=None):
         fail("needs --out, and --nup or --romfs with --exefs")
     out = os.path.abspath(a.out)
     work = os.path.abspath(a.work)
-    os.makedirs(out, exist_ok=True)
+    check_writable(out)
     # (linux) the compiler probe waits until the compile. The game-free cache test stops at the lift, and a missing
     # compiler is still said before the long compile, not after the package has been read
     check_cpu()   # (no game read yet: the AppImage on a CPU without AVX2 stops here)
@@ -1226,6 +1341,22 @@ def main(a=None):
     drop_stale_objects(work)
     if getattr(a, "fetch_ngx_sdk", False):
         fetch_ngx_sdk(a)
+    # (AMD FSR 4: the build's switch for nx2/build.py, and the folder's mark for the next --update)
+    if fsr_wanted(a, out):
+        os.environ["HOOKSHOT_FSR"] = "1"
+        if getattr(a, "fetch_fsr_runtime", False) and not LINUX:
+            fetch_fsr_runtime(a)
+        elif getattr(a, "fetch_fsr_runtime", False):
+            print("--fetch-fsr-runtime: AMD publishes this runtime for Windows only; on Linux see the readme "
+                  "(amd_fidelityfx_upscaler_vk.so)", flush=True)
+        open(os.path.join(out, FSR_MARK), "w").close()
+        if os.environ.get("HOOKSHOT_VK_PREBUILT"):   # (the AppImage's back end: built with AMD FSR 4, scripts/linux/appimage.sh)
+            print("--fsr: the prebuilt Vulkan back end (HOOKSHOT_VK_PREBUILT) has AMD FSR 4; AMD's library "
+                  "(amd_fidelityfx_upscaler_vk.so) is the player's, beside the game (the readme)", flush=True)
+    else:
+        os.environ.pop("HOOKSHOT_FSR", None)
+        if os.path.isfile(os.path.join(out, FSR_MARK)):
+            os.remove(os.path.join(out, FSR_MARK))
     exefs = os.path.join(work, "exefs")
     romfs = os.path.join(out, "romfs")
 
@@ -1300,6 +1431,7 @@ def main(a=None):
         shutil.rmtree(kept, ignore_errors=True)
         shutil.copytree(exefs, kept)
     check_supported_build(exefs)
+    code_ranges = apply_code_mods(a, out, exefs)
 
     # (made once on the development PC: lists of addresses and counts, no game code)
     for name in ("hot_funcs.txt", "hot_order.txt", "hookshot_pieces.prof", "hookshot.res"):
@@ -1360,6 +1492,23 @@ def main(a=None):
     else:
         fail("The translated game came out cut short twice (%s). Check that the drive with %s has free space, and that no antivirus "
              "and no second Hookshot Builder is working in that folder, then update again." % (", ".join(cut[:6]), work))
+    # (Hookshot native engine) the entry gates host/hl_*.c asks for (nx2/hl_gates.py), whether the lift ran or was skipped:
+    # the lift puts them in, but its key does not cover the HL_GATE lines of host/, so an update that adds a gate would
+    # leave it out, and one that drops a gate would leave a gate line calling a function no host file defines any more (an
+    # undefined symbol at every link). A change here rewrites the key: the files were as it vouched for just before
+    import hl_gates
+    # (the functions the exeFS mods patch: no entry gate goes into them, and the engine is told the same list at start, so that no
+    # native answer overrides a patched function. The list is written with the game's other files below)
+    code_patch_list, patched = "", {}
+    if code_ranges:
+        import exefs_mods
+        code_patch_list, patched = exefs_mods.patched_functions(code_ranges, os.path.join(work, "sa", "image"),
+                                                                say=lambda t: print(t, flush=True))
+        print("code mods: the patches touch %d function(s) of the translated game" % len(patched), flush=True)
+    before = gen_print(gen_dir)
+    hl_gates.apply(gen_dir, quiet=True, skip=patched)
+    if gen_print(gen_dir) != before:
+        write_lift_key(work, key)
 
     if LINUX:
         check_linux_compiler()
@@ -1431,10 +1580,10 @@ def main(a=None):
     built = os.path.join(work, "sa", "build")
     # (the new files are copied in beside the old ones as <name>.new and swapped in only once all are complete: a build stopped while
     # copying, or a full disk, left a half-written 460 MB hookshot.exe and no game to play. The old game stays playable until the swap)
-    # (Windows) hookshot.exe in the folder is the game's launcher: the builder's small setup, which opens the installed builder as a
+    # (Windows) Hookshot.exe in the folder is the game's launcher: the builder's small setup, which opens the installed builder as a
     # launcher for this folder (Play, and Update left of it when a newer release is out: builder/setup/setup.c launch mode), or starts
     # the game when no builder is installed. The game and its DLLs are in bin\; its files (image.bin, romfs, saves, settings, caches)
-    # stay in the folder (host/hos_paths.h). Without the setup (a development build) the game stays hookshot.exe in the folder
+    # stay in the folder (host/hos_paths.h). Without the setup (a development build) the game stays Hookshot.exe in the folder
     staged = []
     # (Linux) the same launcher, as a script, when this is a packaged builder (the AppImage sets HOOKSHOT_TOOLS). A source
     # checkout leaves hookshot in the folder, as a development build on Windows does when the setup exe is not beside it
@@ -1453,7 +1602,7 @@ def main(a=None):
             staged.append((src, os.path.join(game_dir, n)))
     staged.append((os.path.join(work, "sa", "image", "image.bin"), os.path.join(out, "image.bin")))
     if launcher:
-        staged.append((launcher, os.path.join(out, BESIDE[0])))
+        staged.append((launcher, os.path.join(out, LAUNCHER if LINUX else BESIDE[0])))
     for src, dst in staged:
         try:
             if os.path.exists(dst + ".new"):
@@ -1469,15 +1618,27 @@ def main(a=None):
         except PermissionError:
             fail("Could not replace %s. Close any running copy of Hookshot and check that the file and folder are writable, then retry. "
                  "Staged replacements remain beside the installed files; the compiled source remains at %s." % (dst, src))
+    for d in ([out, os.path.join(out, "bin")] if OLD_EXES else []):   # (the old hookshot.exe game and launcher: never two games in a folder)
+        for n in OLD_EXES:
+            if n in BESIDE:
+                continue
+            try:
+                if os.path.isfile(os.path.join(d, n)):
+                    os.remove(os.path.join(d, n))
+            except OSError:
+                pass
     if launcher:   # (a folder built before the launcher: its libraries left the folder for bin\; hookshot is the launcher now)
         stale = [] if LINUX else sorted(f for f in os.listdir(out) if f.endswith(".dll") and f.startswith(("av", "sw")))
-        for n in BESIDE[1:] + stale + ["hookshot.map", "hookshot-game.exe"]:
+        # (Linux: the launcher was called hookshot before, or the game itself was, in a folder built without one; the game is bin/hookshot now)
+        for n in BESIDE[1:] + stale + ["hookshot.map", "hookshot-game.exe"] + (["hookshot"] if LINUX else []):
             try:
                 if os.path.isfile(os.path.join(out, n)):
                     os.remove(os.path.join(out, n))
             except OSError:
                 pass
     place_ngx_runtime(out)
+    if fsr_wanted(a, out) and getattr(a, "fetch_fsr_runtime", False):
+        place_fsr_runtime(out)
     # every shader of the game, for its first start to translate (gpu/vk/vk_shader.cpp seed_open). Without it the game still runs, compiling them
     # as it meets them: not worth stopping a finished build for
     if run(shader_census_cmd(romfs, os.path.join(out, "hookshot_shaders.bin")), check=False, output=sys.stderr):
@@ -1496,6 +1657,13 @@ def main(a=None):
         copy_writable(icon, os.path.join(out, "hookshot.png"))   # (a second build overwrites the first's)
     seed_pipelines(out)
     ship_state_list(out)
+    import exefs_mods
+    patch_list = os.path.join(out, exefs_mods.PATCH_LIST)   # (what host/hl_patched.c reads; none when no code patch is in this build)
+    if code_patch_list:
+        with open(patch_list, "w", encoding="utf-8", newline="\n") as f:
+            f.write(code_patch_list)
+    elif os.path.exists(patch_list):
+        os.remove(patch_list)
     language = os.path.join(out, "language.txt")   # (the same text as host/nn_applet.c writes)
     with open(language, "w", encoding="utf-8", newline="\n") as f:
         f.write("# The game's language. Change the line below to one of the codes listed here, save, and start the game again.\n\n%s\n\n" % a.language)

@@ -3,6 +3,7 @@
    (debug output, ticks, info queries) or a sign that an SDK function above it wants an HLE. Unknown ones stop the
    run with the svc number and the caller, so the log says what to do next. Numbers: switchbrew.org "SVC". */
 #include "hos.h"
+#include "hos_guestpages.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +27,7 @@ static uint64_t get_info(uint32_t id0, uint64_t id1, int *ok) {
     case 4: return HOS_HEAP_BASE;                          /* HeapRegionAddress */
     case 5: return HOS_SPACE_END - HOS_HEAP_BASE;          /* HeapRegionSize */
     case 6: return hos_total_memory;                       /* TotalMemorySize */
-    case 7: return hos_program_size + hos_heap_size;       /* UsedMemorySize */
+    case 7: return hos_used_memory(hos_program_size);      /* UsedMemorySize: + heap + mapped pages (hos_mem.c) */
     case 8: return 0;                                      /* DebuggerAttached */
     case 11: return 0x5A3C9E1F0B7D2468ULL ^ (id1 * 0x9E3779B97F4A7C15ULL);   /* RandomEntropy */
     case 12: return 0x08000000ULL;                         /* AslrRegionAddress */
@@ -42,7 +43,7 @@ static uint64_t get_info(uint32_t id0, uint64_t id1, int *ok) {
         return ctx_page;
     }
     case 21: return hos_total_memory;                      /* TotalNonSystemMemorySize */
-    case 22: return hos_program_size + hos_heap_size;      /* UsedNonSystemMemorySize */
+    case 22: return hos_used_memory(hos_program_size);     /* UsedNonSystemMemorySize */
     case 23: return 1;                                     /* IsApplication */
     /* the Switch 2 SDK's (ids from Eglantine's svc_types.h / svc_info.cpp) */
     case 24: return 256;                                   /* FreeThreadCount */
@@ -153,7 +154,9 @@ static uint32_t arbitrate_lock(uint32_t owner, uint64_t mutex, uint32_t tag) {
     waiters[nwaiters++] = (Waiter){self, mutex, 0, tag, 0};
     ReleaseSRWLockExclusive(&klock);
     int to;
+    HOS_JT(JT_K_WAIT_B, mutex, hos_jt_lr());
     hos_thread_wait(self, -1, &to);   /* woken once release_locked made us the owner */
+    HOS_JT(JT_K_WAIT_E, mutex, 2);
     return 0;
 }
 
@@ -178,7 +181,9 @@ static uint32_t wait_key(uint64_t mutex, uint64_t key, uint32_t tag, int64_t tim
     release_locked(mutex);
     ReleaseSRWLockExclusive(&klock);
     int to;
+    HOS_JT(JT_K_WAIT_B, key, hos_jt_lr());
     hos_thread_wait(self, timeout, &to);
+    HOS_JT(JT_K_WAIT_E, key, to ? 6 : 2);
     if (!to) return 0;
     AcquireSRWLockExclusive(&klock);
     int i = find_thread(self);
@@ -271,7 +276,9 @@ static uint32_t wait_address(uint64_t addr, uint32_t type, uint64_t value, int64
     waiters[nwaiters++] = (Waiter){self, 0, addr, 0, 2};
     ReleaseSRWLockExclusive(&klock);
     int to;
+    HOS_JT(JT_K_WAIT_B, addr, hos_jt_lr());
     hos_thread_wait(self, timeout, &to);
+    HOS_JT(JT_K_WAIT_E, addr, to ? 6 : 2);
     if (!to) return 0;
     AcquireSRWLockExclusive(&klock);
     int i = find_thread(self);
@@ -349,6 +356,8 @@ static void query_memory(uint64_t out, uint64_t addr) {
 #define CUR_THREAD 0xFFFF8000u
 static HosThread *thread_handle(uint32_t h) { return h == CUR_THREAD ? hos_self() : hos_thread_by_handle(h); }
 
+int hos_core_count_on(void);
+void hos_core_count_svc(void);
 void a64_svc(Ctx *c, uint32_t imm) {
     hos_vcore_checkpoint();
     switch (imm) {
@@ -437,6 +446,7 @@ void a64_svc(Ctx *c, uint32_t imm) {
         return;
     }
     case 0x10:   /* GetCurrentProcessorNumber */
+        if (hos_core_count_on()) hos_core_count_svc();   /* (TICK-062 A10, HOS_CORE_COUNT) */
         c->x[0] = (uint32_t)hos_thread_core(hos_self());
         return;
     case 0x1E:   /* GetSystemTick */
@@ -475,7 +485,8 @@ void a64_svc(Ctx *c, uint32_t imm) {
         {   /* (pages under a Vulkan import stay committed, zeroed: hos_mem.c FreeMemoryPages) */
             extern int rx_guest_imported(uint64_t lo, uint64_t hi);
             if (rx_guest_imported(c->x[0], c->x[0] + c->x[1])) memset(GP(c->x[0]), 0, (size_t)c->x[1]);
-            else VirtualFree(GP(c->x[0]), (SIZE_T)c->x[1], MEM_DECOMMIT);
+            else if (hos_gp_ready() && hos_gp_touches(GP(c->x[0]), (size_t)c->x[1])) hos_gp_decommit(GP(c->x[0]), (size_t)c->x[1]);
+            else hos_gp_hold(1), VirtualFree(GP(c->x[0]), (SIZE_T)c->x[1], MEM_DECOMMIT), hos_gp_hold(0);
         }
         c->x[0] = R_OK;
         return;

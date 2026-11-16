@@ -139,6 +139,8 @@ static int reserve_guest(void) {
        runtime hands memory out (hos_commit) or on first touch */
     void hos_commit_init(void);
     hos_commit_init();
+    int hos_reserve_guest_pages(int write_watch);   /* (mkw_glue.c: HOS_GUEST_PAGES=1, the heap and regions over a placeholder) */
+    if (hos_reserve_guest_pages(watch != 0)) return 1;
     return VirtualAlloc((void *)A64_HOST_BASE, GUEST_SPACE, MEM_RESERVE | watch, PAGE_NOACCESS) == (void *)A64_HOST_BASE;
 #else
     /* (linux) the whole window readable and writable at once, its pages made as they are first touched (no commit
@@ -375,6 +377,47 @@ static int env_line_allowed(const char *name, const char *value) {
     const int drive = ((value[0] | 0x20) >= 'a' && (value[0] | 0x20) <= 'z' && value[1] == ':');
     return !strpbrk(value, "/\\") && !drive && value[0] != '~' && strcmp(value, ".") && strcmp(value, "..");
 }
+/* (Hookshot, sprint 5) The switches adopted together on 2026-11-12, on unless the environment (or hookshot_env.txt, read
+   first) sets them, =0: off. One at a time each was inside the run-to-run spread; together, with the late pages of a
+   texture's storage deferred (vk_memory.cpp) and the block lift, castle-move went 77.5 -> ~85 fps with the picture and
+   the game's speed right (docs/tickets/SPRINT-5.md; the held flush's linger of nvn_native.c, first counted with them at
+   ~91 fps, is off: its picture was wrong). Set before main (a constructor): hookshot_env.txt, read in main, and the
+   environment itself still decide. */
+__attribute__((constructor)) static void hookshot_env_defaults(void) {
+    static const char *const on[] = {
+        "RX_VK_MSYNC_FAST", "RX_VK_SEG_EARLY", "RX_VK_CAPTURE_CLAIM", "RX_VK_COLLECT_FAST", "RX_VK_SHADOW_FAST", "RX_VK_STAMP_SPLIT",
+        "RX_VK_DRY_LEAN", "RX_VK_WORK_LOCAL", "RX_VK_SEG_SETUP_PAR", "RX_VK_OCC_PROXY_SKIP", "RX_VK_FENCE_POLL_FAST",
+        "RX_VK_READBACK_TICKET", "HOS_CV_SIGNAL_FAST", "HOS_THREAD_OF_CACHE", "HOS_SHORT_SLEEP_PAUSE",
+    };
+    /* (sprint 5, session 4: 85.0 against 82.3 fps over 5 rounds together, each inside the spread alone) the capture copied ahead in
+       one parallel round when the main thread leaves its end-of-frame wait, and the engine's pass-start and dispatch barriers
+       trusting the game's */
+    static const char *const more[][2] = {
+        {"RX_VK_CAPTURE_PRECOPY", "1"}, {"RX_VK_PRECOPY_KICK", "2"}, {"HOS_PRECOPY_KICK", "1"},
+        {"RX_VK_BARRIER_TRUST", "1"}, {"RX_VK_BARRIER_DEDUPE_PAR", "1"},
+    };
+    for (size_t i = 0; i < sizeof more / sizeof more[0]; i++)
+        if (!getenv(more[i][0])) {
+            char kv[64];
+            snprintf(kv, sizeof kv, "%s=%s", more[i][0], more[i][1]);
+#ifdef _WIN32
+            _putenv(kv);
+#else
+            setenv(more[i][0], more[i][1], 0);
+#endif
+        }
+    for (size_t i = 0; i < sizeof on / sizeof on[0]; i++)
+        if (!getenv(on[i])) {
+            char kv[64];
+            snprintf(kv, sizeof kv, "%s=1", on[i]);
+#ifdef _WIN32
+            _putenv(kv);
+#else
+            setenv(on[i], "1", 0);
+#endif
+        }
+}
+
 static void load_hookshot_env(void) {
     char path[MAX_PATH + 32];
     const char *other = getenv("HOS_ENV_FILE");
@@ -912,6 +955,8 @@ static _Thread_local uint64_t flight_transform_controller;
 static _Thread_local uint64_t flight_pose_actor;
 static _Thread_local float flight_transform_yaw;
 static int64_t flight_player_seen;
+static int64_t play_began;   /* (the first time the player ran, hos_now_ns clock; 0 before) */
+static int64_t process_start_ns;   /* (hos_now_ns when main began) */
 
 static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components) {
     int rx_option(int id, int otherwise);
@@ -922,6 +967,12 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
     if (!flying) flying_actor = 0;
     const int64_t now = hos_now_ns();
     __atomic_store_n(&flight_player_seen, now, __ATOMIC_RELAXED);
+    if (!__atomic_load_n(&play_began, __ATOMIC_RELAXED)) {
+        __atomic_store_n(&play_began, now, __ATOMIC_RELAXED);
+        /* (the bench harness cuts its window here: tools/bench/run_bench.py, "play" origin; the clock is the harness's own) */
+        hos_log("play: began at clock %lld ns, %.2f s after the process started", (long long)now,
+                (double)(now - process_start_ns) / 1e9);
+    }
     if (marked_actor != actor || now - last_player_tick > 2000000000LL) marked_controller = 0;
     last_player_tick = now;
     int action = rx_option(HOS_OPT_CHEAT_ACTION, 0);
@@ -1038,10 +1089,24 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
 }
 #endif
 
-int hos_oot_flight_shortcut_ready(void) {
+/* Whether the player has run in the last quarter second: play is on (host/oot_autoload.c stops its presses on it). */
+int hos_oot_player_seen(void) {
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
     const int64_t seen = __atomic_load_n(&flight_player_seen, __ATOMIC_RELAXED);
     return seen && hos_now_ns() - seen < 250000000;
+#else
+    return 0;
+#endif
+}
+
+int hos_oot_flight_shortcut_ready(void) {
+    return hos_oot_player_seen();
+}
+
+/* When play began (hos_now_ns clock; 0 until the player has run once): host/nn_hid.c's HOS_INPUT_FROM_PLAY. */
+int64_t hos_oot_play_ns(void) {
+#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+    return __atomic_load_n(&play_began, __ATOMIC_RELAXED);
 #else
     return 0;
 #endif
@@ -1283,6 +1348,9 @@ static int game_main(int argc, char **argv) {
     if (!narrow_paths_ok(argc, argv)) return 1;
     load_hookshot_env();
 #endif
+#if defined(_WIN32) || defined(__linux__)
+    process_start_ns = hos_now_ns();
+#endif
     occlusion_switch();
     {
         const char *protect_hearts = getenv("HOS_OOT_PROTECT_HEARTS");
@@ -1496,6 +1564,7 @@ static int game_main(int argc, char **argv) {
     uint64_t sp = c->x[31];
     void hos_prof_start(void);
     hos_prof_start();   /* HOS_PROFILE=<seconds> */
+    hos_jt_start();     /* (TICK-039) HOS_JOBTRACE=<path> */
 #ifdef _WIN32
     timeBeginPeriod(1);   /* 1 ms timer resolution: the 60 Hz vsync and the game's frame pacing sleep in short steps */
     no_power_throttling();

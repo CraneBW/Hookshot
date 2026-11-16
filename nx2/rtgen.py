@@ -16,21 +16,10 @@ import os
 import kit
 
 POLL_DECL = r"""
-/* (nx2/poll.py) loop back-edge interrupt polls: A64_POLLING builds clear c->poll and call a64_poll_cur, the backend's,
-   when it is set. The call is handed nothing on purpose: the context parameter is noescape (A64_NOESC) and never
-   captured, so a call with no pointer argument cannot touch *c, and the compiler keeps guest registers in host registers
-   across the loop. (a64_poll(c), the old form, made every loop body reload and store them: a call that takes c may change
-   any of it.) The poll sits before the backward goto, after the body's stores: at the loop header, a call C cannot mark
-   as returning (LLVM's willreturn) left the stores after it not guaranteed to execute, and nothing was promoted.
-   a64_poll_cur finds the thread's context itself (host/mkw_glue.c, hos_ctx). A64_POLL_CTX keeps the old form for the
-   emulator-hosted DLL (nx2/rt/eden_shim.c), whose host's poll takes the context. */
+/* (nx2/poll.py) loop-header interrupt polls: A64_POLLING builds call a64_poll, the backend's, when c->poll is set */
 void a64_poll(Ctx *A64_NOESC c);
-void a64_poll_cur(void);
-#if defined(A64_POLLING) && defined(A64_POLL_CTX)
+#if defined(A64_POLLING)
 #define A64_POLL(c) do { if (__builtin_expect(__atomic_load_n(&(c)->poll, __ATOMIC_RELAXED) != 0, 0)) a64_poll(c); } while (0)
-#elif defined(A64_POLLING)
-#define A64_POLL(c) do { if (__builtin_expect(__atomic_load_n(&(c)->poll, __ATOMIC_RELAXED) != 0, 0)) { \
-    __atomic_store_n(&(c)->poll, 0, __ATOMIC_RELAXED); a64_poll_cur(); } } while (0)
 #else
 #define A64_POLL(c) ((void)0)
 #endif"""
@@ -61,13 +50,25 @@ MARK_NATIVE_64 = r"""extern uint8_t a64_dirty[A64_DIRTY_PAGES];
 /* (Tried 2026-10-21: reading a mark first and writing it only when clear, against cache lines moving between cores:
    game threads +1.1 ms a frame, the code 18 MB bigger. Not kept.) */
 #define A64_DIRTY_AT(a) (((uint64_t)(a) >> 12) & (A64_DIRTY_PAGES - 1))
+#if defined(A64_GRAN)
+/* (Hookshot, sprint 5; -DA64_GRAN, off by default) a mark per 512 bytes too, eight to a page, set before the page's: a capture
+   that takes a page's mark then takes its eight (host/rx_backend.c hos_gran_take) and copies only what was written. A store is
+   at most 64 bytes (DC ZVA): its first and last byte's granules are all it touches. */
+extern uint8_t *a64_gran;
+#define A64_GRAN_AT(a) (((uint64_t)(a) >> 9) & (A64_DIRTY_PAGES * 8 - 1))
+#define A64_MARK(a, n) (__atomic_store_n(&a64_gran[A64_GRAN_AT(a)], 1, __ATOMIC_RELEASE), \
+                        __atomic_store_n(&a64_gran[A64_GRAN_AT((a) + (n) - 1)], 1, __ATOMIC_RELEASE), \
+                        __atomic_store_n(&a64_dirty[A64_DIRTY_AT(a)], 1, __ATOMIC_RELEASE), \
+                        __atomic_store_n(&a64_dirty[A64_DIRTY_AT((a) + (n) - 1)], 1, __ATOMIC_RELEASE))
+#else
 #define A64_MARK(a, n) (__atomic_store_n(&a64_dirty[A64_DIRTY_AT(a)], 1, __ATOMIC_RELEASE), \
-                        __atomic_store_n(&a64_dirty[A64_DIRTY_AT((a) + (n) - 1)], 1, __ATOMIC_RELEASE))"""
+                        __atomic_store_n(&a64_dirty[A64_DIRTY_AT((a) + (n) - 1)], 1, __ATOMIC_RELEASE))
+#endif"""
 
 SUBST = {
     "a64.h": [
         (THREAD, THREAD.replace("\n} GuestContext;", "\n    uint32_t poll;              "
-                                "/* (nx2/rtgen.py) interrupt request: A64_POLL clears it and calls a64_poll_cur when set */\n} GuestContext;")),
+                                "/* (nx2/rtgen.py) interrupt request: A64_POLL calls a64_poll when set */\n} GuestContext;")),
         (RET_MISMATCH, RET_MISMATCH + POLL_DECL),
         ("#define A64_PTR(a) (A64_MEM + (uint32_t)(a))", ADDR64),
         (MARK_NATIVE, MARK_NATIVE_64),
@@ -75,7 +76,8 @@ SUBST = {
     "a64_rt.c": [
         (LOOKUP, "#if A64_ADDR64\n    if (addr >> 32) return NULL;   /* (code lies below 4 GB: never a truncated match) */\n"
                  "#endif\n" + LOOKUP),
-        ("uint8_t a64_dirty[1u << 20];", "uint8_t a64_dirty[A64_DIRTY_PAGES];"),
+        ("uint8_t a64_dirty[1u << 20];", "uint8_t a64_dirty[A64_DIRTY_PAGES];\n#if defined(A64_GRAN)\n"
+         "uint8_t *a64_gran;   /* (nx2/rtgen.py: 8 marks a page, reserved and committed by host/hos_mem.c hos_gran_init) */\n#endif"),
     ],
 }
 

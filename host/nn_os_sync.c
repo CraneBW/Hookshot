@@ -17,6 +17,7 @@ enum { K_MUTEX = 1, K_COND, K_EVENT, K_SEMA, K_QUEUE, K_RWLOCK, K_MULTIWAIT, K_H
 typedef struct Obj {
     uint64_t key;
     int kind;
+    uint32_t ix;   /* (Hookshot) a mutex's number in mx_objs once it has one (0: none): see obj() */
     SRWLOCK lk;
     CONDITION_VARIABLE cv;
     /* mutex / rwlock */
@@ -56,11 +57,17 @@ static SRWLOCK table_lock = SRWLOCK_INIT;
 static Obj **table;
 static uint64_t *table_keys;   /* each slot's object's key, beside it: a probe compares keys without visiting objects */
 static uint64_t cap, used;
-typedef struct Table {   /* (the slots, then the keys: cap of each) */
-    uint64_t cap;
+/* TICK-062 A4/B7, HOS_OBJ_PACK=1: the slot pointer and its key side by side (stride 2: {Obj *, key} pairs, 16 bytes) instead of
+   the pointer array and then the key array (stride 1): a probe touches one cache line, not two, before the object itself.
+   The same values at the same slot numbers, so every lookup answers as before. */
+static uint64_t tstride = 1;
+typedef struct Table {   /* (stride 1: the slots, then the keys, cap of each; stride 2: cap pairs) */
+    uint64_t cap, stride;
     Obj *slot[];
 } Table;
-static uint64_t *table_keys_of(const Table *t) { return (uint64_t *)(void *)(t->slot + t->cap); }
+static uint64_t *table_keys_of(const Table *t) {
+    return t->stride == 2 ? (uint64_t *)(void *)t->slot + 1 : (uint64_t *)(void *)(t->slot + t->cap);
+}
 static Table *live;
 
 static uint64_t slot_of(uint64_t key, uint64_t c) { return (key * 0x9E3779B97F4A7C15ULL >> 20) & (c - 1); }
@@ -68,8 +75,8 @@ static uint64_t slot_of(uint64_t key, uint64_t c) { return (key * 0x9E3779B97F4A
 static Obj *find_locked(uint64_t key) {
     if (!table) return NULL;
     for (uint64_t i = slot_of(key, cap);; i = (i + 1) & (cap - 1)) {
-        if (!table[i]) return NULL;
-        if (table_keys[i] == key && table[i]->kind) return table[i];
+        if (!table[i * tstride]) return NULL;
+        if (table_keys[i * tstride] == key && table[i * tstride]->kind) return table[i * tstride];
     }
 }
 
@@ -135,40 +142,43 @@ static void bury_locked(Obj *o) {
 static Obj *find_dead_locked(uint64_t key) {
     if (!table) return NULL;
     for (uint64_t i = slot_of(key, cap);; i = (i + 1) & (cap - 1)) {
-        if (!table[i]) return NULL;
-        if (table_keys[i] == key && !table[i]->kind) return table[i];
+        if (!table[i * tstride]) return NULL;
+        if (table_keys[i * tstride] == key && !table[i * tstride]->kind) return table[i * tstride];
     }
 }
 
 static void insert_locked(Obj *o) {
     if (!table || used * 2 >= cap) {
         uint64_t ncap = cap ? cap * 2 : 1 << 16;
+        if (!cap) tstride = getenv("HOS_OBJ_PACK") ? 2 : 1;
+        const uint64_t ns = tstride;
         Table *t = (Table *)calloc(1, sizeof(Table) + ncap * (sizeof(Obj *) + sizeof(uint64_t)));
         Obj **nt = t->slot;
         t->cap = ncap;
+        t->stride = ns;
         uint64_t *nk = table_keys_of(t);
         for (uint64_t i = 0; i < cap; i++)
-            if (table[i] && table[i]->kind) {
-                uint64_t j = slot_of(table[i]->key, ncap);
-                while (nt[j]) j = (j + 1) & (ncap - 1);
-                nt[j] = table[i];
-                nk[j] = table[i]->key;
-            } else if (table[i]) {
-                bury_locked(table[i]);
+            if (table[i * tstride] && table[i * tstride]->kind) {
+                uint64_t j = slot_of(table[i * tstride]->key, ncap);
+                while (nt[j * ns]) j = (j + 1) & (ncap - 1);
+                nt[j * ns] = table[i * tstride];
+                nk[j * ns] = table[i * tstride]->key;
+            } else if (table[i * tstride]) {
+                bury_locked(table[i * tstride]);
             }
         table = nt;
         table_keys = nk;
         cap = ncap;
         used = 0;
-        for (uint64_t i = 0; i < cap; i++) used += table[i] != NULL;
+        for (uint64_t i = 0; i < cap; i++) used += table[i * tstride] != NULL;
         __atomic_store_n(&live, t, __ATOMIC_RELEASE);
     }
     uint64_t i = slot_of(o->key, cap);
-    while (table[i] && table[i]->kind) i = (i + 1) & (cap - 1);
-    if (!table[i]) used++;
-    else bury_locked(table[i]);   /* (a tombstone of another address) */
-    __atomic_store_n(&table_keys[i], o->key, __ATOMIC_RELAXED);   /* (before the object: see find_unlocked) */
-    __atomic_store_n(&table[i], o, __ATOMIC_RELEASE);
+    while (table[i * tstride] && table[i * tstride]->kind) i = (i + 1) & (cap - 1);
+    if (!table[i * tstride]) used++;
+    else bury_locked(table[i * tstride]);   /* (a tombstone of another address) */
+    __atomic_store_n(&table_keys[i * tstride], o->key, __ATOMIC_RELAXED);   /* (before the object: see find_unlocked) */
+    __atomic_store_n(&table[i * tstride], o, __ATOMIC_RELEASE);
 }
 
 static Obj *find_unlocked(uint64_t key, int kind) {
@@ -176,10 +186,10 @@ static Obj *find_unlocked(uint64_t key, int kind) {
     if (!t) return NULL;
     const uint64_t *keys = table_keys_of(t);
     for (uint64_t i = slot_of(key, t->cap), n = 0; n < t->cap; i = (i + 1) & (t->cap - 1), n++) {
-        Obj *o = __atomic_load_n(&t->slot[i], __ATOMIC_ACQUIRE);
+        Obj *o = __atomic_load_n(&t->slot[i * t->stride], __ATOMIC_ACQUIRE);
         if (!o) return NULL;
         /* (the key beside the slot first; a slot changing meanwhile gives a miss, and the locked lookup answers) */
-        if (__atomic_load_n(&keys[i], __ATOMIC_RELAXED) == key && o->key == key &&
+        if (__atomic_load_n(&keys[i * t->stride], __ATOMIC_RELAXED) == key && o->key == key &&
             __atomic_load_n(&o->kind, __ATOMIC_ACQUIRE) == kind)
             return o;
     }
@@ -187,11 +197,61 @@ static Obj *find_unlocked(uint64_t key, int kind) {
 }
 
 static Obj *obj_lookup(uint64_t key, int kind);
+static Obj *obj(uint64_t key, int kind);
 /* Every nn::os call looks its object up by the guest address (~1.6% of the game threads' time at the castle: a probe
    of the shared table and a cache miss on a scattered object). Game threads use a few objects over and over: a small
    direct-mapped cache per thread answers those. An entry holds while its object is still that address's and of the
    kind asked for (objects are reused, never freed: spares). HOS_NO_OBJ_CACHE=1: off. */
+/* (Hookshot, 2026-11-13) A mutex's host object, found from the mutex itself. The game's graphics recording job locks
+   one mutex per slot of a table of slots, a different one each time: the per-thread cache below misses on every one, and
+   the shared table's probe was 0.69 ms a frame of that job, on the frame's critical chain (docs/native-engine/
+   gfx-record-job.md). nn::os::MutexType's nesting count (+8) is the SDK's own bookkeeping, which this layer does not
+   use (the count is in the host object): it holds the object's number + nothing else, and an answer is taken only when
+   that object is this address's mutex, so a mutex the game copied, cleared or made anew is found the old way and
+   numbered again. HOS_NO_MUTEX_IX=1: off. */
+#define MX_IX_OFFSET 8
+#define MX_IX_CAP (1u << 20)
+static Obj *volatile mx_objs[MX_IX_CAP];
+static volatile long mx_next = 1;
+static Obj *obj(uint64_t key, int kind);
+static Obj *obj_any(uint64_t key, int kind);
 static Obj *obj(uint64_t key, int kind) {
+    static int ix_off = -1;
+    if (kind != K_MUTEX || ix_off > 0) return obj_any(key, kind);
+    if (ix_off < 0) {
+        ix_off = getenv("HOS_NO_MUTEX_IX") != NULL;
+        if (ix_off) return obj_any(key, kind);
+    }
+    uint32_t *at = (uint32_t *)GP(key + MX_IX_OFFSET);
+    const uint32_t ix = *at;
+    if (ix && ix < MX_IX_CAP) {
+        Obj *o = mx_objs[ix];
+        if (o && __atomic_load_n(&o->key, __ATOMIC_RELAXED) == key && __atomic_load_n(&o->kind, __ATOMIC_ACQUIRE) == K_MUTEX) {
+            hos_vcore_checkpoint();
+            return o;
+        }
+    }
+    Obj *o = obj_any(key, kind);
+    uint32_t mine = __atomic_load_n(&o->ix, __ATOMIC_RELAXED);
+    /* (once the table is full no number is taken any more: an increment on every lookup of an unnumbered mutex would
+       wrap the 32-bit counter negative within an hour and index the table below its start) */
+    if (!mine && __atomic_load_n(&mx_next, __ATOMIC_RELAXED) < (long)MX_IX_CAP) {
+        const long n = __sync_fetch_and_add(&mx_next, 1);
+        if (n < (long)MX_IX_CAP) {
+            uint32_t none = 0;
+            if (__atomic_compare_exchange_n(&o->ix, &none, (uint32_t)n, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+                mx_objs[n] = o;
+                mine = (uint32_t)n;
+            } else {
+                mine = none;   /* (another thread numbered it first) */
+            }
+        }
+    }
+    if (mine && mx_objs[mine] == o && *at != mine) *at = mine;
+    return o;
+}
+
+static Obj *obj_any(uint64_t key, int kind) {
     hos_vcore_checkpoint();   /* (virtual cores: every nn::os call, where a better waiter takes the core) */
     /* (hookshot: 128 still missed: obj_lookup was the busiest leaf in dense Kokiri, 3.2% of all samples, 4.3% of the instants when one
        thread alone ran; each actor has its own mutexes) */
@@ -411,6 +471,7 @@ static int mutex_take_owed(Obj *m, HosThread *self) {   /* (the woken waiter the
 static void mutex_give(Obj *m) {   /* (the owner's count already 0) */
     __atomic_exchange_n(&m->owner, (HosThread *)NULL, __ATOMIC_SEQ_CST);
     if (__atomic_load_n(&m->mwait, __ATOMIC_SEQ_CST)) {
+        HOS_JT(JT_MX_GIVE, m->key, hos_jt_lr());
         AcquireSRWLockExclusive(&m->lk);
         ReleaseSRWLockExclusive(&m->lk);
         /* (all of them while one is owed it: woken alone, another sleeper would fail its take and sleep again) */
@@ -424,12 +485,14 @@ static void mutex_lock_owed(Obj *m, uint64_t guest, int owed) {
     if (!owed) { mutex_lock(m, guest, NULL); return; }
     HosThread *self = hos_self();
     if (mutex_take_owed(m, self)) { m->count = 1; return; }
+    HOS_JT(JT_MX_WAIT_B, m->key, hos_jt_lr());
     AcquireSRWLockExclusive(&m->lk);
     __atomic_add_fetch(&m->mwait, 1, __ATOMIC_SEQ_CST);
     while (!mutex_take_owed(m, self)) hos_cv_sleep(&m->cv, &m->lk, 2000);
     __atomic_sub_fetch(&m->mwait, 1, __ATOMIC_SEQ_CST);
     ReleaseSRWLockExclusive(&m->lk);
     m->count = 1;
+    HOS_JT(JT_MX_WAIT_E, m->key, 0);
 }
 static int handoff_on(void) {   /* HOS_NO_HANDOFF=1: the old way (any thread may take a mutex a signal's waiter is owed) */
     static int v = -1;
@@ -441,12 +504,12 @@ static void cv_enter(Obj *cv, Obj *m) {
     if (cv->cv_waiting && cv->cv_mutex != m) cv->cv_mixed = 1;
     if (!cv->cv_waiting) cv->cv_mixed = 0;
     cv->cv_mutex = m;
-    cv->cv_waiting++;
+    __atomic_add_fetch(&cv->cv_waiting, 1, __ATOMIC_SEQ_CST);
 }
 /* a waiter out (cv->lk held): whether a signal reserved its mutex m for it. A reservation made on another mutex (a
    waiter with a different one came in after the signal) is given back: never left owed to nobody */
 static int cv_leave(Obj *cv, Obj *m) {
-    cv->cv_waiting--;
+    __atomic_sub_fetch(&cv->cv_waiting, 1, __ATOMIC_SEQ_CST);
     if (cv->cv_owed <= 0) return 0;
     Obj *r = cv->cv_owed_mutex[--cv->cv_owed];
     if (r == m) return 1;
@@ -470,6 +533,7 @@ static void mutex_lock(Obj *m, uint64_t guest, Ctx *c) {
     if (trace_ms < 0) { const char *e = getenv("HOS_MUTEX_TRACE"); trace_ms = e ? atoi(e) : 0; }
     HosThread *holder = __atomic_load_n(&m->owner, __ATOMIC_RELAXED);
     const int64_t t0 = trace_ms && holder ? hos_now_ns() : 0;
+    HOS_JT(JT_MX_WAIT_B, m->key, c ? c->x[30] : hos_jt_lr());
     AcquireSRWLockExclusive(&m->lk);
     __atomic_add_fetch(&m->mwait, 1, __ATOMIC_SEQ_CST);
     {   /* (EvilOOT, 11-07: a wait of over 10 s says who holds the mutex, once per wait: the freeze after Load) */
@@ -487,6 +551,7 @@ static void mutex_lock(Obj *m, uint64_t guest, Ctx *c) {
     __atomic_sub_fetch(&m->mwait, 1, __ATOMIC_SEQ_CST);
     ReleaseSRWLockExclusive(&m->lk);
     m->count = 1;
+    HOS_JT(JT_MX_WAIT_E, m->key, 0);
     if (t0) {
         const int64_t waited = hos_now_ns() - t0;
         static volatile LONG logged;
@@ -571,6 +636,19 @@ HLE(_ZN2nn2os25FinalizeConditionVariableEPNS0_21ConditionVariableTypeE) { drop(A
 HLE(_ZN2nn2os23SignalConditionVariableEPNS0_21ConditionVariableTypeE) {
     Obj *cv = obj(ARG(0), K_COND);
     if (watched_cv(ARG(0))) watch_log("signal", watch_mutex(), ARG(0), c, NULL);
+    HOS_JT(JT_CV_SIGNAL, ARG(0), c->x[30]);
+    /* TICK-062 B1, HOS_CV_SIGNAL_FAST=1: a signal with no waiter changes nothing a later wait can see, so it returns before
+       taking cv->lk. No wake is lost: (1) a waiter registers (cv_waiting++, seq_cst) under cv->lk BEFORE it releases the guest
+       mutex (mutex_release_all) and before it sleeps, and reads cv->gen before registering. (2) A signal the guest orders
+       after a wait's registration (it took the mutex the waiter released, or any release/acquire chain from it) reads
+       cv_waiting with a seq_cst load after that, so it sees >= 1 and takes the slow path below, exactly as before. (3) A
+       signal not ordered with the registration (no mutex, truly concurrent) may read 0: that is the signal ordered before the
+       wait, which the slow path also loses (it bumps gen before the waiter reads gen, so the waiter sleeps on). (4) With no
+       waiter the slow path only bumps gen (compared only as a delta by waiters that registered later) and cv_reserve (a no-op
+       with cv_waiting <= cv_owed, owed being 0 with no waiter) and wakes nobody. The wake order of waiters is untouched. */
+    static int fast = -1;
+    if (fast < 0) fast = getenv("HOS_CV_SIGNAL_FAST") && atoi(getenv("HOS_CV_SIGNAL_FAST")) != 0;
+    if (fast && !__atomic_load_n(&cv->cv_waiting, __ATOMIC_SEQ_CST)) return;
     AcquireSRWLockExclusive(&cv->lk);
     cv_reserve(cv);
     cv->gen++;
@@ -586,6 +664,7 @@ HLE(_ZN2nn2os21WaitConditionVariableEPNS0_21ConditionVariableTypeEPNS0_9MutexTyp
         if (i < 8) watch_cvs[i] = ARG(0);
         watch_log("cv wait", ARG(1), ARG(0), c, m);
     }
+    HOS_JT(JT_CV_WAIT_B, ARG(0), c->x[30]);
     AcquireSRWLockExclusive(&cv->lk);
     uint64_t gen = cv->gen;
     cv_enter(cv, m);
@@ -594,6 +673,7 @@ HLE(_ZN2nn2os21WaitConditionVariableEPNS0_21ConditionVariableTypeEPNS0_9MutexTyp
     while (cv->gen == gen) hos_cv_sleep(&cv->cv, &cv->lk, INFINITE);
     const int owed = cv_leave(cv, m);
     ReleaseSRWLockExclusive(&cv->lk);
+    HOS_JT(JT_CV_WAIT_E, ARG(0), 2);
     if (w) watch_log(owed ? "cv woken, owed the mutex" : "cv woken", ARG(1), ARG(0), c, m);
     mutex_lock_owed(m, ARG(1), owed);
     m->count = count;
@@ -607,6 +687,7 @@ static void event_init(uint64_t key, int signaled, int clear_mode) {
     e->autoclear = clear_mode == 1;   /* EventClearMode_AutoClear = 1, ManualClear = 0 */
 }
 static void event_signal(Obj *e) {
+    HOS_JT(JT_EV_SIGNAL, e->key, hos_jt_lr());
     AcquireSRWLockExclusive(&e->lk);
     e->signaled = 1;
     if (wake_lat_on()) e->sig_ns = hos_now_ns();
@@ -660,10 +741,12 @@ static void wake_lat_note(int how, int64_t lat_ns) {   /* how: 0 ready, 1 spun, 
 static int event_wait(Obj *e, int64_t timeout_ns, int try_only) {
     int64_t deadline = timeout_ns > 0 ? hos_now_ns() + timeout_ns : 0;
     const int was_set = e->signaled > 0;
+    if (!try_only) HOS_JT(JT_EV_WAIT_B, e->key, hos_jt_lr());
     if (!try_only) spin_until_set(e, &e->signaled);
     int slept = 0;
     AcquireSRWLockExclusive(&e->lk);
     const int spun = !was_set && e->signaled;
+    if (!try_only && !e->signaled) HOS_JT(JT_SPIN_E, e->key, 0);
     while (!e->signaled) {
         if (try_only || (timeout_ns > 0 && !wait_until(e, deadline))) break;
         if (timeout_ns <= 0) hos_cv_sleep(&e->cv, &e->lk, INFINITE);
@@ -673,6 +756,7 @@ static int event_wait(Obj *e, int64_t timeout_ns, int try_only) {
     if (got && !try_only && wake_lat_on()) wake_lat_note(slept ? 2 : spun ? 1 : 0, slept ? hos_now_ns() - e->sig_ns : 0);
     if (got && e->autoclear) e->signaled = 0;
     ReleaseSRWLockExclusive(&e->lk);
+    if (!try_only) HOS_JT(JT_EV_WAIT_E, e->key, (slept ? 2 : spun ? 1 : 0) | (got ? 0 : 4));
     return got;
 }
 
@@ -789,7 +873,14 @@ static void who_note_signal(Ctx *c, uint64_t key) {
     }
     ReleaseSRWLockExclusive(&lk);
 }
+/* (hookshot, TICK-014) The real-time step's frame rate (nn_vi.c realtime_step; 0: none). The game sets the graphics
+   module's nominal fps (+0x2c8) back to 60 each frame when it is over 60, so the rate written at the present was lost
+   above 60 and every frame stepped a whole 1/60 s: at 68 fps the game ran 13% fast, 2x at 120. f_80706be0 signals this
+   light event (lr 0x80706c88) right before it reads the rate for the frame's step (60 / +0x2c8), with the module in x21:
+   the rate is written there, after the game's own write */
+volatile int hos_realtime_fps;
 HLE(_ZN2nn2os16SignalLightEventEPNS0_14LightEventTypeE) {
+    if (c->x[30] == 0x80706c88 && hos_realtime_fps && c->x[21]) G32(c->x[21] + 0x2c8) = (uint32_t)hos_realtime_fps;
     who_note_signal(c, ARG(0));
     event_signal(obj(ARG(0), K_EVENT));
 }
@@ -813,12 +904,23 @@ static int prof_gate_match(Ctx *c) {
     }
     return on && c->x[30] == lr && strstr(hos_thread_name(hos_self()), thread) != NULL;
 }
+/* (Hookshot, TICK-054) HOS_PRECOPY_KICK=1: when the game's main thread leaves its end-of-frame wait (OoT's f_83acfb90,
+   lr 0x83acfcf4: the last BaseProc stage is done, every job thread's writes of the frame are final, and the main thread's
+   draw code and its submits are still 2-4 ms away), the renderer's capture pre-copy thread is kicked (rx_backend.c
+   rx_precopy_kick, with RX_VK_CAPTURE_PRECOPY=1 RX_VK_PRECOPY_KICK=1): the frame's pages are copied while the job threads
+   idle, and the submit copies only what was written since. */
+static int precopy_kick_lr(void) {
+    static int v = -1;
+    if (v < 0) v = getenv("HOS_PRECOPY_KICK") && atoi(getenv("HOS_PRECOPY_KICK")) != 0;
+    return v;
+}
 HLE(_ZN2nn2os14WaitLightEventEPNS0_14LightEventTypeE) {
     who_note_wait(c, ARG(0));
     const int gate = prof_gate_match(c);
     if (gate) __atomic_add_fetch(&hos_prof_gate, 1, __ATOMIC_SEQ_CST);
     logged_wait(c, obj(ARG(0), K_EVENT), 0, 0, "light");
     if (gate) __atomic_sub_fetch(&hos_prof_gate, 1, __ATOMIC_SEQ_CST);
+    if (c->x[30] == 0x83acfcf4ULL && precopy_kick_lr()) { void rx_precopy_kick(void); rx_precopy_kick(); }
 }
 HLE(_ZN2nn2os19TimedWaitLightEventEPNS0_14LightEventTypeENS_8TimeSpanE) {
     RET(event_wait(obj(ARG(0), K_EVENT), (int64_t)ARG(1) > 0 ? (int64_t)ARG(1) : 1, (int64_t)ARG(1) <= 0));
@@ -872,13 +974,17 @@ static void sema_init(uint64_t key, int initial, int max) {
     s->sem_max = max;
 }
 static void sema_acquire(Obj *s) {
+    const int jt = s->sem <= 0;
+    if (jt) HOS_JT(JT_Q_WAIT_B, s->key, hos_jt_lr());
     spin_until_set(s, &s->sem);
     AcquireSRWLockExclusive(&s->lk);
     while (s->sem <= 0) hos_cv_sleep(&s->cv, &s->lk, INFINITE);
     s->sem--;
     ReleaseSRWLockExclusive(&s->lk);
+    if (jt) HOS_JT(JT_Q_WAIT_E, s->key, 0);
 }
 static void sema_release(Obj *s, int n) {
+    HOS_JT(JT_Q_SIGNAL, s->key, hos_jt_lr());
     AcquireSRWLockExclusive(&s->lk);
     s->sem += n;
     if (s->sem_max && s->sem > s->sem_max) s->sem = s->sem_max;
@@ -916,6 +1022,7 @@ static void queue_trace(Obj *q, uint64_t v, const char *what) {
 /* mode: 0 send (back), 1 jam (front). try: do not block. Returns 1 if done. */
 static int queue_put(Obj *q, uint64_t v, int jam, int try_only) {
     queue_trace(q, v, jam ? "jam" : "send");
+    HOS_JT(JT_Q_SIGNAL, q->key, hos_jt_lr());
     AcquireSRWLockExclusive(&q->lk);
     while (q->qlen == q->qcap) {
         if (try_only) { ReleaseSRWLockExclusive(&q->lk); return 0; }
@@ -938,16 +1045,23 @@ static int queue_put(Obj *q, uint64_t v, int jam, int try_only) {
 static int queue_get(Obj *q, uint64_t *out, int take, int64_t timeout_ns) {
     int64_t deadline = timeout_ns > 0 ? hos_now_ns() + timeout_ns : 0;
     const int was_set = q->qlen > 0;
+    const int jt = timeout_ns != 0 && take;
+    if (jt) HOS_JT(JT_Q_WAIT_B, q->key, hos_jt_lr());
     if (timeout_ns != 0) spin_until_set(q, &q->qlen);
     int slept = 0;
     AcquireSRWLockExclusive(&q->lk);
     const int spun = !was_set && q->qlen;
     while (!q->qlen) {
-        if (timeout_ns == 0 || (timeout_ns > 0 && !wait_until(q, deadline))) { ReleaseSRWLockExclusive(&q->lk); return 0; }
+        if (timeout_ns == 0 || (timeout_ns > 0 && !wait_until(q, deadline))) {
+            ReleaseSRWLockExclusive(&q->lk);
+            if (jt) HOS_JT(JT_Q_WAIT_E, q->key, 6);
+            return 0;
+        }
         if (timeout_ns < 0) hos_cv_sleep(&q->cv, &q->lk, INFINITE);
         slept = 1;
     }
     if (timeout_ns != 0 && wake_lat_on()) wake_lat_note(slept ? 2 : spun ? 1 : 0, slept ? hos_now_ns() - q->sig_ns : 0);
+    if (jt) HOS_JT(JT_Q_WAIT_E, q->key, slept ? 2 : spun ? 1 : 0);
     *out = q->q[q->qhead];
     if (take) {
         q->qhead = (q->qhead + 1) % q->qcap;
@@ -1118,6 +1232,7 @@ HLE(_ZN2nn2os21UnlinkMultiWaitHolderEPNS0_19MultiWaitHolderTypeE) {
 static uint64_t wait_any(uint64_t multiwait, int64_t timeout_ns) {
     Obj *mw = obj(multiwait, K_MULTIWAIT);
     int64_t deadline = timeout_ns > 0 ? hos_now_ns() + timeout_ns : 0;
+    if (timeout_ns) HOS_JT(JT_Q_WAIT_B, multiwait, hos_jt_lr());
     AcquireSRWLockExclusive(&mw_lock);
     InterlockedIncrement(&mw_waiting);
     uint64_t found = 0;
@@ -1138,6 +1253,7 @@ static uint64_t wait_any(uint64_t multiwait, int64_t timeout_ns) {
     }
     InterlockedDecrement(&mw_waiting);
     ReleaseSRWLockExclusive(&mw_lock);
+    if (timeout_ns) HOS_JT(JT_Q_WAIT_E, multiwait, found ? 2 : 6);
     return found;
 }
 HLE(_ZN2nn2os7WaitAnyEPNS0_13MultiWaitTypeE) { RET(wait_any(ARG(0), -1)); }
@@ -1207,6 +1323,7 @@ HLE(_ZN2nn2os17TryWaitTimerEventEPNS0_14TimerEventTypeE) {
 HLE(_ZN2nn2os26TimedWaitConditionVariableEPNS0_21ConditionVariableTypeEPNS0_9MutexTypeENS_8TimeSpanE) {
     Obj *cv = obj(ARG(0), K_COND), *m = obj(ARG(1), K_MUTEX);
     int64_t deadline = hos_now_ns() + ((int64_t)ARG(2) > 0 ? (int64_t)ARG(2) : 0);
+    HOS_JT(JT_CV_WAIT_B, ARG(0), c->x[30]);
     AcquireSRWLockExclusive(&cv->lk);
     uint64_t gen = cv->gen;
     cv_enter(cv, m);
@@ -1217,6 +1334,7 @@ HLE(_ZN2nn2os26TimedWaitConditionVariableEPNS0_21ConditionVariableTypeEPNS0_9Mut
     }
     const int owed = cv_leave(cv, m);
     ReleaseSRWLockExclusive(&cv->lk);
+    HOS_JT(JT_CV_WAIT_E, ARG(0), signaled ? 2 : 6);
     mutex_lock_owed(m, ARG(1), owed);
     m->count = count;
     RET(signaled);
