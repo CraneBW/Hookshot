@@ -38,6 +38,8 @@ commit fields; an older relay may still show only the original card above. Until
 result comment for the commit, not the colour of a Discord card.
 
 You can take part with an agent (Claude Code or another) doing the work, or by hand with four commands.
+You can take part with an agent (Claude Code or another) doing the work, or by hand with four commands. A PC that is
+always on can also take tests by itself as a GitHub Actions runner: [hardware-runners.md](hardware-runners.md).
 
 ## Set up once (about 10 minutes)
 
