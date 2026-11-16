@@ -296,6 +296,8 @@ format, tone mapper, encoding and luminance changes reset the corresponding hist
 | `HOS_WINDOW_NOACTIVATE` (set) | The window opens behind the others and does not take the focus (Windows) |
 | `HOS_FULLSCREEN=1` | Starts in fullscreen; the Insert menu's Fullscreen row is then left alone |
 | `HOS_AUDIO=0` | No sound device is opened (the mixer still runs); `scripts/run-vk.ps1` sets it unless `-Sound` |
+| `HOS_AUDIO_NO_EFFECTS=1` | The audio effects on mixes (reverbs, delay, biquad filters, Aux) are left out: the dry sound, to compare |
+| `HOS_AUDIO_NO_REVERB=1` | Only the reverbs left out |
 | `HOS_LANGUAGE=<code>` | The game's language for this run, a code from `language.txt` |
 | `HOS_TEXTS=0` | The game's own texts: the one that names the console (the ocarina's microphone hint) is not served reworded for a PC from the game folder's `texts` (`nx2/text_assets.py` makes them at build time, `host/texts.c` serves them; a mod's own text file wins either way) |
 | `HOS_OUTPUT_RES=<width>x<height>`, `HOS_HANDHELD=1`, `HOS_ASPECT=<ratio>` | Over the options file: the output resolution (a size, as `output_res`), the handheld profile, a picture wider than 16:9 (2.3889 for 3440x1440) |
