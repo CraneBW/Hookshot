@@ -157,6 +157,8 @@ when those hooks are needed. SIGKILL always bypasses them.
 
 ## Switches for testing and debugging
 
+Set `HOS_OOT_TRACE_SAVES=1` to log save requests and report when the transition autosave is suppressed. The trace defaults to off.
+
 The running game reads its switches from the environment or from `hookshot_env.txt` beside `image.bin` (one
 `NAME=VALUE` a line, `#` for notes; `HOS_ENV_FILE=<path>` reads that file instead; `HOS_OPTIONS_FILE=<path>`, from the
 environment only, does the same for the settings, `hookshot_options.ini`, so a scripted run leaves the player's as they are). The environment goes first: a name
@@ -1070,6 +1072,7 @@ them does not renew a size change's declined restart prompt. Choosing a differen
 | `mouse_sensitivity` | hundredths: 100 is 1.00 |
 | `field_of_view` | 50 to 150 percent of the current vertical gameplay FOV; 100 is the original. Applies immediately, before projection and culling. The resulting vertical angle stays within 5 to 140 degrees |
 | `robust_buffers` | 0 Auto (on), 1 Off, 2 On |
+| `transition_autosave` | 1 On (default), 0 Off. The Autosave row works independently of Debug tools. Off suppresses the verified map-transition save requests. |
 | `damage_taken` | 0 Half, 1 Normal (default), 2 Double, 3 Quadruple; Debug tools Off uses Normal without changing the saved choice. Half rounds the full hit up to a quarter heart, even on lethal hits; Heart protection wins |
 | `game_speed` | 0 Per frame, 1 Real time |
 | `text_speed` | 0 Normal, 1 2x, 2 4x, 3 Instant |

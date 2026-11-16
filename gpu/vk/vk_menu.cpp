@@ -1526,6 +1526,8 @@ Row rows[] = {
      "movement speed. Off puts flight, the free camera and heart protection away and Link back to his own speed and damage.", nullptr, false, true},
     {TAB_DEBUG, "Heart protection", nullptr, 0, 0, 0, nullptr,
      "Protects Link's hearts. Hits can still knock him back.", nullptr, false, true, 0},
+    {TAB_DEBUG, "Autosave:", &opts.transition_autosave, 0, 1, 1, tx_onoff,
+     "Works with Debug tools off. Turning it off skips supported autosaves. You can still save manually.", nullptr, false, true},
     {TAB_DEBUG, "Damage taken", &opts.damage_taken, 0, 3, 1, tx_damage_taken,
      "How much health Link loses from a hit. Normal is unchanged. Half rounds up to the next quarter heart. "
      "Changes apply at once; healing is unchanged. Heart protection takes priority. Debug tools Off makes it Normal "
@@ -1603,6 +1605,10 @@ const Row* pending = nullptr;   // (Restart or Quit: shows Confirm until its sec
 bool cheats_env = false;   // (HOS_OOT_CHEATS=1: on whatever the Debug tab says)
 /// The debug tools: the Debug tab's row, or HOS_OOT_CHEATS=1
 bool cheats_on() { return cheats_env || opts.debug_tools; }
+std::atomic<bool> transition_autosave_enabled{true};
+void sync_transition_autosave() {
+    transition_autosave_enabled.store(opts.transition_autosave != 0, std::memory_order_relaxed);
+}
 std::atomic<int> protect_hearts{-1};
 // -1 disables the shortcut, 0 enables it on the ground, and 1 means flying.
 std::atomic<int> player_flight{-1};
@@ -1893,6 +1899,7 @@ int tab_row_to_global(int t, int local_idx) {
 
 std::atomic<bool> open_now{false};
 bool tune_mode = false;
+bool quick_debug = false;
 bool menu_refresh = false;
 // (a value too long for its row, a GPU's name: the selected row's slides through it, a character a step, resting at
 // each end; the other rows end it with "...". The drawing (fit) says how far it can slide, menu_tick moves it)
@@ -2634,7 +2641,16 @@ void share_pipeline_list() {
 
 /// A row's new value v, as the arrows set it (dir: 1 up, -1 down, for the rows that skip or wrap), saved unless !keep
 /// (a slider's drag: saved once it is let go)
+bool debug_warning = false;
+int debug_warning_choice = 0;
+
 void set_row(Row& r, int v, int dir, bool keep = true) {
+    if (r.value == &opts.debug_tools && !opts.debug_tools && v > 0) {
+        debug_warning = true;
+        debug_warning_choice = 0;
+        menu_refresh = true;
+        return;
+    }
     // (nothing else to choose: no change, no save. A saved choice that cannot run here is kept)
     if (row_fixed(r.value)) return;
     // (the scaling rows: only what can run here; the Render resolution row through the Upscaler's own steps)
@@ -2672,6 +2688,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
             opts.preset = 0; // Custom
         }
     }
+    if (r.value == &opts.transition_autosave) sync_transition_autosave();
     if (r.value == &opts.mic && can_mic()) mic_chosen();   // (hookshot)
     // (hookshot: the samplers made again, at once: their anisotropy, and the upscalers' LOD bias, vk_draw.cpp upscale_lod_bias)
     if (r.value == &opts.anisotropy || r.value == &opts.dlss || r.value == &opts.resolution || r.value == &opts.preset)
@@ -3237,6 +3254,7 @@ struct DebugGroup { const char* title; int from, to; };   // (debug_tools_order[
 constexpr int debug_tools_order[] = {0, -1, 1, 11, 9, 10, 8, 2, 3, 7, 4};
 constexpr DebugGroup debug_groups[] = {{"Player", 0, 6}, {"Travel", 6, 9}, {"Camera & world", 9, 11}};
 constexpr int kDebugGroups = sizeof debug_groups / sizeof debug_groups[0];
+constexpr int kDebugGeneralRows = 2;
 constexpr int kDebugTools = sizeof debug_tools_order / sizeof debug_tools_order[0];
 /// The Debug tab's rows as shown (its row numbers, tab_row_to_global's): the switch, the tools in debug_tools_order while they
 /// are on, then the Developer rows; *dev where those start, *dev_head the Developer heading's row (-1 none). Their count
@@ -3244,14 +3262,17 @@ int debug_rows(int* out, int* dev, int* dev_head) {
     const int count = tab_row_count(TAB_DEBUG);
     int n = 0;
     *dev_head = -1;
-    for (int k = 0; k < count; ++k)
-        if (rows[tab_row_to_global(TAB_DEBUG, k)].value == &opts.debug_tools) out[n++] = k;
+    for (int k = 0; k < count; ++k) {
+        const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
+        if (r.value == &opts.debug_tools || r.value == &opts.transition_autosave) out[n++] = k;
+    }
     for (int t = 0; t < kDebugTools; ++t)
         for (int k = 0; k < count; ++k) {
             const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
-            if (debug_tools_order[t] < 0 ? r.value == &opts.damage_taken : r.cheat == debug_tools_order[t]) out[n++] = k;
+            if (debug_tools_order[t] == -1 ? r.value == &opts.damage_taken : r.cheat == debug_tools_order[t]) out[n++] = k;
         }
     *dev = n;
+    if (quick_debug) return n;
     for (int k = 0; k < count; ++k) {
         const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
         if (r.heading) *dev_head = k;
@@ -3297,9 +3318,9 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
         return ui::size_of(c.f.strong, px, v.empty() ? says : v.c_str()).x + (cheat_chooses(r.cheat) ? 68 : tight ? 56 : 60) * s;   // (choice_cell keeps 48 for arrows either way)
     };
     float name_need[2] = {0, 0}, cell_full[2] = {halves_w + 64 * s, halves_w + 64 * s}, cell_tight[2] = {halves_w + 36 * s, halves_w + 36 * s};
-    for (int i = 1; i < dev; ++i) {
+    for (int i = kDebugGeneralRows; i < dev; ++i) {
         const Row& r = rows[tab_row_to_global(TAB_DEBUG, order[i])];
-        const int col = i - 1 >= debug_groups[0].to ? 1 : 0;   // (Player in the first, the rest in the second)
+        const int col = i - kDebugGeneralRows >= debug_groups[0].to ? 1 : 0;   // (Player in the first, the rest in the second)
         name_need[col] = std::max(name_need[col], ui::size_of(c.f.strong, 18.5f * s, r.name).x + 40 * s);
         cell_full[col] = std::max(cell_full[col], need(r, false)), cell_tight[col] = std::max(cell_tight[col], need(r, true));
     }
@@ -3307,13 +3328,14 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
     const bool two = col_w >= name_need[0] + cell_tight[0] && col_w >= name_need[1] + cell_tight[1];
     // (where each goes: a row number of the layout and a column)
     int vrow[64] = {}, vcol[64] = {}, head_row[kDebugGroups] = {}, head_col[kDebugGroups] = {};
-    int next_row[2] = {1, 1};
-    const bool tools = dev > 1;
+    vrow[1] = 1;
+    int next_row[2] = {kDebugGeneralRows, kDebugGeneralRows};
+    const bool tools = dev > kDebugGeneralRows;
     for (int g = 0; tools && g < kDebugGroups; ++g) {
         const int col = two && g > 0 ? 1 : 0;
-        if (next_row[col] > 1) next_row[col]++;   // (a gap over a heading that follows another group)
+        if (next_row[col] > kDebugGeneralRows) next_row[col]++;   // (a gap over a heading that follows another group)
         head_row[g] = next_row[col]++, head_col[g] = col;
-        for (int t = debug_groups[g].from; t < debug_groups[g].to; ++t) vrow[1 + t] = next_row[col]++, vcol[1 + t] = col;
+        for (int t = debug_groups[g].from; t < debug_groups[g].to; ++t) vrow[kDebugGeneralRows + t] = next_row[col]++, vcol[kDebugGeneralRows + t] = col;
     }
     int foot = std::max(next_row[0], next_row[1]);
     if (tools) foot++;
@@ -3349,7 +3371,7 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
         const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
         const float y = top + (vrow[i] - first) * pitch;
         if (y + pitch <= top || y >= bottom) continue;
-        const bool in_tools = i > 0 && i < dev;
+        const bool in_tools = i >= kDebugGeneralRows && i < dev;
         const float x0 = two && in_tools && vcol[i] ? mid + gap * .5f : left;
         const float x1 = !two || !in_tools || vcol[i] ? right : mid - gap * .5f;
         const bool selected = k == sel;
@@ -4113,6 +4135,39 @@ void draw_teleport(ui::Ctx& c) {
     ui::prompt_bar(c, prompts, 5);   // (the prompts, on top of the help and the cards)
 }
 
+void draw_quick_debug(ui::Ctx& c) {
+    const float s = c.s, width = std::min(1040 * s, c.w - 2 * c.safe);
+    const float left = (c.w - width) * .5f, right = left + width;
+    const float top = std::max(c.safe, c.h * .10f), bottom = std::min(c.h - c.safe, top + 540 * s);
+    c.d->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), ui::kCellDark);
+    c.d->AddRect(ImVec2(left, top), ImVec2(right, bottom), ui::kEdge);
+    ui::text_mid(c, c.f.heading, 23 * s, left + 24 * s, top + 25 * s, ui::kGoldHi, "Debug Tools");
+    draw_debug_rows(c, left, right, top + 52 * s, bottom - 12 * s, tab_selected[TAB_DEBUG]);
+    const ui::Prompt prompts[] = {{ui::kUpDown, "Choose"}, {ui::kLeftRight, "Change"},
+        {ui::kConfirm, "Select"}, {ui::kBack, "Close"}};
+    ui::prompt_bar(c, prompts, 4);
+}
+
+void draw_debug_warning(ui::Ctx& c) {
+    const float s = c.s, width = std::min(600 * s, c.w - 2 * c.safe), height = 234 * s;
+    const ImVec2 a((c.w - width) * .5f, (c.h - height) * .5f), b = a + ImVec2(width, height);
+    c.d->AddRectFilled(a, b, ui::kCellDark);
+    c.d->AddRect(a, b, ui::kEdge, 0, 2 * s);
+    c.d->AddRectFilled(a, ImVec2(b.x, a.y + 48 * s), ui::kBanner);
+    ui::text_mid_centre(c, c.f.heading, 23 * s, (a.x + b.x) * .5f, a.y + 24 * s, ui::kBannerInk, "Enable Debug Tools?");
+    ui::para(c, c.f.body, 18 * s, a + ImVec2(24 * s, 62 * s), ui::kInk,
+             "Debug tools can change your progress. Use a backup save. Enabling Debug tools turns off autosave. "
+             "You can turn it back on in the Debug tab.", width - 48 * s);
+    const char* labels[] = {"Cancel", "Enable Debug Tools"};
+    const float button_w = (width - 60 * s) / 2;
+    for (int i = 0; i < 2; ++i) {
+        const ImVec2 p(a.x + 24 * s + i * (button_w + 12 * s), b.y - 66 * s);
+        const ImVec2 q = p + ImVec2(button_w, 42 * s);
+        ui::button(c, p, q, labels[i], i == debug_warning_choice);
+        hits.add(p.x, p.y, q.x, q.y, menu_hit::kButton, i);
+    }
+}
+
 void draw_ask(ui::Ctx& c) {
     const float s = c.s, W = 560 * s, H = 232 * s;
     const ImVec2 p((c.w - W) * 0.5f, (c.h - H) * 0.5f), q = p + ImVec2(W, H);
@@ -4196,10 +4251,12 @@ void draw_menu(ui::Ctx& c) {
     menu_ox = std::floor((c.w - k.w) * 0.5f);
     const int vtx0 = c.d->VtxBuffer.Size, cmd0 = c.d->CmdBuffer.Size;
     hits.clear(0, 0, k.w, k.h);
-    if (page == 5) draw_ask(k);
+    if (debug_warning) draw_debug_warning(k);
+    else if (page == 5) draw_ask(k);
     else if (page == 1) draw_controls(k);
     else if (page == 3) draw_teleport(k);
     else if (page == 4) draw_inventory(k);
+    else if (quick_debug && cur_tab == TAB_DEBUG) draw_quick_debug(k);
     else if (tune_mode) draw_tune_bar(k);
     else draw_options(k);
     if (menu_ox <= 0) return;
@@ -4798,6 +4855,7 @@ void menu_init() {
         }
     }
     first_start = !has_options;
+    sync_transition_autosave();
     const char* handheld_env = getenv("HOS_HANDHELD");   // (host/nn_applet.c handheld(): the environment over the file's)
     if (!has_output && !(handheld_env ? atoi(handheld_env) != 0 : opts.handheld != 0)) {
         // (none chosen, a new install: the size host/nn_applet.c took at boot, the game's 2560x1440 or the main screen's where
@@ -4980,6 +5038,7 @@ int menu_heart_protection() {
 int menu_player_flight() { return cheats_on() ? player_flight.load(std::memory_order_relaxed) : -1; }
 int menu_free_camera() { return cheats_on() ? free_camera.load(std::memory_order_relaxed) : 0; }
 int menu_link_speed() { return cheats_on() ? link_speeds[std::clamp(link_speed.load(std::memory_order_relaxed), 0, kLinkSpeeds - 1)] : 100; }
+int menu_transition_autosave() { return transition_autosave_enabled.load(std::memory_order_relaxed); }
 int menu_damage_taken() { return cheats_on() ? opts.damage_taken : 1; }   // (Normal while the tools are off; the choice is kept)
 int menu_take_cheat_action() { return cheat_action.exchange(0, std::memory_order_relaxed); }
 
@@ -5430,12 +5489,12 @@ void menu_tick() {
     fullscreen_tick();
     game_lang_tick();
     outputs_follow_screen();
-    enum { K_N = 17 };
+    enum { K_N = 18 };
     static bool held[K_N];
     static const int keys[K_N] = {VK_INSERT, VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_ESCAPE, VK_F1,   // (F1: for keyboards without Insert)
                                   VK_RETURN, VK_DELETE, VK_BACK,
                                   'Q', 'E', VK_TAB,   // (the tabs: Q and E, Tab and Shift+Tab)
-                                  VK_PRIOR, VK_NEXT, VK_HOME, VK_END};   // (the long lists: a page, the ends)
+                                  VK_PRIOR, VK_NEXT, VK_HOME, VK_END, VK_F10};   // (the long lists: a page, the ends)
     HWND fg = GetForegroundWindow();
     DWORD pid = 0;
     if (fg) GetWindowThreadProcessId(fg, &pid);
@@ -5598,11 +5657,31 @@ void menu_tick() {
     // control can be bound to Esc, so nothing in play changes; the window gives the captured mouse back on the close)
     const bool esc_opens = opts.menu_shortcut == 2 && press[5] && !open_now.load();
     if (esc_opens) press[5] = false;
-    if ((press[0] || press[6]) && open_now.load() && page == 5) {
+    const bool home_debug = press[15] && (!open_now.load() || (quick_debug && page == 0));
+    if ((press[17] || home_debug) && !editing && !listening && !debug_warning && page != 5) {
+        if (home_debug) press[15] = false;
+        if (open_now.load() && quick_debug && page == 0) press[5] = true;
+        else {
+            quick_debug = true;
+            tune_mode = false;
+            open_now = true;
+            page = 0;
+            cur_tab = TAB_DEBUG;
+            tab_selected[TAB_DEBUG] = 0;
+            changed = true;
+            press[5] = press[7] = false;
+        }
+    }
+    if (quick_debug && page == 0) tab_left = tab_right = false;
+    if ((press[0] || press[6]) && debug_warning) {
+        debug_warning = false;
+        changed = true;
+    } else if ((press[0] || press[6]) && open_now.load() && page == 5) {
         later();
     } else if ((press[0] || press[6]) && open_now.load() && restart_ask()) {
         page = 5, ask_sel = 0, listening = 0, changed = true;
     } else if (press[0] || press[6] || esc_opens) {
+        quick_debug = false;
         open_now = !open_now.load(), changed = true;
         if (open_now.load()) tune_mode = tune_down;
         else tune_mode = false;
@@ -5613,7 +5692,28 @@ void menu_tick() {
         if (open_now.load()) dlss_probe(), fsr4_probe(), xess_probe();   // (whether the Upscaler row can offer DLSS, FSR and XeSS: asked once)
         if (open_now.load()) refresh_mics();   // (the microphones as they are now)
     }
-    if (open_now.load() && editing) {   // (hookshot) a text field has the keyboard: the keys type into it (text_edit), nothing else
+    if (open_now.load() && debug_warning) {
+        if (press[3] || press[4]) debug_warning_choice = 1 - debug_warning_choice, changed = true;
+        if (mouse) {
+            const auto hit = hits.at((float)mx, (float)my);
+            if (hit.part == menu_hit::kButton && hit.index >= 0 && hit.index < 2 && (moved || ptr.pressed)) {
+                debug_warning_choice = hit.index;
+                changed = true;
+                if (ptr.pressed & HOS_MOUSE_LEFT) press[7] = true;
+            }
+            if (ptr.pressed & HOS_MOUSE_RIGHT) press[5] = true;
+        }
+        if (press[5] || press[7]) {
+            if (!press[5] && debug_warning_choice != 0) {
+                opts.debug_tools = 1;
+                opts.transition_autosave = 0;
+                sync_transition_autosave();
+                save();
+            }
+            debug_warning = false;
+            changed = true;
+        }
+    } else if (open_now.load() && editing) {   // (hookshot) a text field has the keyboard: the keys type into it (text_edit), nothing else
         int done = kTextGoOn;
         auto feed = [&](uint32_t in) {
             if (done == kTextGoOn) done = text_edit(*editing, in), edit_why = nullptr, changed = true;
@@ -5862,7 +5962,7 @@ void menu_tick() {
         if (press[5] && pending) pending = nullptr, changed = true;   // (a Restart or Quit waiting for its second press: cancelled)
         else if (press[5] && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS, press[5] = false, changed = true;   // (back)
         else if (press[5] && restart_ask()) page = 5, ask_sel = 0, changed = true;   // (the restart question first)
-        else if (press[5]) open_now = false, tune_mode = false;
+        else if (press[5]) open_now = false, tune_mode = false, quick_debug = false;
         // (the tabs: LB and RB, Q and E, or Tab; from the Motion page, as from Controls)
         if ((tab_left || tab_right) && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS;
         if (tab_left) cur_tab = (cur_tab + TAB_COUNT - 1) % TAB_COUNT, changed = true;
