@@ -5398,7 +5398,7 @@ static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk) {
         static int64_t n_ok, n_subopt, n_old, n_other;
         (res == VK_SUCCESS ? n_ok : res == VK_SUBOPTIMAL_KHR ? n_subopt : res == VK_ERROR_OUT_OF_DATE_KHR ? n_old : n_other)++;
         if ((n_ok + n_subopt + n_old + n_other) % 600 == 0)
-            logf("vk: presents%s: %lld shown, %lld suboptimal, %lld out of date, %lld failed", dev.present_queue ? " (own queue)" : "",
+            logf("vk: presents%s: %lld shown, %lld suboptimal, %lld out of date, %lld failed", dev.present_queue_supported ? " (own queue)" : "",
                  (long long)n_ok, (long long)n_subopt, (long long)n_old, (long long)n_other);
     }
     present_finish(res, false);

@@ -43,8 +43,6 @@ static int next_source_frame(Voice *v) { memcpy(v->cur, fixture_src, sizeof v->c
         "static void put_handle(", "static int get_handle(", "static float farg(", "static int voice_index(",
         "static int mix_index(", "static int splitter_index(", "static Splitter *splitter_of(",
         "static void ret_float(", "static Reverb *reverb_of("))
-    mixer = source[source.index("static void biquad_frame(float *samples, const float b[3], const float a[2], float z[2]) {"):]
-    actual.append(mixer[:mixer.index("\n}\n") + 3])   # (the mixer's filter, which the mix biquad uses)
     actual.append(setters)
     flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS if os.name == "nt" else 0
     with tempfile.TemporaryDirectory(prefix="audio-effects-") as temporary:

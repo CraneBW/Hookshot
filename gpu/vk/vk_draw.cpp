@@ -2906,10 +2906,10 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         if (logged++ < 10) logf("vk: graphics pipeline for %016llx not made (%d)", (unsigned long long)p.key, (int)r);
         pl = VK_NULL_HANDLE;
     }
-    if (!driver_cache_only && !quick_build &&
-        !(pcache_misses_only() && (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) &&
+    // (a pipeline the cache had already adds nothing to it: RX_VK_PCACHE_MISSES)
+    if (!(pcache_misses_only() && (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT) &&
           (feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT)))
-        pcache_built_since_save++;
+        pcache_built_since_save += !driver_cache_only && !quick_build;
     if (!quick_build) {   // (hookshot: quick builds are counted apart, in quick_pipeline's log line)
         st_pipelines++;
         st_pipeline_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -9332,7 +9332,7 @@ PrepareWhy prepare_check(const std::string& path, const std::string& seed, uint6
     if (had.stamp != stamp) return PrepareWhy::Translator;
     if (!same_seed) return PrepareWhy::Seed;
     // (the record says prepared, but the program cache may not have kept it: a start with other shader settings (RX_VK_OOT_*, ...,
-    // vk_shader.cpp's disk_stamp) makes the cache again under its stamp, and closed before it prepared, the next start under the
+    // program_cache_stamp) makes the cache again under its stamp, and closed before it prepared, the next start under the
     // usual settings found an empty cache and a record that said prepared: every program then translated in play, 200-400 ms
     // each. Less than half of what the last prepare left, or none for a record from before the count: prepared again)
     const size_t kept = program_cache_kept();

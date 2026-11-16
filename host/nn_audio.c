@@ -534,7 +534,22 @@ typedef struct {
     float b[3], a[2], z[MAX_CH][2];
 } MixBiquad;
 static MixBiquad mix_biquads[MAX_EFFECTS];
-static void biquad_frame(float *samples, const float b[3], const float a[2], float z[2]);   /* (the mixer's, below) */
+/* transposed direct form II, additive feedback (as the voices' filters, biquad_frame below); a blown-up state starts over silent */
+static void mix_biquad_block(float *x, const float b[3], const float a[2], float z[2]) {
+    float z0 = z[0], z1 = z[1];
+    for (int i = 0; i < FRAME; i++) {
+        const float in = x[i], y = b[0] * in + z0;
+        z0 = b[1] * in + a[0] * y + z1;
+        z1 = b[2] * in + a[1] * y;
+        x[i] = y;
+    }
+    if (!isfinite(z0) || !isfinite(z1)) {
+        z0 = z1 = 0;
+        memset(x, 0, FRAME * sizeof *x);
+    }
+    z[0] = z0;
+    z[1] = z1;
+}
 static void mix_biquad_frame(MixBiquad *f, Mix *m) {
     if (!f->enabled || !f->on) return;
     for (int c = 0; c < f->n; c++) {
@@ -542,7 +557,7 @@ static void mix_biquad_frame(MixBiquad *f, Mix *m) {
         if (bi < 0 || bi >= m->buffers || bo < 0 || bo >= m->buffers) continue;
         float x[FRAME];
         memcpy(x, m->buf[bi], sizeof x);
-        biquad_frame(x, f->b, f->a, f->z[c]);
+        mix_biquad_block(x, f->b, f->a, f->z[c]);
         memcpy(m->buf[bo], x, sizeof x);
     }
 }
