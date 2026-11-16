@@ -3453,7 +3453,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             // (not unforced: the submitting thread's replay with RX_VK_SYNC_WAITS=0 or RX_VK_PER_QUEUE_FENCES=0, as before)
             const bool behind = async_on();
             const bool unforced = behind || (sync_waits_on() && !per_queue_fences_off());
-            static std::atomic<int64_t> settled{0}, held_back{0};
+            static std::atomic<int64_t> settled{0}, held_back{0}, in_place{0};
             // That is the console's answer for a read the game makes without waiting for the GPU: the latest result that has
             // landed. Where the game does wait first (a fence, nvnSyncWait, nvnQueueFinish), that wait is the exact one and
             // the read after it finds its write-back recorded. RX_VK_READBACK_EXACT (a test, off): 1, every range is read
@@ -3502,6 +3502,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 if (by_part && part && in_place_after) held_back++;
                 const bool parted = unforced && by_part && part && whole <= completed() && !in_place_after &&
                                     wait_recorded_part(part, UINT64_MAX, &ok);
+                if (!parted && !part) in_place++;   // (pages written in place (no mirror: part 0): the whole submission waited for)
                 if (!parted && !(unforced && wait_recorded(v, UINT64_MAX, &ok))) {
                     if (unforced && replay_behind()) wait_queue_empty();   // (not recorded whole: as before)
                     if (behind) readback_fell_back();
@@ -3534,9 +3535,10 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 if (log_ranges) rb_ranges_log();
                 const int64_t n = waited.exchange(0);
                 logf("vk: readbacks of GPU results: %lld of 3000 waited for their write-back, %.2f ms each; %lld looked at the "
-                     "stopped queues first, %lld waited for their submission's last part (guest memory read in place after theirs)",
+                     "stopped queues first, %lld waited for their submission's last part (guest memory read in place after theirs), "
+                     "%lld waited for their whole submission (their pages written in place, no mirror)",
                      (long long)n, n ? ns.exchange(0) / (double)n / 1e6 : 0.0, (long long)settled.exchange(0),
-                     (long long)held_back.exchange(0));
+                     (long long)held_back.exchange(0), (long long)in_place.exchange(0));
             }
         }
     }
