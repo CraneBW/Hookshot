@@ -48,6 +48,7 @@ FIXTURE = r"""
 #include <map>
 #include <mutex>
 #include <vector>
+#include "wrote_regions.h"   // (gpu_wrote_into asks the regions first)
 
 using Ranges = std::vector<std::pair<uint64_t, uint64_t>>;
 struct Texture {

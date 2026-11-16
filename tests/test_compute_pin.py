@@ -107,8 +107,9 @@ def main():
     # every game compute pipeline: its stage through pin_compute (graphics and the mesh fallback keep pin_subgroup)
     if "pin_subgroup(ci.stage" in draw:
         raise SystemExit("a compute pipeline is pinned with pin_subgroup directly: use pin_compute")
-    if draw.count("pin_compute(ci.stage, ") < 4:
-        raise SystemExit("fewer compute pipelines made through pin_compute than the four (warm, prepare, worker, in the dispatch)")
+    # (every compute build goes through compute_pipeline_info: warm, prepare, worker and the dispatch)
+    if "pin_compute(ci.stage, q);" not in block(draw, "VkComputePipelineCreateInfo compute_pipeline_info("):
+        raise SystemExit("compute_pipeline_info does not pin through pin_compute")
     # the compute stages' flag: set from the SPIR-V where their modules are made (a translated program, one from the cache)
     # (translated in vk_shader.cpp, read back from the program cache in vk_progcache.cpp)
     cache = (ROOT / "gpu/vk/vk_progcache.cpp").read_text(encoding="utf-8")

@@ -36,7 +36,7 @@ def check_source():
         raise SystemExit("texture_gpu_wrote no longer notes the write's regions")
     if wrote.index("wrote_regions::mark(lo, hi);") > wrote.index("std::lock_guard lk(gpu_wrote_mu);"):
         raise SystemExit("texture_gpu_wrote notes the regions after the map may have the write: a texture could be told no")
-    into = block(tex, "bool gpu_wrote_into(Texture& tex) {")
+    into = block(tex, "bool gpu_wrote_into(Texture& tex, Ranges* out) {")
     if "wrote_regions::any(lo, hi)" not in into:
         raise SystemExit("gpu_wrote_into no longer asks the table")
     if into.index("wrote_regions::any(lo, hi)") > into.index("std::lock_guard lk(gpu_wrote_mu);"):

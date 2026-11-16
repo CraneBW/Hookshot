@@ -1855,14 +1855,16 @@ COMPILE_ONLY_ENV = ("RX_HOT_OPT", "RX_PGO", "RX_VK_PGO", "RX_VK_PGO_FILE")
 # hashed by its contents. SUYU_RECOMP_ is the emitter's own (third_party/a64-kit/lift/suyu/arm64_to_c.h), and was not in the key.
 # tests/test_lift_cache.py checks that every variable the lift's sources read is one of these, a path, or in LIFT_ENV_NOT_OUTPUT
 LIFT_ENV_PREFIXES = ("A64_", "SUYU_RECOMP_")
-LIFT_ENV_NAMES = ("RX_TARGET",)   # (toolchain.py: the target the emitter and its tables are made for)
-LIFT_PATH_ENV = ("OOT_WORK", "OOT_EXEFS", "OOT_ROMFS", "OOT_DUMP", "A64_HOT_FUNCS")
+LIFT_ENV_NAMES = ("RX_TARGET",   # (toolchain.py: the target the emitter and its tables are made for)
+                  "OOT_EXEFS_PATCHES_SHA1")   # (the mods' ExeFS patches the lift writes into main, by their content)
+LIFT_PATH_ENV = ("OOT_WORK", "OOT_EXEFS", "OOT_ROMFS", "OOT_DUMP", "A64_HOT_FUNCS", "OOT_EXEFS_PATCHES")
 LIFT_ENV_NOT_OUTPUT = {   # (read by the lift's sources, and no change to what it writes)
     "HOOKSHOT_LIFT_JOBS": "how many processes", "HOOKSHOT_LIFT_NO_FORK": "how they are started", "RX_JOBS": "how many processes",
     "EMSDK": "where the compiler is", "HOOKSHOT_MINGW": "where the compiler is",
     "A64_SITE_PROFILE": "the game's runtime (a64_rt.c), at play", "RX_VK_NAN_GUARD": "nx2/bake_ds's own run",
     "RX_VK_NO_DRAW_PARAMS": "nx2/bake_ds's own run", "RX_VK_NO_F16": "nx2/bake_ds's own run",
     "RX_VK_SHARED_48K": "nx2/bake_ds's own run",
+    "HOS_MODS": "the mods folder: the ExeFS patches found in it are in the key by content (OOT_EXEFS_PATCHES_SHA1)",
     "HOS_NO_FASTFP": "the game's runtime (the lifted C reads it at play)",
 }
 
