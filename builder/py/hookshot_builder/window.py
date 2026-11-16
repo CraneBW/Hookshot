@@ -1137,7 +1137,7 @@ class Window(QWidget):
             self.folders_label = l
             self.dump_list.addWidget(l)
         if not self.dumps:
-            l = note("No .nup files in Downloads, Desktop, Documents or the top folders of your drives. Browse to yours, or drop it on "
+            l = note("No .nup or .nx files in Downloads, Desktop, Documents or the top folders of your drives. Browse to yours, or drop it on "
                      "this window.")
             l.setContentsMargins(16, 14, 16, 14)
             self.dump_list.addWidget(l)
@@ -1260,13 +1260,13 @@ class Window(QWidget):
     def dropEvent(self, e):
         for u in e.mimeData().urls():
             p = u.toLocalFile()
-            if p.lower().endswith(".nup") and os.path.isfile(p):
+            if p.lower().endswith(core.GAME_FILES) and os.path.isfile(p):
                 self.add_dump(p, "Dropped")
             elif os.path.isdir(os.path.join(p, "romfs")) and os.path.isdir(os.path.join(p, "exefs")):
                 self.use_folders(os.path.join(p, "romfs"), os.path.join(p, "exefs"))
 
     def browse_nup(self):
-        f, _ = QFileDialog.getOpenFileName(self, "Choose your game file", "", "Game file (*.nup)")
+        f, _ = QFileDialog.getOpenFileName(self, "Choose your game file", "", "Game file (*.nup *.nx)")
         if f:
             self.add_dump(os.path.normpath(f), "Chosen")
 

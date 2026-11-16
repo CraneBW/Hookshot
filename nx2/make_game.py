@@ -1,6 +1,6 @@
 """A game folder from the user's own dump: what the builder app (builder/) runs.
 
-    python -I nx2/make_game.py --nup <file.nup> --out <folder> [--work <folder>] [--jobs <n>]
+    python -I nx2/make_game.py --nup <file.nup or .nx> --out <folder> [--work <folder>] [--jobs <n>]
     python -I nx2/make_game.py --romfs <dir> --exefs <dir> --out <folder> [--work <folder>] [--jobs <n>]
     python -I nx2/make_game.py --check --nup <file.nup>       (or --exefs <dir>: is this the right game and version?)
     python -I nx2/make_game.py --update <folder>             (a folder built before, again with these tools: the game files it keeps)
@@ -638,12 +638,22 @@ def check_cache_paths(out, paths):
                  "Choose a different output folder." % path)
 
 
+def package_script(path):
+    """The reader for a game file: nxar.py for a .nx archive (told by its first bytes, not its name), else nup.py"""
+    try:
+        with open(path, "rb") as f:
+            nx = f.read(4) == b"NXAR"
+    except OSError:   # (nup.py says what is wrong with the file)
+        nx = False
+    return "nx2/nxar.py" if nx else "nx2/nup.py"
+
+
 def check(a, work):
     check_windows_sdk(work)   # (first: said in plain words when the game is chosen, not after it has been read)
     if a.nup:
         probe = os.path.join(work, "probe")
         shutil.rmtree(probe, ignore_errors=True)
-        run(PY + ["nx2/nup.py", a.nup, "--extract", probe, "--only", "exefs"])
+        run(PY + [package_script(a.nup), a.nup, "--extract", probe, "--only", "exefs"])
         check_modules(os.path.join(probe, "exefs"))
         bid = build_id(os.path.join(probe, "exefs", "main"))
         shutil.rmtree(probe, ignore_errors=True)
@@ -2326,7 +2336,7 @@ def write_game_home(out, relative):
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--nup")
+    p.add_argument("--nup", help="your copy as one file: a .nup package, or a .nx archive made from one (nxconvert pack-nup)")
     p.add_argument("--romfs")
     p.add_argument("--exefs")
     p.add_argument("--out")
@@ -2339,7 +2349,7 @@ def parse_args():
     p.add_argument("--language", help="the game's language: a code from LANGUAGES, written to language.txt. Not given: the one the "
                                       "folder has; else the system's with --prepare; else en-US")
     p.add_argument("--check", action="store_true")
-    p.add_argument("--game", help="your copy: a .nup file, or a folder with romfs and exefs in it (the same as --nup, or --romfs and --exefs)")
+    p.add_argument("--game", help="your copy: a .nup or .nx file, or a folder with romfs and exefs in it (the same as --nup, or --romfs and --exefs)")
     p.add_argument("--prepare", action="store_true", help="for RecompLauncher: no window, progress lines, --out ~/Games/Hookshot unless given")
     p.add_argument("--update", help="a game folder built before: built again from the game files it keeps (the game's update offer)")
     p.add_argument("--no-prepare-shaders", action="store_true",
@@ -2628,7 +2638,7 @@ def main(a=None):
             # Keep the last usable cache until the new package has been read and validated.
             staged_exefs = os.path.join(game, "exefs")
             try:
-                run(PY + ["nx2/nup.py", a.nup, "--extract", game])
+                run(PY + [package_script(a.nup), a.nup, "--extract", game])
                 check_modules(staged_exefs)
                 check_supported_build(staged_exefs)
                 if not os.path.isdir(os.path.join(game, "romfs")):

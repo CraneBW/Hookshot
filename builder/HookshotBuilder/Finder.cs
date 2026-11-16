@@ -5,7 +5,9 @@ namespace HookshotBuilder;
 /// The player's game files where people keep them, and the game's shortcuts.
 static class Finder
 {
-    /// .nup files in Downloads, Desktop, Documents, the home folder and the top of each drive, one folder level down too,
+    public static bool IsGameFile(string path) => DumpSearch.IsGameFile(path);
+
+    /// .nup and .nx files in Downloads, Desktop, Documents, the home folder and the top of each drive, one folder level down too,
     /// newest first. (Only names and sizes are read here: the version is checked one file at a time afterwards.) Each place is
     /// searched on its own, and the search gives what it has after DumpSearch.Budget: one drive that does not answer (a USB drive
     /// asleep, a cloud or network drive) held the start-up page on "Looking for your game files…" for good

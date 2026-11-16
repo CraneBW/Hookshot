@@ -1156,7 +1156,7 @@ class Builder(tk.Tk):
         ttk.Button(f, text=button, command=browse, cursor="hand2").grid(row=row, column=2, padx=(self.px(10), 0), pady=self.px(3))
 
     def pick_file(self, var):
-        p = filedialog.askopenfilename(title="Your game's .nup", filetypes=[("Switch 2 game package", "*.nup"), ("All files", "*")])
+        p = filedialog.askopenfilename(title="Your game's .nup or .nx", filetypes=[("Switch 2 game package", "*.nup *.nx"), ("All files", "*")])
         if p:
             var.set(p)
             self.source_picked = True

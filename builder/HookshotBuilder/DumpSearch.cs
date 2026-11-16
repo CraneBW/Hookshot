@@ -49,7 +49,11 @@ static class DumpSearch
 
     public const int ExistsBudget = 3000;
 
-    /// The .nup files in <dir> and the folders just inside it (not hidden ones, Windows or Program Files), up to 200 folders
+    /// A game in one file: a .nup package, or a .nx archive (NXFormat) made from one
+    public static bool IsGameFile(string path) => path.EndsWith(".nup", StringComparison.OrdinalIgnoreCase)
+                                                  || path.EndsWith(".nx", StringComparison.OrdinalIgnoreCase);
+
+    /// The .nup and .nx files in <dir> and the folders just inside it (not hidden ones, Windows or Program Files), up to 200 folders
     public static List<Dump> Look(string dir, string name)
     {
         var found = new List<Dump>();
@@ -68,7 +72,7 @@ static class DumpSearch
         {
             try
             {
-                foreach (var f in Directory.EnumerateFiles(sub, "*.nup"))
+                foreach (var f in Directory.EnumerateFiles(sub).Where(IsGameFile))
                 {
                     var info = new FileInfo(f);
                     found.Add(new Dump(info.FullName, name, info.Length, info.LastWriteTime));

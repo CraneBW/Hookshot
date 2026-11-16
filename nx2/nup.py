@@ -716,6 +716,17 @@ def heal(nup, t, out, names):
                 print("  %s is not a game module in any title: it starts %s" % (m, have.hex()))
 
 
+def plain_modules(nup, t, out):
+    """After an extraction (nxar.py's too): the modules healed, and main, ZBIC-compressed on firmware 22+, made a plain NSO for the tools"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import unpack
+    heal(nup, t, out, unpack.NAMES)
+    for m in unpack.NAMES:
+        p = extraction_path(out, "exefs", m, temporary_suffix=".plain")
+        if os.path.exists(p) and unpack.unpack_nso(p):
+            print("  %s: ZBIC -> plain NSO" % m)
+
+
 def zstd_start(head):
     """Whether a file starts as zstd data: a frame, or a skippable frame (magic 0x184D2A50 to 0x184D2A5F)"""
     return head == ZSTD or (len(head) == 4 and head[1:] == b"\x2a\x4d\x18" and head[0] & 0xf0 == 0x50)
@@ -864,14 +875,8 @@ def main():
         print("extracting title %d (v%d) to %s (%.0f GB free)" % (t["index"], t["version"], a.extract, free / 1e9))
         n, total = extract(nup, t, a.extract, a.only)
         print("done: %d files written, %.2f GB" % (n, total / 1e9))
-        if a.only != "romfs":   # (main is ZBIC-compressed on firmware 22+: made a plain NSO for the tools)
-            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            import unpack
-            heal(nup, t, a.extract, unpack.NAMES)
-            for m in unpack.NAMES:
-                p = extraction_path(a.extract, "exefs", m, temporary_suffix=".plain")
-                if os.path.exists(p) and unpack.unpack_nso(p):
-                    print("  %s: ZBIC -> plain NSO" % m)
+        if a.only != "romfs":
+            plain_modules(nup, t, a.extract)
 
 
 if __name__ == "__main__":

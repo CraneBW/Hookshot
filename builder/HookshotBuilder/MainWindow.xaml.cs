@@ -676,7 +676,7 @@ public partial class MainWindow : Window
         {
             DumpList.Children.Add(new TextBlock
             {
-                Text = "No .nup files in Downloads, Desktop, Documents or the top folders of your drives. Browse to yours, or drop it on this window.",
+                Text = "No .nup or .nx files in Downloads, Desktop, Documents or the top folders of your drives. Browse to yours, or drop it on this window.",
                 Style = (Style)FindResource("Note"), Margin = new Thickness(16, 14, 16, 14),
             });
             return;
@@ -815,7 +815,7 @@ public partial class MainWindow : Window
         if (runner != null || e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } paths) return;
         foreach (var p in paths)
         {
-            if (p.EndsWith(".nup", StringComparison.OrdinalIgnoreCase) && File.Exists(p)) AddDump(p, "Dropped");
+            if (Finder.IsGameFile(p) && File.Exists(p)) AddDump(p, "Dropped");
             else if (Directory.Exists(System.IO.Path.Combine(p, "romfs")) && Directory.Exists(System.IO.Path.Combine(p, "exefs")))
                 UseFolders(System.IO.Path.Combine(p, "romfs"), System.IO.Path.Combine(p, "exefs"));
         }
@@ -823,7 +823,7 @@ public partial class MainWindow : Window
 
     void BrowseNup(object sender, RoutedEventArgs e)
     {
-        var d = new OpenFileDialog { Filter = "Game file (*.nup)|*.nup", Title = "Choose your game file" };
+        var d = new OpenFileDialog { Filter = "Game file (*.nup, *.nx)|*.nup;*.nx", Title = "Choose your game file" };
         if (d.ShowDialog(this) == true) AddDump(d.FileName, "Chosen");
     }
 

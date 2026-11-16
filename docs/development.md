@@ -39,6 +39,7 @@ Run everything with `python -I` from this folder.
 | Command | What |
 |---|---|
 | `python -I nx2/nup.py <file.nup> --extract work/dump` | the `.nup` dump package to `work/dump/exefs` + `romfs` (newest title; ZBIC NSOs made plain by `nx2/unpack.py`) |
+| `python -I nx2/nxar.py <file.nx> --extract work/dump` | the same from a `.nx` archive ([NXFormat](https://github.com/fab918/nxformat)) that holds the game as `exefs` and `romfs` trees, as `nxconvert pack-nup` makes it from a `.nup`; one that holds NCA files is refused |
 | `python -I nx2/dump.py --dump <folder with exefs/ and romfs/> --set` | what the dump is (Switch 1 or 2, ids, modules, SDK, NVN); `--set` records it in `work/dump.txt` |
 | `python -I nx2/lift.py [--write]` | image + discovery + coverage (`work/image/coverage.txt`); `--write` emits the C to `work/gen` |
 | `python -I nx2/census.py --nx2` | instruction census per module, after the Switch 2 forms |

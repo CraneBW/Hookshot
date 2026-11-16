@@ -75,7 +75,8 @@ you start the game from its launcher, which also updates it.
 ### What you need
 
 - **Your copy of the game at the supported version:** program `0400486024DEC000`, update v131072, build `e0f3ccfa`.
-  Other versions do not work. A `.nup` file, or the `romfs` and `exefs` folders.
+  Other versions do not work. A `.nup` file, a `.nx` file made from one
+  ([NXFormat](https://github.com/fab918/nxformat)'s `nxconvert pack-nup`), or the `romfs` and `exefs` folders.
 - 64-bit Windows 10 or 11, or 64-bit Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora, Arch,
   SteamOS ...) and a CPU with AVX2. The Linux AppImage needs AVX2; on Windows, and in a build from source, a CPU
   without it gets a game built for what it has, a little slower.
@@ -95,7 +96,7 @@ For a portable install on an external SSD, run the downloaded setup with `--port
 
 1. Open the [latest release](https://git.notrexed.dev/Hookshot/Hookshot/releases/latest) and download `HookshotBuilder.exe`.
 2. Run it. It downloads the rest of Hookshot Builder (about 500 MB), checks it, and opens it.
-3. Pick your game. The builder looks for `.nup` files in your Downloads, Desktop and Documents folders and lists them
+3. Pick your game. The builder looks for `.nup` and `.nx` files in your Downloads, Desktop and Documents folders and lists them
    under **Found on this PC**. Not listed? Press **Browse…**, drop the file on the window, or choose
    **romfs and exefs folders**. The builder checks that it is the right version.
 4. Under **Install the game to**, keep the folder (`Games\Hookshot` in your user folder) or press **Change**. Choose
@@ -118,8 +119,8 @@ The first start prepares the game's shaders, which takes a while. Later starts a
    "Allow executing file as program" (the words differ between desktops). Or in a terminal:
    `chmod +x Hookshot-*-x86_64.AppImage`.
 3. Double-click it. The Hookshot Builder window opens.
-4. Under **Game files**, choose **.nup file** or **romfs and exefs**, then press **Browse** to pick them. The builder
-   checks the version.
+4. Under **Game files**, choose **.nup file** (a `.nx` file goes here too) or **romfs and exefs**, then press
+   **Browse** to pick them. The builder checks the version.
 5. Under **Save the game to**, keep `~/Games/Hookshot` or choose another folder. Choose a **Language**.
 6. Press **Build**. It takes about 10 to 45 minutes, depending on your CPU and memory.
 7. When it says "Your game is ready", press **Play**.

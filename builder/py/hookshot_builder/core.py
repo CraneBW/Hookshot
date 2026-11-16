@@ -384,11 +384,12 @@ FOLDER_DOWNLOADS = _guid("374DE290-123F-4565-9164-39C4925E467B")
 FOLDER_PROGRAMS = _guid("A77F5D77-2E2B-44C3-A6A2-ABA601054A51")
 
 
+GAME_FILES = (".nup", ".nx")   # (a game in one file: a .nup package, or a .nx archive (NXFormat) made from one)
 DUMP_SEARCH_BUDGET = 8.0   # (seconds: DumpSearch.Budget. Long enough for a sleeping USB drive to spin up)
 
 
 def find_dumps():
-    """.nup files in Downloads, Desktop, Documents, the home folder and the top of each drive, one folder level down too, newest
+    """.nup and .nx files in Downloads, Desktop, Documents, the home folder and the top of each drive, one folder level down too, newest
     first: every place searched at once, and what was found after DUMP_SEARCH_BUDGET (DumpSearch.cs). One drive that did not
     answer held the start-up page on "Looking for your game files…" for good"""
     home = os.path.expanduser("~")
@@ -435,7 +436,7 @@ def search_dumps(places, budget, look):
 
 
 def look_for_dumps(d, name):
-    """The .nup files in <d> and the folders just inside it (not hidden ones, Windows or Program Files), up to 200 folders"""
+    """The .nup and .nx files in <d> and the folders just inside it (not hidden ones, Windows or Program Files), up to 200 folders"""
     if not os.path.isdir(d):
         return []
     dirs, found = [d], []
@@ -448,7 +449,7 @@ def look_for_dumps(d, name):
     for sub in dirs:
         try:
             for e in os.scandir(sub):
-                if e.is_file() and e.name.lower().endswith(".nup"):
+                if e.is_file() and e.name.lower().endswith(GAME_FILES):
                     st = e.stat()
                     found.append(Dump(os.path.abspath(e.path), name, st.st_size, st.st_mtime))
         except OSError:
