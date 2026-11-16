@@ -796,6 +796,8 @@ const char* tx_damage_taken(int v) {
 }
 const char* tx_fov(int v) { return v == 100 ? "100% (original)" : tx_percent(v); }
 // (hookshot) Walk mode: how the Walk key (the Controls page) makes Link walk with the movement keys (host/nn_hid.c walk_held)
+const char* tx_grass(int v) { return v == 0 ? "None" : tx_fov(v); }
+const char* tx_base_quality(int v) { return v ? "Low (handheld)" : "Normal"; }
 const char* tx_walk_mode(int v) { return v == 1 ? "Toggle" : "Hold"; }
 MENU_HINTS(hn_walk_mode, 0, "Link walks while the Walk key is held.", "One press of the Walk key walks, the next runs again.")
 /// Shadow resolution: the sun's cascades at the game's own sizes (host/oot_shadow.c). Auto, the default, takes the size
@@ -810,6 +812,14 @@ MENU_HINTS(hn_shadow_res, 0,
            "1600 pixels a side, the console's. About 31 MB of video memory.",
            "2200 pixels a side. About 58 MB of video memory.",
            "3072 pixels a side, the game's own highest. About 113 MB of video memory.")
+// detail caps: past them foliage flickers (GPU instance budget), grass thins, shadows step (fixed shadow map res)
+constexpr int kCapFoliage = 150, kCapObjects = 250, kCapGrass = 200, kCapShadows = 200;
+#define GFX_HINT(fn, cap) \
+    const char* fn(int v, int variant) { return variant <= 0 && v > cap ? "May be unstable." : nullptr; }
+GFX_HINT(hn_foliage, kCapFoliage)
+GFX_HINT(hn_objects, kCapObjects)
+GFX_HINT(hn_grass, kCapGrass)
+GFX_HINT(hn_shadows, kCapShadows)
 const char* tx_prompts(int v) {
     static const char* t[HOS_PROMPT_N + 1] = {"Auto", "Switch", "Xbox", "PlayStation 4", "PlayStation 5", "Steam Deck",
                                               "Keyboard"};
@@ -1420,6 +1430,20 @@ Row rows[] = {
      "The size of the sun's shadow maps: higher keeps the shadows of thin things near you, such as chains, fences and "
      "leaves, smooth instead of stair-stepped, for more video memory and a little GPU time. Applies at once.",
      hn_shadow_res},
+    {TAB_GRAPHICS, "Foliage distance", &opts.gfx_foliage, 25, 400, 25, tx_fov,
+     "How far away small trees, bushes and flowers are drawn. Higher costs CPU and GPU time. Changes apply at once.",
+     hn_foliage, false, true},
+    {TAB_GRAPHICS, "Object detail", &opts.gfx_objects, 100, 400, 25, tx_fov,
+     "How far away 3D objects keep their detailed models. Changes apply at once.", hn_objects, false, true},
+    {TAB_GRAPHICS, "Grass density", &opts.gfx_grass, 0, 300, 25, tx_grass,
+     "How much grass is drawn: None hides it. Changes apply at once.", hn_grass, false, true},
+    {TAB_GRAPHICS, "Shadow distance", &opts.gfx_shadows, 25, 400, 25, tx_fov,
+     "How far away scenery and characters cast shadows (160 m and 30 m in the game). Changes apply at once.",
+     hn_shadows, false, true},
+    {TAB_GRAPHICS, "Contact shadows", &opts.gfx_contact_shadows, 0, 1, 1, tx_onoff,
+     "The small screen-space shadows where objects touch. Off saves a little GPU time.", nullptr, false, true},
+    {TAB_GRAPHICS, "Base quality", &opts.gfx_base_quality, 0, 1, 1, tx_base_quality,
+     "Low uses the game's own handheld preset, for weaker GPUs. Changes apply at once.", nullptr, false, true},
     // (the rows to change when something is wrong, or on a card short of memory: last)
     {TAB_GRAPHICS, "GPU and memory", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     {TAB_GRAPHICS, "GPU device", &opts.gpu_device, 0, 8, 1, tx_gpu,
@@ -1628,6 +1652,9 @@ Row rows[] = {
     {TAB_DEBUG, "Robust buffers", &opts.robust, 0, 2, 1, tx_robust,
      "Bounds-checked buffer reads: a read past a buffer's end is dropped instead of stopping the GPU. Applies after a "
      "restart.", hn_robust, true, true},
+    {TAB_DEBUG, "Uncap detail sliders", &opts.gfx_uncapped, 0, 1, 1, tx_onoff,
+     "Lets Foliage distance, Object detail, Grass density and Shadow distance go past their safe maximum. Past it, far "
+     "foliage can flicker, grass can thin out and shadows move in steps.", nullptr, false, true},
     {TAB_DEBUG, "ASTC as RGBA8", &opts.astc_rgba8, 0, 1, 1, tx_onoff,
      "Big ASTC textures kept as decoded RGBA8 instead of re-encoded to BC3: a workaround for texture artifacts seen on some AMD "
      "cards (issues 57 and 1006). Takes far more video memory. Applies after restart.", hn_astc_rgba8, true, true},
@@ -1847,6 +1874,16 @@ const char* cheat_button_text(int i) {
 }
 constexpr int kRows = sizeof rows / sizeof rows[0];
 
+/// Detail rows' max: table hi (uncapped) or the cap; a capped value is pulled back (after the ini, on the Debug row)
+void gfx_limits() {
+    static const struct { int* v; int cap, max; } caps[] = {
+        {&opts.gfx_foliage, kCapFoliage, 400}, {&opts.gfx_objects, kCapObjects, 400},
+        {&opts.gfx_grass, kCapGrass, 300}, {&opts.gfx_shadows, kCapShadows, 400}};
+    for (Row& r : rows)
+        for (const auto& k : caps)
+            if (r.value == k.v) r.hi = opts.gfx_uncapped ? k.max : k.cap, *k.v = std::min(*k.v, r.hi);
+}
+
 int ultrawide_read = 1;   // (ultrawide= as read: saved again while HOS_OUTPUT_RES holds the Output resolution and the row is as it was)
 /// (hookshot) The Aspect ratio and Output resolution rows' ends from the screen's sizes and the player's own (known once the
 /// options and HOS_OUTPUT_RES are read), and the Aspect ratio of the size chosen: a size of a shape of its own is that shape,
@@ -1985,9 +2022,9 @@ constexpr int64_t kMarqueeStep = 150000000LL, kMarqueeRest = 1200000000LL;   // 
 int hover_tab = -1;
 int drag_row = -1;
 bool mouse_read = false;   // (the menu has read the mouse since it opened)
-bool is_slider(const Row& r) { return r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
+bool is_slider(const Row& r) { return r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov || r.value == &opts.gfx_foliage || r.value == &opts.gfx_objects || r.value == &opts.gfx_grass || r.value == &opts.gfx_shadows; }
 /// (a scale: the arrows and a click stop at its ends; Rumble strength would go from Off to its strongest)
-bool stops_at_ends(const Row& r) { return r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
+bool stops_at_ends(const Row& r) { return r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov || r.value == &opts.gfx_foliage || r.value == &opts.gfx_objects || r.value == &opts.gfx_grass || r.value == &opts.gfx_shadows; }
 /// (the ini's Rumble strength on the menu's steps: 0 to 150, the nearest 25)
 int rumble_step(int v) { return (std::min(std::max(v, 0), 150) + 12) / 25 * 25; }
 // (hookshot) A run's environment over a saved row (RX_VK_PACE=1, HOS_OUTPUT_RES=...): for that run only. save() writes the
@@ -2752,6 +2789,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         apply_preset(*r.value);
     } else {
         *r.value = v > r.hi ? r.lo : v < r.lo ? r.hi : v;   // (Game language: written when the row is left, game_lang_tick)
+        if (r.value == &opts.gfx_uncapped) gfx_limits();
         // (another shape: the Output resolution moves to one of its sizes, the screen's own when it has that shape)
         if (r.value == &opts.ultrawide) {
             const int out = output_for_aspect(*r.value);
@@ -5065,6 +5103,7 @@ void menu_init() {
         env_override(&opts.output_res, parse_output(e));
     }
     outputs_sync();   // (the Aspect ratio follows the size read)
+    gfx_limits();
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
 }
 

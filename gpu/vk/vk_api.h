@@ -74,6 +74,10 @@ enum { HOS_OPT_SHADOW_RES = 60 };
    choice). host/nvn_native.c answers the game's present poll at once with it. The existing option callback: no new member.) */
 enum { HOS_OPT_RENDER_THREAD = 58 };
 enum { HOS_OPT_TRANSITION_AUTOSAVE = 59 };
+/* view dists (host/oot_gfx.c): % of game's; contact 1 on; base quality 1 = handheld preset */
+enum { HOS_OPT_GFX_FOLIAGE = 65, HOS_OPT_GFX_OBJECTS, HOS_OPT_GFX_GRASS, HOS_OPT_GFX_SHADOWS, HOS_OPT_GFX_CONTACT_SHADOWS,
+       HOS_OPT_GFX_BASE_QUALITY };
+enum { HOS_OPT_GFX_UNCAPPED = 71 };   /* Debug's Uncap detail sliders (vk_menu.cpp gfx_limits) */
 
 /* (hookshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of hookshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

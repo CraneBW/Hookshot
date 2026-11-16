@@ -1111,6 +1111,8 @@ them does not renew a size change's declined restart prompt. Choosing a differen
 | `mouse_sensitivity` | hundredths: 100 is 1.00 |
 | `field_of_view` | 50 to 150 percent of the current vertical gameplay FOV; 100 is the original. Applies immediately, before projection and culling. The resulting vertical angle stays within 5 to 140 degrees |
 | `shadow_resolution` | the sun's shadow maps: 0 Auto (the default: by the memory tier, `memory_budget` or else Auto (this PC)'s, the game's 1600 on Minimum and Low, 2200 on Balanced, 3072 from High up; `menu_shadow_res`), 1 Game's (1600 pixels a side), 2 High (2200), 3 Highest (3072). Read each frame (`host/oot_shadow.c`), so a change applies at once. A Quality preset sets it back to 0 |
+| `foliage_distance`, `object_detail`, `grass_density`, `shadow_distance` | Percent of the game's view distances (host/oot_gfx.c): foliage 25 to 150, object detail 100 to 250, grass 0 (none) to 200, shadows 25 to 200 (400, 400, 300, 400 with `uncap_detail_sliders=1`); 100 is the original. Applied each frame at the head of f_831f3200 (nx2/oot_gfx.py) |
+| `contact_shadows`, `base_quality` | Screen-space contact shadows (1 on, the game's); base quality 1: the game's handheld preset |
 | `robust_buffers` | 0 Auto (on), 1 Off, 2 On |
 | `transition_autosave` | 1 On (default), 0 Off. The Autosave row works independently of Debug tools. Off suppresses the verified map-transition save requests. |
 | `damage_taken` | 0 Half, 1 Normal (default), 2 Double, 3 Quadruple; Debug tools Off uses Normal without changing the saved choice. Half rounds the full hit up to a quarter heart, even on lethal hits; Heart protection wins |

@@ -367,6 +367,12 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Texture detail | Auto, Full, Medium, Low | Auto |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once | Auto |
+| | Foliage distance | 25% to 150% (400% uncapped), in steps of 25; applies immediately | 100% (original) |
+| | Object detail | 100% to 250% (400% uncapped), in steps of 25; applies immediately | 100% (original) |
+| | Grass density | None, 25% to 200% (300% uncapped), in steps of 25; applies immediately | 100% (original) |
+| | Shadow distance | 25% to 200% (400% uncapped), in steps of 25; applies immediately | 100% (original) |
+| | Contact shadows | On, Off | On |
+| | Base quality | Normal, Low (handheld) | Normal |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | | Threaded rendering | Auto, On, Off (after a restart). Auto is On with 8 or more processor threads for the game | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
@@ -415,6 +421,7 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Developer: Descriptor reuse | Off, On (after a restart) | On |
 | | Developer: Sampler cache | Off, On (after a restart) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
+| | Developer: Uncap detail sliders | Off, On: the four detail rows above past their safe max | Off |
 | | Developer: ASTC as RGBA8 | Off, On (after a restart) | Off |
 
 - **Quality preset** sets Render resolution, Window scaling filter, Sharpness, Frame pacing, Game speed, Profile
@@ -521,6 +528,11 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 - **Anisotropic filtering** keeps textures sharp on surfaces seen at a slant: the paths and floors ahead of Link. The game
   asks for 1x or 2x, which at a PC's resolutions smears the ground a few metres off; 16x costs little on most cards, and
   Game's is the console's own. `RX_VK_ANISO=<n>` sets it for one run (0: the game's).
+- **Foliage distance**, **Object detail**, **Grass density**, **Shadow distance**, **Contact shadows** and **Base quality**
+  change how far the game draws its small plants, detailed models, grass and shadows, live. They are hotoni's Graphics-Menu
+  mod for Lichii (its exefs part, which Hookshot cannot load: see Mods) written again for Hookshot. Higher distances cost
+  CPU and GPU time. They stop where the game starts to break: far foliage flickers past 150%, grass thins out past 200%, shadows move in steps past 200%; Debug > Developer > Uncap detail sliders lifts the caps. Base quality Low is the
+  game's own handheld preset. At their defaults nothing of the game is changed.
 - **Upscaler Off** (`dlss=6` in `hookshot_options.ini`) is for slow GPUs and for measuring: no DLSS, no FSR, and not the
   game's own network either, which otherwise runs on every frame (at the game's usual 3/4 share it scales the 3D up and
   smooths its edges; at 100% a pass of the same kind still smooths them). In its place the 3D is stretched to the output
@@ -702,7 +714,8 @@ layout emulators use: `mods/<name>/romfs/...` holds files that replace or add to
 have the same file, the one whose folder name sorts last wins, so name them `01-...`, `02-...` to set the order.
 
 Only RomFS mods are loaded. `exefs` patches (`.pchtxt`, `.ips`) are left out: Hookshot compiles the game's code ahead
-of time, so patching its instructions would need a rebuild. The log (`hookshot_log.txt`) names each mod and the files
+of time, so patching its instructions would need a rebuild. Graphics-Menu's settings are built in instead (Graphics >
+Detail); its RomFS part is only for its own in-game menu and need not be installed. The log (`hookshot_log.txt`) names each mod and the files
 read from it.
 
 A mod file larger than the game's own does not load unless the resource size table allows for it:
