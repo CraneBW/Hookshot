@@ -272,7 +272,7 @@ dump, the runtime made game-neutral, the stage-1 tools checked on MKW's dump as 
   (a release ships no hot list, so a player's build has no hot pieces: every lifted file is built at `-O1`). `RX_PGO=gen` counts branches
   (host/pgo_rt.c writes LLVM raw format 11, the toolchain has no compiler-rt profile library), `HOS_PGO=<path>` with `<path>.reset` and
   `<path>.dump` files drives a run, `nx2/pgo_pieces.py` fits the merged profile to the pieces, `RX_PGO=<file>` uses it. `RX_VK_ONLY=1`: the renderer alone.
-  (2026-11-14, after ProjectReLink) The renderer module the same way, apart from the game's: `RX_VK_PGO=gen` counts in the back end's own
+  (2026-11-14) The renderer module the same way, apart from the game's: `RX_VK_PGO=gen` counts in the back end's own
   files with the module's own copy of host/pgo_rt.c (`RX_VK_PGO_FILE=<path>` drives a run; on Linux the writer reads the ELF sections
   `__llvm_prf_*`), `llvm-profdata merge` makes `work/hookshot_vk.profdata`, `RX_VK_PGO=<file>` uses it (docs/development.md).
 - Dark frames, open: lit surfaces come out black for one frame, geometry and depth intact. 5% with `RX_VK_FRAMEGEN=0`, 2.9% with the menu's Off, about 0.1% at 4x.

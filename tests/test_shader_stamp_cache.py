@@ -264,7 +264,7 @@ class ShaderStampCacheTests(unittest.TestCase):
                 self.assertEqual({n for n, j in fsr.items() if "-DHOOKSHOT_FSR" in j["flags"]}, {"gpu/vk/vk_fsr4.cpp"})
                 self.assertEqual(self.changed(plain, fsr), {"gpu/vk/vk_fsr4.cpp"})
 
-    # (RX_VK_PGO, after ProjectReLink: the back end's own files, not Eden's recompiler, sirit, Dear ImGui, the fonts, zstd or the
+    # (RX_VK_PGO: the back end's own files, not Eden's recompiler, sirit, Dear ImGui, the fonts, zstd or the
     # POSIX calls)
     def own(self, jobs):
         return {n for n in jobs if n.startswith(("gpu/vk/vk_", "gpu/third_party/suyu/"))}

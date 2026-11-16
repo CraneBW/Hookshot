@@ -1,8 +1,8 @@
 # Hardware test runners
 
 A tester's PC (a Steam Deck, an AMD, Intel or 8 GB card) can take a pull request's hardware test by itself, as a
-self-hosted GitHub Actions runner, instead of someone picking it from the [test-request queue](test-requests.md). It is
-opt-in, the queue stays the way for machines that are not always on, and a merge never waits for it. Idea and
+self-hosted GitHub Actions runner, instead of someone testing it by hand. It is
+opt-in, testing by hand stays the way for machines that are not always on, and a merge never waits for it. Idea and
 discussion: [#2797](https://github.com/NotRexed/Hookshot/issues/2797).
 
 A runner runs code from a pull request on someone's own PC, and that PC has their game dump on it. GitHub's own advice

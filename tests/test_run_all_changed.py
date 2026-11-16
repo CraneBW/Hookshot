@@ -24,13 +24,13 @@ class ChangedTests(unittest.TestCase):
         self.assertFalse(everything)
         self.assertIn("tests/test_chunk_split.py", picked)
         self.assertIn("tests/test_parallel_emit.py", picked)
-        self.assertNotIn("tests/test_team_chat.py", picked)
+        self.assertNotIn("tests/test_tested_configurations.py", picked)
         self.assertLess(len(picked), len(TESTS) // 4)
 
     def test_by_name_too_and_not_inside_a_longer_name(self):
-        picked, _ = run_all.reads_changed(TESTS, ["scripts/team_chat.py"])
-        self.assertIn("tests/test_team_chat.py", picked)
-        self.assertFalse(any("team_chat_x" in p for p in picked))
+        picked, _ = run_all.reads_changed(TESTS, ["scripts/tested_configurations.py"])
+        self.assertIn("tests/test_tested_configurations.py", picked)
+        self.assertFalse(any("tested_configurations_x" in p for p in picked))
 
     def test_a_changed_test_runs_itself(self):
         self.assertEqual(run_all.reads_changed(TESTS, ["tests/test_run_all_changed.py"])[0], ["tests/test_run_all_changed.py"])
@@ -62,8 +62,8 @@ class ChangedTests(unittest.TestCase):
         cases = (("forge\thttps://git.notrexed.dev/Hookshot/Hookshot.git (fetch)\n"
                   "origin\thttps://github.com/NotRexed/Hookshot.git (fetch)\n", "forge/main"),
                  ("hookshot\thttps://git.notrexed.dev/Hookshot/Hookshot.git (fetch)\n"
-                  "forge-fork\thttps://git.magicbean.dev/someone/Hookshot.git (fetch)\n", "hookshot/main"),
-                 ("origin\thttps://git.magicbean.dev/someone/Hookshot.git (fetch)\n", "origin/main"))
+                  "forge-fork\thttps://git.example.org/someone/Hookshot.git (fetch)\n", "hookshot/main"),
+                 ("origin\thttps://git.example.org/someone/Hookshot.git (fetch)\n", "origin/main"))
         for out, want in cases:
             def git(cmd, **kw):
                 self.assertEqual(cmd[3:], ["remote", "-v"])

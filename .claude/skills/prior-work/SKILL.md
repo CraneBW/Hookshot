@@ -30,7 +30,7 @@ Otherwise ask Forgejo's own search, which matches loosely and misses some items,
 wording:
 
 ```
-python -I -c "import sys; sys.path.insert(0, 'scripts'); import forge; [print(i['state'], i['html_url'], i['title']) for i in forge.api('GET', '/repos/MagicBeanDev/Hookshot/issues?state=all&limit=50&q=' + sys.argv[1])]" RX_VK_ASTC_BC1
+python -I -c "import sys; sys.path.insert(0, 'scripts'); import forge; [print(i['state'], i['html_url'], i['title']) for i in forge.api('GET', '/repos/Hookshot/Hookshot/issues?state=all&limit=50&q=' + sys.argv[1])]" RX_VK_ASTC_BC1
 ```
 
 (`%20` for a space in a term.) A merged pull request shows as `closed` there: `python -I scripts/forge.py pr view <n>
@@ -39,7 +39,7 @@ python -I -c "import sys; sys.path.insert(0, 'scripts'); import forge; [print(i[
 **Merged work.** `git fetch forge`, then `git log forge/main --oneline -i --grep <term>` and
 `git grep -n <term> forge/main`. A shallow clone sees only its own commits: `git fetch --unshallow forge` once.
 
-**Claims.** `python -I scripts/team_chat.py read --limit 50` (the [team-updates skill](../team-updates/SKILL.md)), and
+**Claims.**
 the *Owner* column of [docs/worklist.md](../../../docs/worklist.md).
 
 **Hookshot**, the project Hookshot continues, still takes pull requests, and many Hookshot changes are ports of them:

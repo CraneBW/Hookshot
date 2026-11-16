@@ -20,7 +20,7 @@ Changes made here after the copy (against Hookshot's first import of it, commit 
   history is Hookshot's: `git log 04407384.. -- third_party/a64-kit`.
 - Hookshot: `tools/toolchain.py` reads `HOOKSHOT_MINGW`, as the rest of Hookshot's build sets it, where Hookshot read
   `HOOKSHOT_MINGW` (marked `(hookshot)`). The `(hookshot)` markers and comments stay as Hookshot wrote them.
-- Hookshot, 2026-11-14, from ProjectReLink (a GPL fork of Hookshot): `lift/a64_lift.py`'s vector float sums (A64_VFPX_SUM)
+- Hookshot, 2026-11-14, from a GPL fork of Hookshot: `lift/a64_lift.py`'s vector float sums (A64_VFPX_SUM)
   fix only the lanes the fast test gave up on, and the operations the fast paths and rescues give up on are done
   with the host's own arithmetic where Arm's result is known (FPX_EASY_HEADER), not the software body.
 

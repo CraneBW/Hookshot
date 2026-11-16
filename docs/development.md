@@ -773,8 +773,7 @@ clangd at that folder, or link the file to the checkout's top, which `.gitignore
 
 #### The renderer's play profile
 
-The Vulkan back end is built with a play profile of its own (after
-[ProjectReLink](https://github.com/pixl27/ProjectReLink)): `assets/profiles/hookshot_vk.profdata.xz`, committed, with
+The Vulkan back end is built with a play profile of its own: `assets/profiles/hookshot_vk.profdata.xz`, committed, with
 its note in `assets/profiles/README.md` (where and how it was recorded, and what it measured: about -4 to -5 % frame
 time standing and -3 % running in the Market on an RTX 3090). Every build that compiles the renderer uses it: a
 player's (with DLSS or FSR 4 too), the AppImage's, a developer's. A checkout's own `work/hookshot_vk.profdata` is used in

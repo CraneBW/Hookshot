@@ -4,7 +4,7 @@
    HOS_PGO=<path>: every 500 ms, if <path>.reset exists the counters are cleared, and if <path>.dump exists they are written to <path>;
    each file is deleted when done. So a run can leave out the loading.
    The renderer module has a copy of its own (RX_VK_PGO=gen: the counters are each module's own), which reads RX_VK_PGO_FILE
-   instead (-DPGO_ENV, below). After ProjectReLink (https://github.com/pixl27/ProjectReLink).
+   instead (-DPGO_ENV, below).
    On Linux the counters are in the ELF sections __llvm_prf_cnts/__llvm_prf_data/__llvm_prf_names, whose ends the linker names
    (__start_/__stop_), and the Win32 calls below are host/posix's. */
 #include <stdint.h>

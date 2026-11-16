@@ -1644,7 +1644,7 @@ def vk_profile_for(work, environ, readable=None, root=ROOT):
     (a developer's recording, copied to <work> by main), else the committed assets/profiles/hookshot_vk.profdata.xz, unpacked
     into <work>; either only when this compiler reads it (on every system: the committed one comes from another LLVM than
     llvm-mingw's). Not when RX_VK_PGO is set already (gen, or another profile: the developer's choice stands); with neither file
-    the renderer is built as it always was. After ProjectReLink's make_game.py"""
+    the renderer is built as it always was"""
     if environ.get("RX_VK_PGO"):
         return None
     own = os.path.join(work, VK_PROFILE)
@@ -1845,7 +1845,7 @@ def note_shader_list(work, romfs, out):
 LIFT_KEY = ".lift_key"   # (in <work>/sa/gen: what the lifted C there was made from)
 # (the compile's own switches, read by nx2/build.py alone: the hot pieces' level and their profile. They are not the lift's, so a
 # development build at RX_HOT_OPT=O1 keeps the lifted C instead of translating the game again; tests/test_lift_cache.py checks
-# that nothing else the key covers reads them. The renderer's profile too, after ProjectReLink: a renderer profile made, changed or
+# that nothing else the key covers reads them. The renderer's profile too: a renderer profile made, changed or
 # taken away does not translate the game again)
 COMPILE_ONLY_ENV = ("RX_HOT_OPT", "RX_PGO", "RX_VK_PGO", "RX_VK_PGO_FILE")
 # (the dev-loop proposal's A2) what of the environment the key hashes: the variables whose values change the lifted C. The key

@@ -352,7 +352,7 @@ def patch_glyph(source):
                       "extern void hos_prompts_glyph(uint64_t slot);\n")
 
 
-# (hookshot, after ProjectReLink, 2026-11-15) The game's zstd sequence loop (f_801102e0, ZSTD_decompressSequences_body of its
+# (hookshot, 2026-11-15) The game's zstd sequence loop (f_801102e0, ZSTD_decompressSequences_body of its
 # zstd 1.4) natively: most of the loading threads' time arriving in Hyrule Castle (host/zstd_native.c says what was measured:
 # 720 MB/s against 340 lifted). At the head of the lifted function, inside it (split_hot cuts the file at function heads: the
 # call travels with the function): the host runs the loop and the function returns, or (HOS_ZSTD_NATIVE=0) the lifted body

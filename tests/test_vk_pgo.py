@@ -1,4 +1,4 @@
-"""The renderer's play profile (RX_VK_PGO, after ProjectReLink) is opt-in at every step: with no work/hookshot_vk.profdata the
+"""The renderer's play profile (RX_VK_PGO) is opt-in at every step: with no work/hookshot_vk.profdata the
 renderer is built as it always was, a developer's own RX_VK_PGO (gen, or another profile) is never replaced, a profile this
 compiler cannot read is left out rather than stopping the build, and the game module's counters keep their own variable.
 

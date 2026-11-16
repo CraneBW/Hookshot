@@ -7629,7 +7629,7 @@ static bool fallback_list_held(uint64_t list) {
 }
 
 void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
-    handle_memo_next();   // (hookshot, after ProjectReLink: a new draw or dispatch: the handles kept for the last one go)
+    handle_memo_next();   // (hookshot: a new draw or dispatch: the handles kept for the last one go)
     Pass& ps = pass();   // (once: the accessor is a call and a thread-local read at each use. The same object for the thread's life: draw_begin_recording resets it in place)
     PROF_HOT(PROF_DRAW);
     FINE_N(FC_DRAWS, 1);
@@ -10427,7 +10427,7 @@ void compute_optimize(Program& q) {
 
 void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t z, uint64_t indirect) {
     PROF(PROF_DISPATCH);
-    handle_memo_next();   // (hookshot, after ProjectReLink: a new draw or dispatch: the handles kept for the last one go)
+    handle_memo_next();   // (hookshot: a new draw or dispatch: the handles kept for the last one go)
     DispatchClock dclock;
     s.grid[0] = indirect ? 1 : x, s.grid[1] = indirect ? 1 : y, s.grid[2] = indirect ? 1 : z;
     if (indirect) {   // (the program may read its grid from c0: the counts as the GPU will see them, best effort)

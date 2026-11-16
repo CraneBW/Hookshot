@@ -1685,7 +1685,7 @@ def main():
         # (the bundled fonts, compiled in: nx2/ui_fonts.py's file of the build's own)
         vk_jobs.append((cxx, fonts_cpp, os.path.join(obj_dir, "vk_ui_fonts.o"), target() + (["-fPIC"] if LINUX else []) + ["-O0", "-g0", "-w"],
                         b""))
-        # (hookshot, after ProjectReLink) RX_VK_PGO=gen: the back end's own files (not Eden's recompiler, sirit, Dear ImGui or
+        # (hookshot) RX_VK_PGO=gen: the back end's own files (not Eden's recompiler, sirit, Dear ImGui or
         # zstd) count their branches, and host/pgo_rt.c in the module writes them (RX_VK_PGO_FILE=<path>, <path>.reset and
         # <path>.dump as HOS_PGO's). RX_VK_PGO=<merged .profdata>: built with that profile. The replay on the game's render
         # thread is the frame's limit in heavy places (Kokiri Forest). Neither set: the build as it was, the same object keys.

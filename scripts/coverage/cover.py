@@ -48,9 +48,7 @@ COMPILER_S = 6478.0   # (the lifted C's -O1 compiler-seconds: nightly-34's first
 # ---- the toolchain ------------------------------------------------------------------------------------------------------
 def tool_dirs():
     local = os.environ.get("LOCALAPPDATA", "")
-    found = sorted(glob.glob(os.path.join(local, "LongshotLauncher", "toolchains", "*", "HookshotBuilder", "tools", "llvm-mingw", "bin")),
-                   key=os.path.getmtime, reverse=True)
-    found += glob.glob(os.path.join(local, "HookshotBuilder", "versions", "*", "*", "tools", "llvm-mingw", "bin"))
+    found = glob.glob(os.path.join(local, "HookshotBuilder", "versions", "*", "*", "tools", "llvm-mingw", "bin"))
     return found
 
 

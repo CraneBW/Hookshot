@@ -62,8 +62,6 @@ EMULATORS = [
     Program("nx2navi", "NX2navi", {"linux": ["{home}/Games/Ocarina"],
                                    "windows": ["{localappdata}/Programs/NX2navi/game", "C:/Games/Ocarina"]},
             ["nx2navi", "ocarina"], []),
-    # (Longshot: Hookshot with add-ons and the same save code, so its saves copy as they are. Windows: its builder's game folder)
-    Program("longshot", "Longshot", {"linux": ["{data}/longshot"], "windows": ["{home}/Games/Longshot"]}, ["longshot"], []),
 ]
 HOOKSHOT = Program("hookshot", "Hookshot", {"linux": ["{data}/hookshot"], "windows": []}, ["hookshot"], [])
 FOLDER = Program("folder", "the folder", {"linux": [], "windows": []}, [], [])

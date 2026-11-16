@@ -4726,7 +4726,7 @@ int64_t st_imports_evicted = 0;
 uint64_t st_import_bytes_evicted = 0;
 constexpr uint64_t kImportIdle = 600;
 
-// (hookshot, after ProjectReLink) The game frees an address region without unmapping its pages first, and a freed region's pages
+// (hookshot) The game frees an address region without unmapping its pages first, and a freed region's pages
 // were only discarded: the regions' commit stood at their whole span (8 GB for the ~2.9 GB mapped at a time). What no import of
 // the GPU holds of a freed region is decommitted now (the host's region_release_gaps): the game's thread only queues the range
 // (memory_guest_release), and the next submission, which holds pools_mu, gives back the parts no import, retired import, dead
@@ -6438,7 +6438,7 @@ void memory_stats(int64_t* mirrors, uint64_t* mirror_mb, int64_t* sync_bytes, in
     *mirrors = st_mirrors, *mirror_mb = mirror_bytes >> 20, *sync_bytes = st_sync_bytes, *sync_copies = st_sync_copies;
     *wb_bytes = st_wb_bytes;
 }
-// (hookshot, after ProjectReLink) the game freed the address region [lo, hi): queued for the next submission (released_drain)
+// (hookshot) the game freed the address region [lo, hi): queued for the next submission (released_drain)
 void memory_guest_release(uint64_t lo, uint64_t hi) {
     if (hi <= lo) return;
     std::lock_guard lk(released_mu);

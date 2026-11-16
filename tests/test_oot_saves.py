@@ -85,10 +85,8 @@ class Discovery(Case):
         make_save(eden_save(self.data / "eglantine"), b"EG")
         nx = self.home / "Games" / "Ocarina" / "profile" / "save" / ACCOUNT
         make_save(nx, b"NX")
-        ls = self.data / "longshot" / "save" / UID
-        make_save(ls, b"LS")
         expect = {"lichii": self.li, "frizti": self.li, "orchid": self.li, "pokedinner": self.li, "eden": self.li,
-                  "eglantine": eden_save(self.data / "eglantine"), "nx2navi": nx, "longshot": ls}
+                  "eglantine": eden_save(self.data / "eglantine"), "nx2navi": nx}
         self.assertEqual(sorted(expect), sorted(p.name for p in oot.EMULATORS))
         for program in oot.EMULATORS:
             folder, found = oot.locate(program, None, "--from")
@@ -99,11 +97,10 @@ class Discovery(Case):
         win_li = eden_save(self.appdata / "eden")
         win_eg = eden_save(self.appdata / "eglantine")
         win_nx = self.localappdata / "Programs" / "NX2navi" / "game" / "profile" / "save" / ACCOUNT
-        win_ls = self.home / "Games" / "Longshot" / "user" / "save" / UID
-        for folder in (win_li, win_eg, win_nx, win_ls):
+        for folder in (win_li, win_eg, win_nx):
             make_save(folder, b"W")
         expect = {"lichii": win_li, "frizti": win_li, "orchid": win_li, "pokedinner": win_li, "eden": win_li,
-                  "eglantine": win_eg, "nx2navi": win_nx, "longshot": win_ls}
+                  "eglantine": win_eg, "nx2navi": win_nx}
         with mock.patch.object(oot, "WINDOWS", True):
             for program in oot.EMULATORS:
                 self.assertEqual(list(oot.locate(program, None, "--from")[1].values()), [str(expect[program.name])])
@@ -192,16 +189,15 @@ class Discovery(Case):
         self.assertIn(str(self.data / "eglantine"), str(e.exception))
 
     def test_list_json(self):
-        make_save(self.data / "longshot" / "save" / UID, b"LS")
+        make_save(eden_save(self.data / "eglantine"), b"EG")
         code, out, _ = self.run_main("list", "--json")
         self.assertEqual(code, 0)
         doc = json.loads(out)
         self.assertEqual([s["path"] for s in doc["hookshot"]["saves"]], [str(self.hs)])
         by = {g["name"]: g for g in doc["sources"]}
-        self.assertEqual(sorted(by), ["lichii", "longshot"])   # (Eden's forks share one entry; no other saves here)
+        self.assertEqual(sorted(by), ["eglantine", "lichii"])   # (Eden's forks share one entry; no other saves here)
         self.assertIn("Orchid", by["lichii"]["display"])
         self.assertEqual([x["slot"] for x in by["lichii"]["saves"][0]["slots"]], ["slot_00"])
-        self.assertEqual(by["longshot"]["saves"][0]["profile"], UID)
 
     def test_import_json_answer(self):
         code, out, err = self.run_main("import", "lichii", "--json")
