@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "astc_opaque.h"   // (gpu/vk: upload_astc_gpu counts the blocks' kinds as it stages them)
+
 namespace fixture {
 void require(bool ok, const char* why) { if (!ok) { fprintf(stderr, "FAIL: %s\n", why); std::exit(1); } }
 struct VmaAllocation_T { std::vector<uint8_t> cpu, gpu; bool alive = true; };
@@ -75,6 +77,9 @@ const uint8_t* guest_bytes(uint64_t at, uint64_t n, std::vector<uint8_t>&) {
     require(at <= guest.size() && n <= guest.size() - at, "authored guest bounds"); return guest.data() + at;
 }
 int64_t st_bytes = 0;
+// (the BC1 choice's count of the blocks' kinds: on here, so the gather reads each layer's blocks from the game's bytes too)
+bool env_on(const char*) { return false; }
+bool astc_kinds_wanted(const Texture&) { return true; }
 struct { uint32_t w=8, tw=8, d=1; } g;
 Texture tex;
 uint32_t px_h=2, th=2, level=0, layer=0, y0=0;

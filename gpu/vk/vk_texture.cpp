@@ -1354,6 +1354,11 @@ bool bc_reformat(Texture& tex, VkFormat f) {
     return true;
 }
 
+/// (hookshot) whether an upload of tex counts its blocks' kinds, for the BC1 choice (a BC7 image, RX_VK_ASTC_BC7's, stays BC7)
+bool astc_kinds_wanted(const Texture& tex) {
+    return tex.bc && !tex.bc_resized && linear_twin(tex.format) != VK_FORMAT_BC7_UNORM_BLOCK && bc1_on();
+}
+
 bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     astc_fail = nullptr;
     if (tex.type != VK_IMAGE_TYPE_2D || tex.samples != VK_SAMPLE_COUNT_1_BIT || !astc_ready()) {
@@ -1377,12 +1382,26 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         astc_fail = "no staging memory for its ASTC blocks";
         return false;
     }
+    // (hookshot) The blocks' kinds, for the BC1 choice below, are counted here from the game's bytes as each layer is staged.
+    // They were counted from the staging buffer after the copies: that buffer is memory made for sequential writes
+    // (create_buffer's VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT), write-combined where the driver has such a
+    // type, and reading every block back out of it was the replay thread's largest single function while an area streams in
+    // (astc_opaque::scan, 10% of its running time over an arrival in the Water Temple, RTX 3060 Ti). It also counted what the
+    // staging held past a short last layer. RX_VK_ASTC_SCAN_STAGED=1: from the staging, as before
+    static const bool scan_staged = env_on("RX_VK_ASTC_SCAN_STAGED");
+    const bool kinds = astc_kinds_wanted(tex);
+    astc_opaque::Scan sc;
     std::vector<uint8_t> scratch;
     for (size_t k = 0; k < layers.size(); k++) {
         const uint64_t at = (uint64_t)layers[k] * layer_size + tail0;
         if (at >= total) continue;
         const uint64_t n = std::min(tail, total - at);
-        std::memcpy(s.data + k * tail, guest_bytes(tex.gpu + at, n, scratch), n);
+        const uint8_t* const src = guest_bytes(tex.gpu + at, n, scratch);
+        std::memcpy(s.data + k * tail, src, n);
+        if (kinds && !scan_staged && !sc.alpha) {   // (as one scan of them all: it stops at the first block that may carry alpha)
+            const astc_opaque::Scan one = astc_opaque::scan(src, n);
+            sc.opaque += one.opaque, sc.alpha += one.alpha, sc.empty += one.empty;
+        }
     }
     const uint64_t staged = tail * layers.size();
     flush_mapped_range(s.allocation, s.offset, staged);   // (encoded blocks read by the GPU decoder, not necessarily coherent)
@@ -1390,10 +1409,9 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     VkCommandBuffer cmd = upload_cmd();
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe);
     const uint64_t align = std::max<uint64_t>(dev.props.limits.minStorageBufferOffsetAlignment, 4);
-    if (tex.bc && !tex.bc_resized && linear_twin(tex.format) != VK_FORMAT_BC7_UNORM_BLOCK && bc1_on()) {   // (hookshot: BC1 for a
-        // texture whose blocks are all opaque, astc_opaque.h; a BC7 image, RX_VK_ASTC_BC7's, stays BC7)
+    if (kinds) {   // (hookshot: BC1 for a texture whose blocks are all opaque, astc_opaque.h)
         const bool is_bc1 = tex.format == VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
-        const astc_opaque::Scan sc = astc_opaque::scan(s.data, staged);
+        if (scan_staged) sc = astc_opaque::scan(s.data, staged);
         if (is_bc1 && sc.alpha) {   // (new contents with alpha: BC3 again, every layer uploaded into it)
             if (bc_reformat(tex, VK_FORMAT_BC3_UNORM_BLOCK)) {
                 tex.bc1 = 1;
