@@ -111,6 +111,11 @@ void apply_auto();
 /* APPLY_AUTO */
 
 std::vector<gpu_choice::Card> gpu_device_cards;   // (the GPU row's cards, save: gpu_device_id=)
+// (set_row's debug warning and the transition autosave row: stand-ins, as the other menu fixtures have)
+bool debug_warning = false;
+int debug_warning_choice = 0;
+void sync_transition_autosave() {}
+bool menu_refresh = false;
 std::string ini_file;
 std::string ini_path() { return ini_file; }
 std::string mic_want;
