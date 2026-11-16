@@ -600,6 +600,46 @@ static void removed_switch_notes(void) {
         }
 }
 
+#ifdef __linux__
+#include "hos_submit_thread.h"
+/* (Linux) Mesa's submit thread (hos_submit_thread.h): decided in main() after load_hookshot_env (the switch may come from
+   hookshot_env.txt) and before the first thread (SDL's, the log's, the game's): the setenv is not safe once another thread can
+   getenv. The variable stays set for the process. The note goes to the log after its first line (game_main), and to the Vulkan
+   back end, which says whether the device it picked is RADV (hos_posix_submit_thread_note, vk_main.cpp create_device) */
+static char submit_thread_note[192];
+const char *hos_posix_submit_thread_note(void) { return submit_thread_note; }
+
+static void submit_thread_at_start(void) {
+    const char *mesa = getenv("MESA_VK_ENABLE_SUBMIT_THREAD");
+    const char *user = hos_submit_thread_user_value(mesa, getenv(HOS_SUBMIT_THREAD_MARK));
+    if (mesa && !user) unsetenv("MESA_VK_ENABLE_SUBMIT_THREAD");   /* (inherited from a Hookshot: decided again here) */
+    unsetenv(HOS_SUBMIT_THREAD_MARK);
+    const long online = sysconf(_SC_NPROCESSORS_ONLN);
+    const unsigned threads = online > 0 ? (unsigned)online : 1u;
+    const HosSubmitThread c =
+        hos_submit_thread_decide(hos_drm_has_amdgpu("/sys/class/drm"), user, getenv("RX_VK_RADV_SUBMIT_THREAD"), threads);
+    char *n = submit_thread_note;
+    const size_t cap = sizeof submit_thread_note;
+    switch (c) {
+    case HOS_SUBMIT_THREAD_ON:
+    case HOS_SUBMIT_THREAD_FORCED:
+        setenv("MESA_VK_ENABLE_SUBMIT_THREAD", "1", 1);
+        setenv(HOS_SUBMIT_THREAD_MARK, "1", 1);
+        /* (the device is not picked yet: beside an AMD card another Mesa GPU's queues (ANV) get it too) */
+        if (c == HOS_SUBMIT_THREAD_ON)
+            snprintf(n, cap, "on: %u threads (RX_VK_RADV_SUBMIT_THREAD=0: off); it reaches any other Mesa GPU's queues too", threads);
+        else snprintf(n, cap, "on: RX_VK_RADV_SUBMIT_THREAD=1 (%u threads); it reaches any other Mesa GPU's queues too", threads);
+        break;
+    case HOS_SUBMIT_THREAD_FEW_THREADS:
+        snprintf(n, cap, "off: %u threads, below %u (RX_VK_RADV_SUBMIT_THREAD=1: on)", threads, HOS_SUBMIT_THREAD_MIN_THREADS);
+        break;
+    case HOS_SUBMIT_THREAD_SWITCH_OFF: snprintf(n, cap, "off: RX_VK_RADV_SUBMIT_THREAD=0 (Mesa's own choice)"); break;
+    case HOS_SUBMIT_THREAD_USER_SET: snprintf(n, cap, "left as the user set it: MESA_VK_ENABLE_SUBMIT_THREAD=%.60s", user); break;
+    case HOS_SUBMIT_THREAD_NO_AMDGPU: n[0] = 0; break;   /* (no AMD card: nothing to say) */
+    }
+}
+#endif
+
 int hos_oot_protect_hearts;
 /* Trace the request before the save manager queues it. */
 int hos_oot_trace_save(Ctx *c) {
@@ -2215,6 +2255,10 @@ static int game_main(int argc, char **argv) {
     void hos_crash_watch_start(int argc, char **argv);
     hos_crash_watch_start(argc, argv);
     if (hookshot_env_note[0]) hos_log("%s", hookshot_env_note);   /* (what hookshot_env.txt gave) */
+#ifdef __linux__
+    if (submit_thread_note[0])   /* (decided in main, before any thread: submit_thread_at_start) */
+        hos_log("env: Mesa's submit thread %s", submit_thread_note);
+#endif
     const char *image = NULL;
     /* (hookshot) --compile-shaders all or most: what a preparation of this run builds (gpu/vk/vk_draw.cpp compile_all), over
        compile_shaders= in hookshot_options.ini; as RX_VK_COMPILE_SHADERS, set before --prepare-shaders runs, wherever it stands */
@@ -2535,6 +2579,12 @@ int main(int argc, char **argv) {
     driver_cache_room();
     driver_cache_folder();
     driver_env_choose();
+#ifdef __linux__
+    /* (after hookshot_env.txt, which may set RX_VK_RADV_SUBMIT_THREAD, and before hos_display_init's SDL_Init, the first
+       thread: its setenv is safe only while this is the one thread. HL_TRACE's dump threads, a constructor's, are the one
+       exception, as for load_hookshot_env's own setenv) */
+    submit_thread_at_start();
+#endif
     game_argc = argc, game_argv = argv;
     int prepare_shaders = 0;
     for (int i = 1; i < argc; i++) {
