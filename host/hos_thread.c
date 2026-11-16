@@ -43,6 +43,7 @@ struct HosThread {
        whether it has run without one since an escape (vc_acquire; until its next block, hos_vcore_away, or the next
        hos_vcore_back); vc_starved: waiting longer than HOS_VCORE_STARVE_US (it goes first at the next release) */
     int vc_held, vc_last, vc_queued, vc_escaped, vc_starved;
+    int vc_boost;   /* (priority steps better while it has the core it took back after the replay: hos_vcore_back_first) */
     volatile int vc_kick;
     int vc_prio_over;   /* (hookshot, HOS_VC_PRIO) the priority the virtual cores schedule it at, 0: its own */
     int64_t vc_since;
@@ -1680,7 +1681,8 @@ static unsigned vc_allowed(HosThread *t) {
     return m;
 }
 /* a runs before b: a starved waiter first (the one waiting longest first among them), then by priority (vcp) */
-static int vcp(const HosThread *t) { return t->vc_prio_over ? t->vc_prio_over : t->priority; }
+/* (less its vc_boost while it has the core it took back after the replay: hos_vcore_back_first) */
+static int vcp(const HosThread *t) { return (t->vc_prio_over ? t->vc_prio_over : t->priority) - t->vc_boost; }
 static int vc_better(HosThread *a, HosThread *b) {
     if (a->vc_starved != b->vc_starved) return a->vc_starved;
     if (!a->vc_starved && vcp(a) != vcp(b)) return vcp(a) < vcp(b);
@@ -1930,6 +1932,7 @@ static void vc_acquire(HosThread *t) {
             vc_dequeue(t);
             t->vc_starved = 0;
             t->vc_escaped = 1;
+            t->vc_boost = 0;   /* (no core to keep a place on) */
             vc_st.escapes++;
             static int logged;
             if (logged < 40) {
@@ -1962,6 +1965,7 @@ static void vc_release(HosThread *t) {
     vc_owner[c] = NULL;
     t->vc_held = 0;
     t->vc_kick = 0;
+    t->vc_boost = 0;   /* (its place ahead ends with the core it was for: hos_vcore_back_first) */
     vc_grant(c);
     /* (hookshot, vc_bg_cap) fewer cores held: a background thread kept waiting by the cap may take a free core of its own
        mask now, not only this one */
@@ -1986,7 +1990,9 @@ static void vc_yield(HosThread *t, int strict) {
     if (any) vc_st.yields++;
     ReleaseSRWLockExclusive(&vc_lock);
     if (!any) return;
+    const int boost = t->vc_boost;   /* (a yield to a better waiter is not the block that ends its place ahead) */
     vc_release(t);
+    t->vc_boost = boost;
     vc_acquire(t);
 }
 /* 1 when the caller is to take a core again after its block (hos_vcore_back): it gave its core up, or it has run without
@@ -2003,6 +2009,21 @@ int hos_vcore_away(void) {
     }
     vc_release(t);
     return 1;
+}
+/* (hookshot) hos_vcore_back after host-only work on the frame's path (the replay in nvnQueueSubmitCommands): the thread
+   takes a core ahead of threads up to HOS_VCORE_REPLAY_BOOST priority steps better than it (2), and keeps that place until
+   it next gives the core up. OoT's Presentation Thread (priority 17, any core) replays the frame; its six job executors
+   and five module workers (priority 16, one core each) run their batches meanwhile, so after each replay it waited
+   ~1.1 ms for one of them to finish, to run a few microseconds of game code before the next replay. 0: as before */
+void hos_vcore_back_first(void) {
+    static int steps = -1;
+    if (steps < 0) steps = getenv("HOS_VCORE_REPLAY_BOOST") ? atoi(getenv("HOS_VCORE_REPLAY_BOOST")) : 2;
+    HosThread *t = cur;
+    if (!hos_vcores_on() || !t) return;
+    t->vc_escaped = 0;
+    if (t->vc_held) return;
+    t->vc_boost = steps > 0 && steps < 64 ? steps : 0;   /* (not queued, no core: no other thread reads it yet) */
+    vc_acquire(t);
 }
 void hos_vcore_back(void) {
     HosThread *t = cur;
@@ -2042,6 +2063,7 @@ int hos_cv_sleep(void *cv, void *lk, unsigned ms) {
 int hos_vcores_on(void) { return 0; }
 int hos_vcore_away(void) { return 0; }
 void hos_vcore_back(void) {}
+void hos_vcore_back_first(void) {}
 void hos_vcore_checkpoint(void) {}
 void hos_vcore_yield(void) {}
 int hos_cv_sleep(void *cv, void *lk, unsigned ms) {

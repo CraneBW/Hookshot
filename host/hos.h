@@ -139,6 +139,7 @@ int hos_cores(void);
 int hos_vcores_on(void);
 int hos_vcore_away(void);
 void hos_vcore_back(void);
+void hos_vcore_back_first(void);   /* (after the replay: hos_thread.c) */
 void hos_vcore_checkpoint(void);
 /* HOS_CHAIN=<path> (hos_chain.c, diagnostic): blocks, wake-ups, sleeps and presents of the guest threads for
    scripts/chain.py's critical path. kind: a wait that blocks begins / ends, a signal that can end one, a sleep begins /
