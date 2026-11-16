@@ -45,6 +45,7 @@
 #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
 #include "vk_bug_report.h"   // (the Gameplay tab's Bug report: what it writes, and how)
 #include "../../host/hos_wide_size.h"   // (the widescreen picture's size, as host/hos_main.c works it out)
+#include "../../host/audio_output_devices.h"
 #include "vk_fsr3.h"      // (the Upscaler row: whether AMD FSR 3.1 runs on this GPU)
 #include "vk_fsr3fi.h"    // (the Frame generation row: whether FSR 3.1 makes the frame)
 #include "vk_fsr4.h"
@@ -821,6 +822,60 @@ const char* tx_gpu(int v) {
     return buf;
 }
 const char* tx_pad_layout(int v);
+// The playback row stores an endpoint ID, never its position or possibly duplicated display name.
+// Menu state uses menu_mu, shared by menu_tick and the control bridge; the host mailbox has its own lock.
+struct OutputChoice { std::string id, name; };
+std::vector<OutputChoice> output_devices;
+int output_pick = 0;
+std::string output_want, output_saved_name;
+bool output_missing = false;
+bool can_outputs() {
+    return host && host->audio_output_count && host->audio_output_info && host->audio_output_select && host->audio_output_state;
+}
+bool output_forced() { const char* e = getenv("HOS_AUDIO_DEVICE"); return e && *e; }
+std::string output_id_key(const char* text) {
+    std::string s(text ? text : "");
+    while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
+    char valid[HOS_OUTPUT_ID_CAP];
+    return audio_output_copy_id(valid, sizeof valid, s.c_str()) ? s : std::string();
+}
+std::string output_name_key(const char* text) {
+    std::string s(text ? text : "");
+    while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
+    for (char& c : s) if ((unsigned char)c < 0x20 || c == 0x7f) c = ' ';
+    return s;
+}
+const char* tx_output_device(int v) {
+    static std::string text;
+    if (output_forced()) return "Overridden by HOS_AUDIO_DEVICE";
+    if (v <= 0) return "Default";
+    if (output_missing && v == (int)output_devices.size() + 1) {
+        text = (output_saved_name.empty() ? std::string(i18n::tr("Selected output")) : output_saved_name) + i18n::tr(" (not connected)");
+        return text.c_str();
+    }
+    if ((size_t)(v - 1) >= output_devices.size()) return "Default";
+    text = output_devices[v - 1].name;
+    int duplicates = 0;
+    for (const auto& d : output_devices) if (d.name == text) duplicates++;
+    if (duplicates > 1) text += " [" + std::to_string(v) + "]";
+    return text.c_str();
+}
+const char* hn_output_device(int, int variant) {
+    if (variant > 0) return nullptr;
+    if (variant < 0) return "Where the game plays sound. A change briefly restarts only the audio stream.";
+    if (output_forced()) return "HOS_AUDIO_DEVICE overrides this run. The saved device choice is kept.";
+#ifndef _WIN32
+    return "Named playback selection is Windows-only in this build. Default uses the system output.";
+#else
+    const int state = can_outputs() ? host->audio_output_state() : 0;
+    if (state & HOS_OUTPUT_UNAVAILABLE) return "No playback output could be opened. The game keeps trying.";
+    if (output_missing || (state & HOS_OUTPUT_FALLBACK))
+        return "Default is used temporarily. The selected output is remembered and retried when available.";
+    return output_pick ? "This playback device. Speaker layout changes still require a game restart."
+                       : "Follow the Windows default playback device.";
+#endif
+}
+
 // (hookshot) the Microphone row: Off, the system's default, or one of the host's microphones (host/nn_audio_in.c: the
 // ocarina's input streams), told to the host by its name (host->mic_select) whenever it changes. The chosen one is kept by
 // its name, mic_want, also while it is unplugged: the row then has one more entry for it, "<name> (not connected)", the
@@ -1216,7 +1271,7 @@ MENU_HINTS(hn_speed, 0, "A step each frame: the game slows down whenever it runs
            "Normal speed down to 15 fps, by taking longer steps.")
 MENU_HINTS(hn_text_speed, 0, "The game's own pace, with its pauses.", "Twice as fast.", "Four times as fast.",
            "Each page at once, as pressing A does.")
-MENU_HINTS(hn_audio_output, 0, "5.1 when the default output device has 5.1 or more speakers, else stereo.",
+MENU_HINTS(hn_audio_output, 0, "5.1 when the selected/default output has 5.1 or more speakers at startup, else stereo.",
            "Stereo, whatever the device has.", "5.1, whatever the device has. Mixed down on stereo speakers.",
            "The stereo average in both ears. Changes live on stereo output; restart from 5.1.")
 MENU_HINTS(hn_text_size, 0, "The game's original size.", "A little larger.", "Larger.", "Much larger.", "Largest.")
@@ -1423,8 +1478,13 @@ Row rows[] = {
     {TAB_AUDIO, "Mute in background", &opts.mute_background, 0, 1, 1, tx_onoff,
      "Silences the game while another window has the focus. The sound comes back when you switch to the game.", nullptr,
      false, true},
-    {TAB_AUDIO, "Audio output", &opts.audio_output, 0, 3, 1, tx_audio_output,
+    {TAB_AUDIO, "Output device", &output_pick, 0, 0, 1, tx_output_device,
+     "Where the game plays sound. Changes apply without restarting the game.", hn_output_device, false, true},
+    {TAB_AUDIO, "Speaker layout", &opts.audio_output, 0, 3, 1, tx_audio_output,
      "The speakers the game mixes for. Mono/Stereo changes live on stereo output; channel layout changes need a restart.", hn_audio_output, true, true},
+    {TAB_AUDIO, "Microphone", &opts.mic, 0, 2 + kMaxMics, 1, tx_mic,
+     "What the ocarina hears when the game's microphone option is on (playing an instrument, or humming).", hn_mic, false,
+     true},
 
     // Gameplay
     {TAB_GAMEPLAY, "FPS counter", &opts.show_fps, 0, fps_stats::kLevels - 1, 1, tx_fps_level,
@@ -1468,9 +1528,6 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Skip title screen", &opts.skip_title, 0, 1, 1, tx_onoff,
      "Starts a launch with the most recent saved game: presses through the title screen and its file list. Does nothing "
      "until the game has a save. Applies after a restart.", nullptr, true, true},
-    {TAB_GAMEPLAY, "Microphone", &opts.mic, 0, 2 + kMaxMics, 1, tx_mic,
-     "What the ocarina hears when the game's microphone option is on (playing an instrument, or humming).", hn_mic, false,
-     true},
     {TAB_GAMEPLAY, "Game language", &opts.game_lang, 0, i18n::game_lang_count() - 1, 1, tx_game_lang,
      "The game's own language, its text. Applies after a restart.", nullptr, true, true},
     {TAB_GAMEPLAY, "Menu language", &opts.menu_lang, 0, i18n::lang_count(), 1, tx_menu_lang, "The language of this menu.",
@@ -1995,6 +2052,7 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.output_res) return "output_res";   // (host/nn_applet.c reads it at the start)
     if (r.value == &opts.vsync) return "vsync";
     // (rows renamed since their values were first saved keep their keys: an options file from before still loads)
+    if (r.value == &opts.audio_output) return "audio_output";
     if (r.value == &opts.resolution) return "resolution";
     if (r.value == &opts.fps_cap) return "frame_rate_cap";   // (host/nn_vi.c reads it at the start, then HOS_OPT_FPS_CAP)
     if (r.value == &opts.upscale) return "upscaling";
@@ -2051,6 +2109,32 @@ int detect_pad_layout() {
 // (hookshot) the row's choice to the host: off, the default, or a microphone by its name (and its place in the host's list,
 // -1 while it is unplugged: of two with one name, the one chosen). Unplugged, the name is the kept one, cut: the host takes
 // a name that starts with it
+void refresh_outputs() {
+    output_devices.clear();
+    if (can_outputs()) {
+        const int count = std::max(0, host->audio_output_count());
+        for (int i = 0; i < count && i < 0x7ffffffd; i++) {
+            char id[HOS_OUTPUT_ID_CAP], name[HOS_OUTPUT_NAME_CAP];
+            if (host->audio_output_info(i, id, sizeof id, name, sizeof name)) output_devices.push_back({id, name});
+        }
+    }
+    output_pick = 0;
+    for (size_t i = 0; i < output_devices.size(); i++)
+        if (output_devices[i].id == output_want) output_pick = (int)i + 1, output_saved_name = output_devices[i].name;
+    output_missing = !output_want.empty() && !output_pick;
+    if (output_missing) output_pick = (int)output_devices.size() + 1;
+    for (Row& r : rows) if (r.value == &output_pick) r.hi = (int)output_devices.size() + (output_missing ? 1 : 0);
+}
+void output_chosen() {
+    if (output_forced() || !can_outputs()) return;
+    if (output_pick <= 0) output_want.clear(), output_saved_name.clear();
+    else if ((size_t)(output_pick - 1) < output_devices.size()) {
+        output_want = output_devices[output_pick - 1].id;
+        output_saved_name = output_devices[output_pick - 1].name;
+    }
+    host->audio_output_select(output_want.c_str());
+    refresh_outputs();
+}
 void mic_tell_host() {
     if (!can_mic()) return;
     if (opts.mic <= 1) host->mic_select(opts.mic <= 0 ? 0 : 1, "", -1);
@@ -2102,8 +2186,12 @@ void save() {
     // (and every other line the menu does not write, such as discord_app_id=: they were dropped at the next save)
     std::string kept, others;
     if (FILE* f = fopen(ini_path().c_str(), "r")) {
-        char line[256];
+        char line[4096];
         while (fgets(line, sizeof line, f)) {
+            if (!strchr(line, '\n') && !feof(f)) {
+                int c; while ((c = fgetc(f)) != '\n' && c != EOF) {}
+                continue;
+            }
             if (!strncmp(line, "pad_", 4) || !strncmp(line, "key_", 4) || !strncmp(line, "toggle_", 7)) {
                 kept += line;
                 continue;
@@ -2113,7 +2201,8 @@ void save() {
             const std::string key(line, (size_t)(eq - line));
             // (memory_budget and auto_for too: save() writes them, and the file's old line, kept after it, won at the next start;
             // auto_output, the Output resolution Auto once set, is no longer written: its old line is dropped)
-            bool mine = key == "microphone_device" || key == "options_version" || key == "memory_budget" || key == "auto_for" ||
+            bool mine = key == "audio_output_device_id" || key == "audio_output_device_name" || key == "output_device" ||
+                        key == "microphone_device" || key == "options_version" || key == "memory_budget" || key == "auto_for" ||
                         key == "auto_tuned" || key == "auto_output" || key == "auto_steps";
             // (and the Mesh shaders row's line, no longer read (gpu/vk/mesh_mode.h): dropped, not kept for nothing)
             mine |= key == "mesh_shaders";
@@ -2137,11 +2226,15 @@ void save() {
                 // ultrawide= is kept, unless the row was changed in the menu)
                 const int v = saved_value(r.value);
                 fprintf(f, "%s=%d\n", ini_key(r), env_holds(&opts.output_res) && v == aspect_started ? ultrawide_read : aspect_follows_host(v) ? 1 : 0);
-            } else if (r.value && r.value != &opts.game_lang) {   // (game_lang: language.txt's)
+            } else if (r.value && r.value != &opts.game_lang && r.value != &output_pick) { // The device is saved by ID below.
                 fprintf(f, "%s=%d\n", ini_key(r), saved_value(r.value));
             }
         }
         if (!mic_want.empty()) fprintf(f, "microphone_device=%s\n", mic_want.c_str());   // (hookshot: also while it is unplugged)
+        if (!output_want.empty()) {
+            fprintf(f, "audio_output_device_id=%s\n", output_want.c_str());
+            fprintf(f, "audio_output_device_name=%s\n", output_saved_name.c_str());
+        }
         // (not a row: the preset Custom came from, whose mip trimming it keeps: opts.budget)
         fprintf(f, "memory_budget=%d\n", opts.budget);
         // (the GPU device row's card itself, not only its place in the list: gpu_choice.h. A saved card not here this run, the
@@ -2679,6 +2772,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         menu_refresh = true;
         return;
     }
+    if (r.value == &output_pick && output_forced()) return;
     // (nothing else to choose: no change, no save. A saved choice that cannot run here is kept)
     if (row_fixed(r.value)) return;
     // (the scaling rows: only what can run here; the Render resolution row through the Upscaler's own steps)
@@ -2718,6 +2812,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     }
     if (r.value == &opts.transition_autosave) sync_transition_autosave();
     if (r.value == &opts.mic && can_mic()) mic_chosen();   // (hookshot)
+    if (r.value == &output_pick) output_chosen();
     // (hookshot: the samplers made again, at once: their anisotropy, and the upscalers' LOD bias, vk_draw.cpp upscale_lod_bias)
     if (r.value == &opts.anisotropy || r.value == &opts.dlss || r.value == &opts.resolution || r.value == &opts.preset)
         samplers_changed();
@@ -4872,13 +4967,18 @@ void menu_init() {
         protect_hearts.store(hearts && !strcmp(hearts, "1"));
     }
     if (FILE* f = fopen(ini_path().c_str(), "r")) {
-        char line[80];
+        char line[4096]; // Endpoint IDs are opaque and must not be cut into multiple settings.
         bool has_resolution = false;
         bool v2 = false;
         int version = 0;
         int old_dynres = -1;   // (the row before Resolution: 0, the full scale, is its 100%; 1 is Auto)
         bool menu_auto = false;   // (menu_size=0, the Menu size Auto there was before: Medium, not the Small the row's clamp gives)
         while (fgets(line, sizeof line, f)) {
+            if (!strchr(line, '\n') && !feof(f)) {
+                if (!strncmp(line, "audio_output_device_id=", 23)) output_want.clear();
+                int c; while ((c = fgetc(f)) != '\n' && c != EOF) {}
+                continue;
+            }
             char* eq = strchr(line, '=');
             if (!eq) continue;
             *eq = 0;
@@ -4914,10 +5014,14 @@ void menu_init() {
             if (!strcmp(line, "microphone_device")) {   // (hookshot: the microphone, by its name)
                 mic_want = mic_key(eq + 1);
             }
+            if (!strcmp(line, "audio_output_device_id")) output_want = output_id_key(eq + 1);
+            if (!strcmp(line, "audio_output_device_name")) output_saved_name = output_name_key(eq + 1);
         }
         fclose(f);
         // (the saved microphone by its name, not its place; the host told the row's choice. Off or the default: no list, no SDL
         // audio at the start)
+        refresh_outputs();
+        if (can_outputs()) host->audio_output_select(output_want.c_str());
         if (!mic_want.empty()) refresh_mics();
         else {
             if (opts.mic >= 2) opts.mic = 1;
@@ -5801,6 +5905,7 @@ void menu_tick() {
         if (open_now.load()) opts.pad_layout = detect_pad_layout();
         if (open_now.load()) dlss_probe(), fsr4_probe(), xess_probe();   // (whether the Upscaler row can offer DLSS, FSR and XeSS: asked once)
         if (open_now.load()) refresh_mics();   // (the microphones as they are now)
+        if (open_now.load()) refresh_outputs();
     }
     if (open_now.load() && debug_warning) {
         if (press[3] || press[4]) debug_warning_choice = 1 - debug_warning_choice, changed = true;

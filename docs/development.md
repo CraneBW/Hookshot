@@ -1132,9 +1132,34 @@ buttons: a held confirm or shoulder does not commit or add another character whe
 and keyboard editing keys reach the field while the game receives none.
 
 Custom output size's restart state tracks the actual width and height, not just the custom choice's list index.
-Audio output keeps its separate channel-layout state: Mono and Stereo share a restart value, so switching between
+Speaker layout keeps its separate channel-layout state: Mono and Stereo share a restart value, so switching between
 them does not renew a size change's declined restart prompt. Choosing a different channel layout still does.
 `tests/test_menu_text_field.py` exercises these changes together, including restoring the original size.
+
+Audio's Output device row stores `audio_output_device_id`, an opaque Windows playback endpoint ID, and
+`audio_output_device_name`, its display label. Default is an empty ID. Device changes apply live; a missing endpoint
+uses the default temporarily while retaining and retrying the chosen ID. `HOS_AUDIO_DEVICE` overrides the route for
+one run without changing the saved preference. Named output selection is Windows-only; Linux retains default output.
+Speaker layout retains the existing `audio_output` key and values: 0 Auto, 1 Stereo, 2 5.1, 3 Mono. Microphone is now
+under Audio with its existing settings keys and behavior unchanged.
+
+The host reads the startup output preference from `hos_options_file()`, the same settings path the menu receives through
+`MkwVkHost.options_path`: `HOS_OPTIONS_FILE`, then `--user`, otherwise beside the game. A missing or unchosen file means
+Default, without independently falling back to another settings file. API version 24 appends the playback callbacks after
+version 22's `take_text` and version 23's `options_path`; build the host and renderer together. `tests/test_audio_output_devices.py`
+checks their positional wiring and layout, and `tests/test_audio_output_preferences.py` compiles the actual settings-path
+and preference modules together against synthetic settings files, without enumerating or opening a device.
+
+Explicit playback changes are applied by `output_route_update()` on the audio thread before `render_frame()` mixes its
+next PCM frame. Recovery in `output_frame()` can still reopen a sink after mixing; it drops that frame only when the
+reopened sink has another channel count. A same-layout recovery keeps the frame. The game-free checks are
+`tests/test_audio_output_recovery.py` and `tests/test_audio_output_errors.py`.
+
+A failed named-device retry leaves the working fallback stream and its queued audio intact. A stalled named stream
+falls back without consuming the default device's six-reopen budget. Named retries back off from 3 to 60 seconds;
+only 30 seconds of successfully submitted and returned audio blocks reset that backoff. An open handle, failed write
+or healthy fallback does not establish that the named device plays. Explicitly changing the chosen device resets its
+retry state. Device discovery refreshes when the menu opens, rather than polling on the render thread.
 
 | Key | Values |
 |---|---|

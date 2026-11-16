@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 23
+#define MKWVK_API_VERSION 24
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (hookshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -234,6 +234,13 @@ typedef struct MkwVkHost {
        Insert menu's (gpu/vk/vk_menu.cpp ini_path) and the switches its rows read before it loads. "" when none could be chosen:
        every row at its default, and nothing saved */
     const char *(*options_path)(void);
+    /* Version 24: playback metadata and requests, appended after version 23's settings path.
+       Only the audio thread changes playback handles.
+       info copies an opaque ID and UTF-8 name. State: 1 default fallback, 2 environment override, 4 no output. */
+    int (*audio_output_count)(void);
+    int (*audio_output_info)(int index, char *id, int id_capacity, char *name, int name_capacity);
+    void (*audio_output_select)(const char *id);
+    int (*audio_output_state)(void);
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */
