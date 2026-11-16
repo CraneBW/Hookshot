@@ -1021,13 +1021,17 @@ def flag_text(fl):
     """The flags an object key is named by. Include folders are left out (their headers are in deps). The builder's
     own folder is <root> (issue 565: versions\\<tag>\\... made every update look new). --sysroot= is <sysroot>: the
     AppImage mount is a new /tmp/.mount_... path every start, and that path is not a change in the headers. -MD is left out:
-    it writes the depfile beside the object (renderer_deps) and changes nothing in it."""
+    it writes the depfile beside the object (renderer_deps) and changes nothing in it. -fprofile-instr-use= is <profile>: the
+    play profile (RX_PGO, RX_VK_PGO) is in the work folder, and its contents are in the -D..._PROFILE_SHA1 beside it; its path
+    kept another work folder from sharing the hot pieces and the renderer's objects (object_store.py, dev_packs.py)."""
     kept = []
     for f in fl:
         if f.startswith("-I") or f == "-MD":
             continue
         if f.startswith("--sysroot="):
             f = "--sysroot=<sysroot>"
+        elif f.startswith("-fprofile-instr-use="):
+            f = "-fprofile-instr-use=<profile>"
         else:
             f = f.replace(kit.ROOT, "<root>")
         kept.append(f)
