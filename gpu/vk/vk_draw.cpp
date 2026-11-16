@@ -6860,9 +6860,9 @@ void end_pass(VkCommandBuffer cmd) {
     }
     if (gprof_on()) {
         char label[160];
-        snprintf(label, sizeof label, "pass %ux%u f%d %dc%s, %s draws, first prog %016llx, last prog %016llx", ps.width, ps.height,
+        snprintf(label, sizeof label, "pass %ux%u f%d %dc%s, %s draws, %zu sampled, first prog %016llx, last prog %016llx", ps.width, ps.height,
                  (int)ps.format0, ps.n, ps.depth ? "+d" : "", ps.draws > 256 ? ">256" : ps.draws > 32 ? "33-256" : ps.draws > 4 ? "5-32" : "0-4",
-                 (unsigned long long)ps.first_prog, (unsigned long long)ps.prog);
+                 ps.sampled.size(), (unsigned long long)ps.first_prog, (unsigned long long)ps.prog);
         gprof_end(cmd, label, ps.draws);
     }
     if (dump_on())
@@ -12297,8 +12297,9 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     wheel_scene_note(cmd, s, p, false);   // (hookshot: the game's own gameplay upscale, for the item wheel)
     if (dump_on() && dump_ssbo_wanted(p.key)) dump_ssbos(cmd, p, "after");
     if (gprof_on()) {
-        char label[96];
-        snprintf(label, sizeof label, "dispatch %s prog %016llx", indirect ? "indirect" : "", (unsigned long long)p.key);
+        char label[128];   // (G2: the grid, and "mma" for the game's matrix networks, native or software multiplies)
+        snprintf(label, sizeof label, "dispatch %s prog %016llx%s grid %ux%ux%u", indirect ? "indirect" : "", (unsigned long long)p.key,
+                 !p.stages.empty() && p.stages[0].info.uses_cooperative_matrix ? " mma" : "", indirect ? 0u : x, indirect ? 0u : y, indirect ? 0u : z);
         gprof_end(cmd, label);
     }
     st_dispatches++;
