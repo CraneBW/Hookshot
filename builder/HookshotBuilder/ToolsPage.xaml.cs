@@ -46,6 +46,7 @@ partial class ToolsPage : UserControl
         mods = new ModList(game);
         modsDirty = false;
         FillMods();
+        Watch();
         ModsTab.IsChecked = true;
         Show(ModsView);
         SetStatus("");
@@ -54,6 +55,7 @@ partial class ToolsPage : UserControl
     /// The backend let go (the page left, or another game folder)
     public void Close()
     {
+        StopWatching();
         client?.Dispose();
         client = null;
         saveReady = false;
@@ -223,6 +225,96 @@ partial class ToolsPage : UserControl
     {
         try { PatchBuilds.Clear(game); } catch (Exception ex) { SetStatus("Not freed: " + ex.Message, true); }
         RefreshPatchBar();
+    }
+
+    // ---- the mods folder watched while the page is open: a mod copied in, taken out or changed shows at once (Refresh keeps
+    // the switches and order made here). Changes come in bursts (a copy is many files): read once they settle, 600 ms
+    FileSystemWatcher? folderWatch, modsWatch;
+    System.Windows.Threading.DispatcherTimer? settle;
+
+    void Changed() => Dispatcher.BeginInvoke(() => { settle?.Stop(); settle?.Start(); });
+
+    void Watch()
+    {
+        StopWatching();
+        settle = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        settle.Tick += (_, _) => { settle?.Stop(); ReloadMods(auto: true); };
+        try
+        {
+            // (the game folder itself, not its subfolders: a mods folder made, removed or renamed, then the mods folder watched)
+            folderWatch = new FileSystemWatcher(game) { NotifyFilter = NotifyFilters.DirectoryName, IncludeSubdirectories = false };
+            folderWatch.Created += (_, e) => { if (IsModsFolder(e.FullPath)) { Dispatcher.BeginInvoke(WatchMods); Changed(); } };
+            folderWatch.Deleted += (_, e) => { if (IsModsFolder(e.FullPath)) Changed(); };
+            folderWatch.Renamed += (_, e) => { if (IsModsFolder(e.FullPath) || IsModsFolder(e.OldFullPath)) { Dispatcher.BeginInvoke(WatchMods); Changed(); } };
+            folderWatch.EnableRaisingEvents = true;
+        }
+        catch (Exception) { folderWatch = null; }
+        WatchMods();
+    }
+
+    void WatchMods()
+    {
+        modsWatch?.Dispose();
+        modsWatch = null;
+        if (mods == null || !Directory.Exists(mods.Root)) return;
+        try
+        {
+            modsWatch = new FileSystemWatcher(mods.Root)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.DirectoryName | NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            };
+            modsWatch.Created += (_, _) => Changed();
+            modsWatch.Deleted += (_, _) => Changed();
+            modsWatch.Changed += (_, _) => Changed();
+            modsWatch.Renamed += (_, _) => Changed();
+            modsWatch.Error += (_, _) => Dispatcher.BeginInvoke(() => { WatchMods(); Changed(); });   // (too many changes at once)
+            modsWatch.EnableRaisingEvents = true;
+        }
+        catch (Exception) { modsWatch = null; }
+    }
+
+    bool IsModsFolder(string path) =>
+        mods != null && string.Equals(Path.TrimEndingDirectorySeparator(path), Path.TrimEndingDirectorySeparator(mods.Root), StringComparison.OrdinalIgnoreCase);
+
+    void StopWatching()
+    {
+        settle?.Stop();
+        settle = null;
+        folderWatch?.Dispose();
+        modsWatch?.Dispose();
+        folderWatch = modsWatch = null;
+    }
+
+    void ReloadMods(bool auto)
+    {
+        if (mods == null) return;
+        var names = mods.Mods.Select(m => m.Name).ToHashSet();
+        mods.Refresh();
+        var added = mods.Mods.Where(m => !names.Contains(m.Name)).Select(m => m.Name.Split('/').Last()).ToList();
+        var gone = names.Count - (mods.Mods.Count - added.Count);
+        FillMods();
+        if (added.Count > 0) SetStatus("New in the mods folder: " + string.Join(", ", added) + ". It's ticked: Save to keep it.");
+        else if (gone > 0) SetStatus($"{gone} mod{(gone == 1 ? "" : "s")} gone from the mods folder.");
+        else if (!auto) SetStatus("The mods folder read again.");
+    }
+
+    async void ReloadClick(object sender, RoutedEventArgs e)
+    {
+        if (ModsView.Visibility == Visibility.Visible) { ReloadMods(auto: false); return; }
+        if (client == null || !saveReady) return;
+        if (edited > 0 && MessageBox.Show(Window.GetWindow(this), "Read the saves again and drop the changes not saved yet?", "Hookshot",
+                                          MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        var keep = SlotPick.SelectedItem is ComboBoxItem { Tag: ValueTuple<string, string> t } ? t : default;
+        client.Dispose();
+        client = null;
+        saveReady = false;
+        edited = 0;
+        await StartSaves();   // (the slots listed again, a save made since among them; then the slot that was open)
+        foreach (ComboBoxItem item in SlotPick.Items)
+            if (item.Tag is ValueTuple<string, string> t2 && t2 == keep && SlotPick.SelectedItem != item) { SlotPick.SelectedItem = item; break; }
+        SetStatus("The saves read again.");
     }
 
     void FillMods()

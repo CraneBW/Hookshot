@@ -421,6 +421,32 @@
       </Setter>
     </Style>
 
+    <!-- every tooltip: dark, as the windows are (Windows' own is light, and the light text on it could not be read) -->
+    <Style TargetType="ToolTip">
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+      <Setter Property="FontFamily" Value="{StaticResource Ui}"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="HasDropShadow" Value="True"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToolTip">
+            <Border Background="{StaticResource Raised}" BorderBrush="{StaticResource LineStrong}" BorderThickness="1" CornerRadius="6"
+                    Padding="10,6" MaxWidth="360">
+              <ContentPresenter>
+                <ContentPresenter.Resources>
+                  <Style TargetType="TextBlock">
+                    <Setter Property="TextWrapping" Value="Wrap"/>
+                    <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+                    <Setter Property="FontSize" Value="12"/>
+                  </Style>
+                </ContentPresenter.Resources>
+              </ContentPresenter>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- every scroll bar: a slim rounded thumb on no track, wider and brighter under the mouse; no arrows -->
     <Style x:Key="ThumbStyle" TargetType="Thumb">
       <Setter Property="Template">
