@@ -18,4 +18,5 @@ Use the [save transfer guide](saves.md) for supported sources, backups, and tran
 
 ## Mods
 
-See the [mods reference](../readme.md#mods) for installation and compatibility guidance.
+The [mods guide](using-mods.md) covers installing them, turning them off, their order and checking that they loaded; the
+[mods reference](../readme.md#mods) has the details.

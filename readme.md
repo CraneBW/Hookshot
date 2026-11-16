@@ -731,10 +731,10 @@ layout emulators use: `mods/<name>/romfs/...` holds files that replace or add to
 patches to the game's code (`.ips`, IPS32, `.pchtxt`), and `mods/<name>/cheats/E0F3CCFAF50065AE.txt` Atmosphere cheats.
 Deeper layouts such as `mods/contents/<title id>/<name>/romfs` work too. A folder whose name starts with `-` or `_` is off.
 
-Only RomFS mods are loaded. `exefs` patches (`.pchtxt`, `.ips`) are left out: Hookshot compiles the game's code ahead
-of time, so patching its instructions would need a rebuild. Graphics-Menu's settings are built in instead (Graphics >
-Detail); its RomFS part is only for its own in-game menu and need not be installed. The log (`hookshot_log.txt`) names each mod and the files
-read from it.
+Players: the [mods guide](docs/using-mods.md) covers installing, turning off, ordering and checking mods. RomFS files
+load at each start; `exefs` patches (`.pchtxt`, `.ips`) are applied when the game is built (below). Graphics-Menu's
+settings are built in instead (Graphics > Detail); its RomFS part is only for its own in-game menu and need not be
+installed. The log (`hookshot_log.txt`) names each mod and the files read from it.
 The Insert menu's **Mods** tab (shown when there are mods) lists them in their order, each On or Off: Left and Right
 switch the selected one, Enter picks it up and Up and Down move it. When two mods have the same file, the one lower in
 the list wins; out of the box the list is in the folders' names' order, so `01-...`, `02-...` still set it. The order and
