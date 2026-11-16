@@ -395,7 +395,6 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | FPS counter details | Opens the FPS counter details page: Version and hardware at every level (Off, On; Off), then a line each of the Dev level (VRAM, Textures, Draws, Dispatches, Render passes, Draws skipped, Texture uploads, Pipelines built, GPU slot waits, Queue submits, Write-backs) and the CPU and GPU lines (Off, On; On) | Version and hardware off, every line on |
 | | Menu size | Small, Medium, Large | Medium |
 | | Discord status | Off, On ("Playing Hookshot" and the time played in your Discord status, while Discord runs on this PC) | On |
-| | Skip opening | Off, On (skips the new-game opening, the story movie and Navi waking Link; later cutscenes, the Deku Tree meeting and the title screen are left alone) | On |
 | | Bug report | Saves a report into a new folder in `bug-reports` (below) | |
 | Controls | Controls | Opens the Controls page | |
 | | Controller in background | Off, On | Off |

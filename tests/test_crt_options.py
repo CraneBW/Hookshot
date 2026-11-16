@@ -123,12 +123,14 @@ std::string mic_want;
 std::string mic_key(const char* name) { return name; }
 void refresh_mics() {}
 void mic_tell_host() {}
+int mods_slot = -1;   // (the Mods tab's restart slot: none here, no host mods)
+bool can_mods() { return false; }
 namespace i18n { int game_lang_index() { return 0; } }   // no external language.txt in this fixture
 /* RUMBLE_STEP */
 constexpr int HOS_KEY_N = 1, HOS_SW_N = 1, HOS_SW_PLUS = 10, HOS_SW_MINUS = 11, HOS_BIND_PAD = 0, HOS_BIND_KEY = 1;
 constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1;
 const char* const bind_names[HOS_KEY_N] = {"a"};
-struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); };
+struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); uint64_t (*mods_changed)(); };
 Host host_value{}, *host = &host_value;
 bool can_bind() { return false; }
 /* INI_KEY */

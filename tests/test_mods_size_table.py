@@ -234,7 +234,7 @@ def documented_example_checks(exe, tmp):
         return out
 
     log = run("HOS_MODS root, discovery, full-path order and lookup", mods, expected)
-    check("03-code-only: exefs patches are left out" in log, "the example's ExeFS warning is missing")
+    check(re.search(r"mods: 03-code-only: .*ExeFS patches", log) is not None, "the example's ExeFS mod is missing from the log")
     run("default root beside the executable", None, expected)
     # Every invocation is a new process: the loader deliberately indexes once per start.
     (mods / "contents").rename(mods / "-contents")

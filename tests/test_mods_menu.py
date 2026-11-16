@@ -132,7 +132,7 @@ def main():
     ver = int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1))
     need(ver >= 24 and all(f in api for f in ("(*mod_info)", "(*mod_edit)", "(*mods_changed)", "(*cheat_info)", "(*cheat_set)")),
          "MkwVkHost has no Mods tab functions (API version 24)")
-    need(re.search(r"hos_prompts_live_parts,\s*host_screen_size,\s*hos_wide_cover,\s*host_take_text,\s*hos_mod_info,\s*hos_mod_edit,\s*hos_mods_changed,\s*hos_cheat_info,\s*hos_cheat_set", backend),
+    need(re.search(r"hos_region_release_gaps,\s*hos_options_file,\s*hos_mod_info,\s*hos_mod_edit,\s*hos_mods_changed,\s*hos_cheat_info,\s*hos_cheat_set", backend),
          "host/rx_backend.c does not give the back end the mods' functions, in MkwVkHost's order")
     titles = re.search(r"tab_titles\[TAB_COUNT\] = \{([^}]*)\}", menu).group(1)
     need('"Mods"' in titles and titles.index('"Mods"') < titles.index('"Debug"'), "the tab strip has no Mods title before Debug")
