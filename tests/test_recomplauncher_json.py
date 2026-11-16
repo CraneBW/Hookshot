@@ -24,6 +24,19 @@ class RecompLauncherJsonTests(unittest.TestCase):
         self.assertTrue(keys)
         self.assertEqual(keys - rows, set())
 
+    def test_builds_into_the_launchers_game_folder(self):
+        # (RecompLauncher issue 215: without --out the build went to ~/Games/Hookshot, not the drive the player
+        # installed to. The folder it builds into is the one it plays, and the settings and saves live in it.)
+        manifest = json.loads((ROOT / "recomplauncher.json").read_text(encoding="utf-8"))
+        prepare = manifest["prepare"]["args"]
+        out = prepare[prepare.index("--out") + 1]
+        self.assertTrue(out.startswith("{install}/"))
+        self.assertEqual(manifest["start"]["args"], ["--play", out])
+        self.assertEqual(manifest["folders"]["game"][0]["path"], out)
+        self.assertEqual(manifest["config"][0]["file"][0]["path"], out + "/hookshot_options.ini")
+        self.assertIn(out + "/user", manifest["saves"])
+        self.assertNotIn("{home}/Games", json.dumps(manifest))
+
     def test_appimage_carries_it(self):
         self.assertIn('cp recomplauncher.json "$APPDIR/recomplauncher.json"',
                       (ROOT / "scripts" / "linux" / "appimage.sh").read_text(encoding="utf-8"))

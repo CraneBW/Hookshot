@@ -17,7 +17,7 @@
     ],
     "args": [
       "--play",
-      "{home}/Games/Hookshot"
+      "{install}/Hookshot"
     ]
   },
   "prepare": {
@@ -29,8 +29,11 @@
       "--cli",
       "--prepare",
       "--game",
-      "{game}"
+      "{game}",
+      "--out",
+      "{install}/Hookshot"
     ],
+    "version": "2",
     "label": "Building the game from your copy (10 to 45 minutes)",
     "timeout": 7200,
     "options": [
@@ -76,20 +79,20 @@
       "format": "ini",
       "file": [
         {
-          "path": "{home}/Games/Hookshot/hookshot_options.ini"
+          "path": "{install}/Hookshot/hookshot_options.ini"
         }
       ]
     }
   ],
   "saves": [
     "{local}/hookshot",
-    "{home}/Games/Hookshot/user"
+    "{install}/Hookshot/user"
   ],
   "folders": {
     "saves": [
       {
-        "path": "{home}/Games/Hookshot/user",
-        "if": "{home}/Games/Hookshot/user"
+        "path": "{install}/Hookshot/user",
+        "if": "{install}/Hookshot/user"
       },
       {
         "path": "{local}/hookshot"
@@ -97,7 +100,7 @@
     ],
     "game": [
       {
-        "path": "{home}/Games/Hookshot"
+        "path": "{install}/Hookshot"
       }
     ]
   },
