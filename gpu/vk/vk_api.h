@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 26
+#define MKWVK_API_VERSION 27
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (hookshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -256,6 +256,14 @@ typedef struct MkwVkHost {
     uint64_t (*mods_changed)(void);
     int (*cheat_info)(int i, const char **name, const char **mod, const char **note, int *kind, int *on);
     void (*cheat_set)(int i, int on);
+    /* (version 27, hookshot: 24 to 26 are the host's region_release_gaps, options_path and the Mods tab) playback
+       metadata and requests.
+       Only the audio thread changes playback handles.
+       info copies an opaque ID and UTF-8 name. State: 1 default fallback, 2 environment override, 4 no output. */
+    int (*audio_output_count)(void);
+    int (*audio_output_info)(int index, char *id, int id_capacity, char *name, int name_capacity);
+    void (*audio_output_select)(const char *id);
+    int (*audio_output_state)(void);
 } MkwVkHost;
 /* (version 26) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };

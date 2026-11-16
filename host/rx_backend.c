@@ -15,6 +15,7 @@
 #ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/hookshot_env.h"
 #endif
+#include "audio_output_devices.h"
 
 /* the stand-ins when there is no Vulkan back end (host/rx_nowgpu.c, host/posix/linux_stubs.c) */
 int wgr_start(void *hwnd);
@@ -323,6 +324,7 @@ static const MkwVkHost vk_host = {
     hos_region_release_gaps,
     hos_options_file,
     hos_mod_info, hos_mod_edit, hos_mods_changed, hos_cheat_info, hos_cheat_set,
+    hos_audio_output_count, hos_audio_output_info, hos_audio_output_select, hos_audio_output_state,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
