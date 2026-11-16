@@ -1539,7 +1539,7 @@ Row rows[] = {
      "Skips the new-game opening (the story movie and Navi waking Link) and leaves later cutscenes, the Deku Tree "
      "meeting, and the title screen alone.", nullptr, false, true},
 
-    // Controls (16 rows; Motion opens the 6 TAB_MOTION rows, Controls its page with the 2 TAB_PAGE rows)
+    // Controls (17 rows; Motion opens the 6 TAB_MOTION rows, Controls its page with the 2 TAB_PAGE rows)
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
      "Whether the controller plays the game while another window has the focus.", hn_background, false, true},
     {TAB_CONTROLS, "Mouse camera", &opts.mouse_native, 0, 2, 1, tx_mousecam, "How the captured mouse turns the camera.",
@@ -1552,6 +1552,11 @@ Row rows[] = {
      "count. The - and = keys change it in game too.", nullptr, false, true},
     {TAB_CONTROLS, "Invert mouse vertical", &opts.mouse_invert, 0, 1, 1, tx_onoff, "Swaps up and down for the mouse.",
      hn_mouse_invert, false, true},
+    // (with Mouse camera on Native the game's own camera inversion, which turns the right stick around, never reaches
+    // the mouse: this row is how its left and right are swapped, in both modes. No line about which way the camera
+    // then turns: As the stick turns it as the game turns it for the right stick, which need not be Native's way)
+    {TAB_CONTROLS, "Invert mouse horizontal", &opts.mouse_invert_x, 0, 1, 1, tx_onoff,
+     "Swaps left and right for the mouse.", nullptr, false, true},
     {TAB_CONTROLS, "Invert camera X", &opts.invert_cam_x, 0, 1, 1, tx_onoff,
      "Inverts horizontal look (left/right) on the right analog stick.", nullptr, false, true},
     {TAB_CONTROLS, "Invert camera Y", &opts.invert_cam_y, 0, 1, 1, tx_onoff,
