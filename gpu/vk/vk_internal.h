@@ -53,6 +53,9 @@ struct Device {
     VkDevice device = VK_NULL_HANDLE;
     uint32_t queue_family = 0;
     VkQueue queue = VK_NULL_HANDLE;
+    // (the queue vkQueueBindSparse takes for sparse buffers: `queue` where its family binds sparse memory, else a queue of a
+    // family that does. Mesa's RADV keeps sparse binding on a family of its own, with no graphics or compute. VK_NULL_HANDLE: none)
+    VkQueue sparse_queue = VK_NULL_HANDLE;
     // extensions in use
     bool mesh_shader = false, mesh_queries = false, external_memory_host = false, external_memory_fd = false, dma_buf_import = false, pipeline_library = false,
          graphics_pipeline_library = false, custom_border_color = false, dynamic_state3 = false,
@@ -62,7 +65,7 @@ struct Device {
          buffer_marker = false, // (RX_VK_CHECKPOINTS=1 without the NV extension: VK_AMD_buffer_marker, AMD and Intel)
          device_fault = false,  // (VK_EXT_device_fault: what a lost device faulted on)
          sparse_images = false, // (sparse resident 2D images on the queue: the terrain's huge arrays)
-         sparse_buffers = false, // (sparse-bound buffers on the queue: a pool imported as several dma-bufs)
+         sparse_buffers = false, // (sparse-bound buffers on sparse_queue: a pool imported as several dma-bufs)
          view_2d_of_3d = false, // (VK_EXT_image_2d_view_of_3d: a 3D texture a 2D sample instruction reads)
          coop_matrix = false,   // (VK_KHR_cooperative_matrix with its feature)
          native_mma = false;    // (HMMA on it: the cooperative matrix test passed, vk_coopmat.cpp)

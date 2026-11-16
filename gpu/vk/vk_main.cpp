@@ -459,9 +459,25 @@ bool create_device() {
         x.queueFamilyIndex = family, x.queueCount = count, x.pQueuePriorities = priorities;
         qs.push_back(x);
     };
+    // (hookshot) Sparse binding on a family of its own. Mesa's RADV has one (queue flags SPARSE_BINDING alone) and
+    // its graphics family no longer binds sparse memory, so asking only the replay's family found none: "larger pools are
+    // host-pointer imports (no sparse binding)", and with the guest window a memfd (host/hos_main.c) a host-pointer import
+    // cannot be made either. Every pool over udmabuf's size_limit_mb (64 MB by default) was then no import at all: its
+    // storage buffers bound nothing, the foliage culling's compute passes wrote nowhere, and grass and small plants
+    // flickered in and out (RX 7800 XT, Mesa 25.0.7: "pool ... not imported (VkResult -13)", "storage buffer NOT bound
+    // (reads zeros)"). Only sparse buffers' binds go to this queue (vk_memory.cpp import_dma_buf_pieces); the sparse
+    // textures stay on the replay's own. RX_VK_SPARSE_QUEUE=0: only the replay's family is asked, as before
+    uint32_t sparse_family = UINT32_MAX;
+    if (!(families[dev.queue_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) &&
+        !(getenv("RX_VK_SPARSE_QUEUE") && !atoi(getenv("RX_VK_SPARSE_QUEUE"))))
+        for (uint32_t i = 0; i < n && sparse_family == UINT32_MAX; i++)
+            if (i != dev.queue_family && i != compute_family && i != presenter_family && families[i].queueCount &&
+                (families[i].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT))
+                sparse_family = i;
     queues(dev.queue_family, 1);
     if (compute_family != UINT32_MAX) queues(compute_family, 1);
     if (presenter_family != UINT32_MAX) queues(presenter_family, presenter_index + 1);
+    if (sparse_family != UINT32_MAX) queues(sparse_family, 1);
     (void)q;
     // (and the presenter's waits for its presents to be shown: VK_KHR_present_id + VK_KHR_present_wait, where the driver has them)
     const bool want_present_wait = presenter_family != UINT32_MAX && has_extension(exts, VK_KHR_PRESENT_ID_EXTENSION_NAME) &&
@@ -661,7 +677,8 @@ bool create_device() {
     dev.features = f.features;
     dev.sparse_images = (families[dev.queue_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) && f.features.sparseBinding &&
                         f.features.sparseResidencyImage2D && !(getenv("RX_VK_SPARSE") && !atoi(getenv("RX_VK_SPARSE")));
-    dev.sparse_buffers = (families[dev.queue_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) && f.features.sparseBinding;
+    const bool own_family_sparse = (families[dev.queue_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) != 0;
+    dev.sparse_buffers = (own_family_sparse || sparse_family != UINT32_MAX) && f.features.sparseBinding;
     // (hookshot) Intel XeSS's features (vk_xess.cpp), last, into the chain as it will be made: the library sets what it needs in
     // the renderer's structures and adds what it lacks (VK_EXT_mutable_descriptor_type's); nothing without its library, and a
     // refusal leaves the chain as it was and XeSS out for the run
@@ -684,6 +701,15 @@ bool create_device() {
     // fallback, a start keeps the fallback's programs ready, and loads at create have not been shown to be as good there)
     programs_load_decide(dev.mesh_shader && !dev.mesh_fallback && !dev.task_mesh_fallback);
     vkGetDeviceQueue(dev.device, dev.queue_family, 0, &dev.queue);
+    dev.sparse_queue = VK_NULL_HANDLE;
+    if (dev.sparse_buffers) {
+        if (own_family_sparse) dev.sparse_queue = dev.queue;
+        else vkGetDeviceQueue(dev.device, sparse_family, 0, &dev.sparse_queue);
+        if (!dev.sparse_queue) dev.sparse_buffers = false;
+        if (dev.sparse_queue && dev.sparse_queue != dev.queue)
+            logf("vk: sparse buffers are bound on a queue of family %u (the replay's family %u binds no sparse memory)", sparse_family,
+                 dev.queue_family);
+    }
     dev.present_queue = VK_NULL_HANDLE;
     dev.present_family = dev.queue_family;
     if (compute_family != UINT32_MAX) vkGetDeviceQueue(dev.device, compute_family, 0, &dev.present_queue), dev.present_family = compute_family;

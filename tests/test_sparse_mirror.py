@@ -37,7 +37,8 @@ def check_source():
     mem = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
     # (on by default: unset is on, =0 / off / false / no off; never where the device can't)
     need(block(mem, "bool mirror_sparse_on()"), ['getenv("RX_VK_MIRROR_SPARSE")', "const bool asked = !v || !env_value_off(v);",
-                                                 "residencyNonResidentStrict", "sparseResidencyBuffer", "return asked && can;"],
+                                                 "residencyNonResidentStrict", "sparseResidencyBuffer", "return asked && can;",
+                                                 "const bool own_queue = dev.sparse_queue == dev.queue;", "dev.sparse_buffers && own_queue &&"],
          "mirror_sparse_on()")
     make = block(mem, "bool mirror_make(Pool& pool) {")
     need(make, ["sparse_mirror::live_blocks(p->lo, p->hi", "sparse_fill(*p, sparse_buf, sparse_req, live)",

@@ -317,7 +317,11 @@ bool import_dma_buf_pieces(uint64_t lo, uint64_t hi, uint64_t piece, Pool& p) {
             VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             vkCreateFence(dev.device, &fi, nullptr, &fence);
         }
-        {   // (on the queue, as the sparse textures' binds: nothing uses the new buffer yet, so no wait for earlier work)
+        if (dev.sparse_queue && dev.sparse_queue != dev.queue) {
+            // (a queue of the driver's sparse family, RADV's: this function is its only user and fence_mu its lock. Nothing uses
+            // the new buffer yet and the fence is waited for below, so the replay's queue and its held submits are left alone)
+            res = vkQueueBindSparse(dev.sparse_queue, 1, &si, fence);
+        } else {   // (on the queue, as the sparse textures' binds: nothing uses the new buffer yet, so no wait for earlier work)
             std::lock_guard qk(dev.present_mu);
             queue_flush_locked();
             res = vkQueueBindSparse(dev.queue, 1, &si, fence);
@@ -373,11 +377,24 @@ bool import_dma_buf(uint64_t lo, uint64_t hi, Pool& p) {
         if (dmabuf_memfd >= 0)
             logf("vk: dma-bufs of at most %llu MB (udmabuf's limit %llu MB); larger pools %s", (unsigned long long)(piece >> 20),
                  (unsigned long long)(dmabuf_limit >> 20),
-                 dev.sparse_buffers ? "are several, in a sparse buffer" : "are host-pointer imports (no sparse binding)");
+                 dev.sparse_buffers ? "are several, in a sparse buffer"
+                                    : "CANNOT be imported (no sparse binding, and the window's shared pages are no host-pointer import)");
     }
     if (dmabuf_memfd < 0 || (lo & 4095) || (hi & 4095)) return false;
     if (hi - lo > piece) {
-        if (!dev.sparse_buffers || !import_dma_buf_pieces(lo, hi, piece, p)) return false;
+        if (!dev.sparse_buffers) {
+            // (said once, with what helps: such a pool is no import at all, its buffers bind nothing and whatever reads or writes
+            // them, the foliage culling first, gets zeros: grass and small plants flickering in and out)
+            static std::atomic<int> told{0};
+            if (told++ < 1)
+                logf("vk: WARNING: pool %#llx..%#llx (%llu MB) is over udmabuf's %llu MB limit and this driver binds no sparse buffers: it "
+                     "cannot be imported, and what reads or writes it gets zeros (plants flickering or missing). Close the game and raise "
+                     "the limit, then start it again: echo 2048 | sudo tee /sys/module/udmabuf/parameters/size_limit_mb",
+                     (unsigned long long)lo, (unsigned long long)hi, (unsigned long long)((hi - lo) >> 20),
+                     (unsigned long long)(dmabuf_limit >> 20));
+            return false;
+        }
+        if (!import_dma_buf_pieces(lo, hi, piece, p)) return false;
     } else {
         VkExternalMemoryBufferCreateInfo eb{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
         eb.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
@@ -3310,11 +3327,16 @@ bool mirror_sparse_on() {
     static const bool on = [] {
         const char* v = getenv("RX_VK_MIRROR_SPARSE");
         const bool asked = !v || !env_value_off(v);
-        const bool can = dev.sparse_buffers && dev.features.sparseResidencyBuffer &&
+        // (the mirrors bind on the replay's queue: where that family binds no sparse memory (RADV keeps sparse binding on a
+        // family of its own, dev.sparse_queue, which only the dma-buf pools use), a bind there is not allowed and the GPU hangs)
+        const bool own_queue = dev.sparse_queue == dev.queue;
+        const bool can = dev.sparse_buffers && own_queue && dev.features.sparseResidencyBuffer &&
                          dev.props.sparseProperties.residencyNonResidentStrict;
         if (asked)
             logf("vk: sparse VRAM mirrors (RX_VK_MIRROR_SPARSE): %s",
-                 can ? "on" : "not on this device (no strict sparse residency for buffers): whole mirrors");
+                 can ? "on"
+                 : dev.sparse_buffers && !own_queue ? "not on this device (the replay's queue family binds no sparse memory): whole mirrors"
+                                                    : "not on this device (no strict sparse residency for buffers): whole mirrors");
         return asked && can;
     }();
     return on;
