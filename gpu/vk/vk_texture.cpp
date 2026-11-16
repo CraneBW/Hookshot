@@ -3404,7 +3404,7 @@ void full_barrier(VkCommandBuffer cmd, const char* why) {
 // spans, fps unchanged (72.6 / 72.6 against 72.6 / 73.9): the drains cost the GPU little, the frame is not limited by them. Left
 // off: no gain for the ordering the game may rely on.
 void pass_start_barrier(VkCommandBuffer cmd, const char* why) {
-    static const bool trust = getenv("RX_VK_PASS_TRUST") != nullptr;
+    static const bool trust = env_on("RX_VK_PASS_TRUST");
     if (trust && !par_active.load(std::memory_order_relaxed) && cmd == last_barrier_cmd &&
         other_work_slot(cmd).load(std::memory_order_relaxed) == last_barrier_other) {
         st_barriers_left_out.fetch_add(1, std::memory_order_relaxed);
@@ -3419,7 +3419,7 @@ void dispatch_barrier(VkCommandBuffer cmd, const char* why) {
         st_trust_dispatch_left.fetch_add(1, std::memory_order_relaxed);
         return;
     }
-    static const bool trust = getenv("RX_VK_DISPATCH_TRUST") != nullptr;
+    static const bool trust = env_on("RX_VK_DISPATCH_TRUST");
     const uintptr_t v = (uintptr_t)cmd;
     if (trust && !par_active.load(std::memory_order_relaxed) && cmd == last_barrier_cmd &&
         xfer_work_by_cmd[((v >> 4) ^ (v >> 10) ^ (v >> 16)) & 63].load(std::memory_order_relaxed) == last_barrier_xfer) {

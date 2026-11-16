@@ -1376,7 +1376,7 @@ HLE(_ZN2nn2os17SetThreadCoreMaskEPNS0_10ThreadTypeEim) {
    (nn::os::GetCurrentCoreNumber, svc 0x10) and the waits for a virtual core, logged every 5 s (cumulative) */
 int hos_core_count_on(void) {
     static int on = -1;
-    if (on < 0) on = getenv("HOS_CORE_COUNT") != NULL;
+    if (on < 0) on = env_on("HOS_CORE_COUNT");
     return on;
 }
 void hos_core_count_svc(void) { if (cur) cur->cc_svc++; }
@@ -1941,7 +1941,7 @@ static void vc_stats_locked(int64_t now) {
 static struct { HosThread *t; int64_t n, ns; } vc_th[64];
 static void vc_thread_note(HosThread *t, int64_t waited) {   /* holding vc_lock */
     static int on = -1;
-    if (on < 0) on = getenv("HOS_VCORE_LOG") != NULL;
+    if (on < 0) on = env_on("HOS_VCORE_LOG");
     if (!on) return;
     int i = 0;
     while (i < 64 && vc_th[i].t && vc_th[i].t != t) i++;

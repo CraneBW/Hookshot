@@ -2219,7 +2219,7 @@ uint64_t shipped_list_done() {
 }
 bool shipped_list_pending() {
     static const bool on = !getenv("RX_VK_SHIPPED_STATES") || atoi(getenv("RX_VK_SHIPPED_STATES")) != 0;
-    if (!on || getenv("RX_VK_NO_STATE_LIST")) return false;
+    if (!on || env_on("RX_VK_NO_STATE_LIST")) return false;
     const uint64_t h = shipped_list_hash();
     const bool pending = h && h != shipped_list_done();
     if (pending) logf("vk: the shipped pipeline state list is new since the shaders were prepared: its pipelines are noted now");
@@ -4346,7 +4346,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
         }
     }
     out.bufs.reserve(nbuf), out.imgs.reserve(nimg), out.views.reserve(nview);   // (stable pointers below)
-    static const bool no_slot_cache = getenv("RX_VK_NO_SLOT_CACHE") != nullptr;
+    static const bool no_slot_cache = env_on("RX_VK_NO_SLOT_CACHE");
     TexSlot* slots = nullptr;
     if (!no_slot_cache && ntex) {
         auto& table = prog_slots();

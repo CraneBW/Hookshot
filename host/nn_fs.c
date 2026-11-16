@@ -145,7 +145,7 @@ static int mount(const char *name, const char *root, int writable) {   /* 0: the
                          "update applied, its romfs and exefs from the same dump.", root, fd.cFileName, expected);
             }
         }
-        if (text[0] && !getenv("HOS_HEADLESS"))
+        if (text[0] && !env_on("HOS_HEADLESS"))
             MessageBoxA(NULL, text, "Hookshot: game files", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
     }
 #endif

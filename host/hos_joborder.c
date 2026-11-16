@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../gpu/vk/compat/hookshot_env.h"   /* (env_on: the switches' one rule) */
 
 static int jo_on = -1;
 static int64_t jo_long_ns = 300000;
@@ -55,7 +56,7 @@ static int jo_init(void) {
     if (jo_on >= 0) return jo_on;
     const char *e = getenv("HOS_JOB_ORDER"), *us = getenv("HOS_JOB_ORDER_US");
     if (us && atoi(us) > 0) jo_long_ns = (int64_t)atoi(us) * 1000;
-    jo_log = getenv("HOS_JOB_ORDER_LOG") != NULL;
+    jo_log = env_on("HOS_JOB_ORDER_LOG");
     const int on = e && e[0] == '1';
     static volatile long told;
     if (on && !__sync_lock_test_and_set(&told, 1)) hos_log("joborder: on: jobs over %lld us first in their level", (long long)(jo_long_ns / 1000));

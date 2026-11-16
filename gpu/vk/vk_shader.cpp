@@ -805,7 +805,7 @@ bool spirv_uses_subgroups(const std::vector<uint32_t>& spirv) {
 thread_local uint64_t module_program = 0;   // (translate_into's program, for make_module's callers that do not name it)
 VkShaderModule make_module(const std::vector<uint32_t>& spirv_in, uint64_t program, bool* busy) {
     // (RX_VK_KEEP_DENORM=1: the modules as translated, to compare a picture or a number with and without the strip)
-    static const bool keep = getenv("RX_VK_KEEP_DENORM") != nullptr;
+    static const bool keep = env_on("RX_VK_KEEP_DENORM");
     const bool lacks = !keep && (dev.denorm_preserve_widths != 7 || dev.denorm_flush_widths != 7);
     const std::vector<uint32_t> cleaned = lacks ? strip_float_controls(spirv_in, dev.denorm_preserve_widths, dev.denorm_flush_widths)
                                                 : std::vector<uint32_t>{};

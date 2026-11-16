@@ -635,7 +635,7 @@ void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back
     {   // what the capture waits for: how long, how far ahead of the GPU, and how long the GPU had it by then
         static std::mutex mu;
         static int64_t n, unsub, wait_ns, max_ns, gpu_had_ns, ahead, n_traced;
-        static const bool trace = getenv("RX_VK_CAPWAIT_TRACE") != nullptr;   // (diagnostic: each wait, 400 of them after 3000)
+        static const bool trace = env_on("RX_VK_CAPWAIT_TRACE");   // (diagnostic: each wait, 400 of them after 3000)
         const int64_t t1 = std::chrono::steady_clock::now().time_since_epoch().count();
         const uint64_t q = q_values.load();
         std::lock_guard lk(mu);
@@ -1818,7 +1818,7 @@ int64_t dry_work = 0;
 // clear: the targets black for the frame. The log's "written (a pass's colour target) in segment N, uploaded by the later segment M"
 // lines counted them (40 and more in a 4-minute run; none with RX_VK_PARALLEL=0). RX_VK_NO_DRY_CLEAR_MARKS=1: as before
 bool dry_clear_marks() {
-    static const bool on = !getenv("RX_VK_NO_DRY_CLEAR_MARKS");
+    static const bool on = !env_on("RX_VK_NO_DRY_CLEAR_MARKS");
     return on;
 }
 // (RX_VK_DRY_LEAN=1) the points whose state the dry pass keeps: only those the boundaries can be at (see
@@ -2037,7 +2037,7 @@ uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::functio
 void ub_overlay_onto(uint64_t addr, uint64_t n, uint8_t* p) {
     UbReadGuard ug;
     const size_t lim = ub_limit ? std::min(ub_limit, ub_updates.size()) : 0;
-    static const bool cur_only = getenv("RX_VK_UB_CUR_ONLY") != nullptr;
+    static const bool cur_only = env_on("RX_VK_UB_CUR_ONLY");
     const size_t first = cur_only ? std::min(ub_first_of_recording, lim) : 0;
     if (ub_gap_holds(addr, n, first, lim) || ub_try_gap(first, lim, addr, n)) return;
     for (size_t i = first; i < lim; i++) {
@@ -2139,7 +2139,7 @@ struct ReplayWall {
 };
 ReplayWall rwall;
 bool wall_fine_on() {
-    static const bool v = getenv("RX_VK_PROF_FINE") != nullptr;
+    static const bool v = env_on("RX_VK_PROF_FINE");
     return v;
 }
 inline int64_t wall_now() { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
@@ -4791,7 +4791,7 @@ int wait_core(uint64_t f, uint64_t timeout_ns) {
     static std::mutex mu;
     static int64_t n, n_long, by_path[4], unrec, logged;
     static double sum_ms, max_ms, ahead;
-    static const bool each = getenv("RX_VK_FENCE_WAIT_LOG") != nullptr;
+    static const bool each = env_on("RX_VK_FENCE_WAIT_LOG");
     std::lock_guard lk(mu);
     if (!timeout_ns) return r;
     n++, sum_ms += ms, max_ms = std::max(max_ms, ms), ahead += (double)(f - done0), by_path[wait_path & 3]++, unrec += !recorded;
@@ -5132,7 +5132,7 @@ RbScope::~RbScope() {
         if (pending) tl_ev("rb-val", value, fence_at, completed());
         tl_ev("rb-end", gpu, size, (uint64_t)(total / 1000) | (uint64_t)(ph[2] / 1000) << 24 | (uint64_t)(ph[3] / 1000) << 40 | (uint64_t)late << 63);
     }
-    static const bool aggregate = getenv("RX_VK_RB_PROF") != nullptr;
+    static const bool aggregate = env_on("RX_VK_RB_PROF");
     if (!aggregate) return;
     std::lock_guard lk(rb_prof_mu);
     if (!rb_prof_from) rb_prof_from = presents_now, rb_prof_next = presents_now + 300;   // (the first window starts here)

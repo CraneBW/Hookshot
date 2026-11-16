@@ -4689,7 +4689,7 @@ bool noaccess_ram_on() {
     static const bool on = [] {
         const char* e = getenv("HOS_NOACCESS_RAM");
         const char* lazy = getenv("HOS_LAZY_COMMIT");
-        return e && e[0] == '1' && !(lazy && lazy[0] == '0') && !getenv("HOS_LARGE_PAGES");   // (off by default here: =1 on)
+        return e && e[0] == '1' && !(lazy && lazy[0] == '0') && !env_on("HOS_LARGE_PAGES");   // (off by default here: =1 on)
     }();
     return on;
 }

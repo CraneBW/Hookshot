@@ -467,7 +467,7 @@ void clear_tex(VkCommandBuffer cmd, NvnState& st, const nvn_p_clear_tex& p) {
 // scene targets of the frame, black for one frame ("parallel: ... written in segment N, uploaded by the later segment M" in
 // the log counted them). RX_VK_NO_DRY_XFER_MARKS=1: as before
 void dry_mark_copy_target(const nvn_p_copy_tt& p) {
-    static const bool off = getenv("RX_VK_NO_DRY_XFER_MARKS") != nullptr;
+    static const bool off = env_on("RX_VK_NO_DRY_XFER_MARKS");
     if (off || !p.dst || !p.dst->gpu) return;
     const nvn_view* view = p.has_dv ? &p.dv : nullptr;
     Texture* tex = texture_get(p.dst, false);

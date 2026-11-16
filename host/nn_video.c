@@ -831,7 +831,7 @@ static void dec_acquire(Ctx *c) {
            picture again, as a display shows a frame until the next one is due. Only for pools the game reads through
            the API (OoT's): nothing in guest memory to keep. HOS_VIDEO_NO_HOLD=1: as before */
         static int no_hold = -1;
-        if (no_hold < 0) no_hold = getenv("HOS_VIDEO_NO_HOLD") != NULL;
+        if (no_hold < 0) no_hold = env_on("HOS_VIDEO_NO_HOLD");
         const int64_t due = d->clock_pts + (hos_now_ns() - d->clock_ns), early = 8000000;
         const int prev = d->last_slot - 1;
         Pool *to = (Pool *)host_of(d->slots[slot], POOL_MAGIC);
