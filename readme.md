@@ -363,7 +363,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once | Auto |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
-| | Threaded rendering | Auto, On, Off (after a restart). Auto is On with 12 or more processor threads for the game | Auto |
+| | Threaded rendering | Auto, On, Off (after a restart). Auto is On with 8 or more processor threads for the game | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
 | | Audio output | Auto, Stereo, 5.1 (after a restart) | Auto |
@@ -436,7 +436,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Threaded rendering:** On draws the picture on threads of its own (a render thread and a recorder thread) while
   the game goes on to its next frame, for a higher frame rate on a processor with threads to spare; it is still being
   tested and can show flashes. Off draws it on the game's own thread, as before. Auto chooses by the processor
-  (On with 12 or more threads for the game, Off with fewer, and Off wherever the mode is not safe). It applies after
+  (On with 8 or more threads for the game, Off with fewer, and Off wherever the mode is not safe). It applies after
   a restart. `RX_VK_ASYNC` and `RX_VK_RECORDER`, when set, choose for one run.
 - **Frame generation** makes extra frames between the game's own. It adds a little input delay, and fast motion can
   show artifacts. The renderer's own interpolation makes the frames; at 2x, AMD FSR 3.1's frame interpolation can make

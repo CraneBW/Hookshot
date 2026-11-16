@@ -1118,7 +1118,7 @@ const char* threaded_env() {
 const char* hn_threaded(int v, int variant) {
     static const char* const t[] = {
         threaded::kAutoEnabled
-            ? "On where the processor has 12 or more threads for the game, and nothing rules it out; otherwise Off."
+            ? "On where the processor has 8 or more threads for the game, and nothing rules it out; otherwise Off."
             : "The same as Off, on every PC.",
         "The picture is drawn on threads of its own while the game goes on to its next frame. Still being tested: it "
         "can show flashes.",

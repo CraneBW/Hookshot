@@ -28,7 +28,7 @@ enum { AUTO = 0, ON = 1, OFF = 2 };   // (the row's values, in V-Sync's order: A
 constexpr bool kAutoEnabled = true;
 /// Auto's threshold: the logical processors the process may run on, from which it picks the render thread and the recorder
 /// thread (the game's own threads, the replay, the recorder and the parallel replay's workers beside one another)
-constexpr unsigned kAutoCpus = 12;
+constexpr unsigned kAutoCpus = 8;
 
 enum class Why {
     On,            // the row says On

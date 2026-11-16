@@ -2,7 +2,7 @@
 the replay, the recorder and the host. A compiled check of the rule plus source checks; no game, no GPU.
 
 The rule is one function every reader shares: On is the render thread and the recorder thread together, Off neither,
-and Auto picks them where the process may run on 12 or more logical processors and the mode is safe. All of Auto is
+and Auto picks them where the process may run on 8 or more logical processors and the mode is safe. All of Auto is
 behind one constant, threaded::kAutoEnabled, which is on: turned off, Auto is Off on every PC and the row changes
 nobody's default. The source checks: that constant is the only gate and is on; the row is Auto by default,
 takes a restart and is in the readme and the development guide; RX_VK_ASYNC is read in one place (vk_replay.cpp
@@ -32,10 +32,10 @@ using namespace mkwvk::threaded;
 int main() {
     // (the row's values, in V-Sync's order)
     CHECK(AUTO == 0 && ON == 1 && OFF == 2);
-    // (Auto's threshold: 12 logical processors the process may run on; an unknown count, 0, is too few)
-    CHECK(kAutoCpus == 12);
-    CHECK(!auto_picks(0) && !auto_picks(4) && !auto_picks(8) && !auto_picks(11));
-    CHECK(auto_picks(12) && auto_picks(16) && auto_picks(32) && auto_picks(256));
+    // (Auto's threshold: 8 logical processors the process may run on; an unknown count, 0, is too few)
+    CHECK(kAutoCpus == 8);
+    CHECK(!auto_picks(0) && !auto_picks(4) && !auto_picks(6) && !auto_picks(7));
+    CHECK(auto_picks(8) && auto_picks(12) && auto_picks(16) && auto_picks(32) && auto_picks(256));
     // (On and Off are the player's word: whatever the CPU, whatever is unsafe, whatever the gate)
     for (const bool gate : {false, true})
         for (const bool unsafe : {false, true})
@@ -44,10 +44,10 @@ int main() {
                 CHECK(!choose(OFF, cpus, unsafe, gate).on && choose(OFF, cpus, unsafe, gate).why == Why::Off);
             }
     // (Auto with the gate on: the CPU's rule, and off where the mode is not safe)
-    CHECK(choose(AUTO, 12, false, true).on && choose(AUTO, 12, false, true).why == Why::AutoCpus);
+    CHECK(choose(AUTO, 8, false, true).on && choose(AUTO, 8, false, true).why == Why::AutoCpus);
     CHECK(choose(AUTO, 24, false, true).on);
-    CHECK(!choose(AUTO, 11, false, true).on && choose(AUTO, 11, false, true).why == Why::AutoFewCpus);
-    CHECK(!choose(AUTO, 8, false, true).on && !choose(AUTO, 0, false, true).on);
+    CHECK(!choose(AUTO, 7, false, true).on && choose(AUTO, 7, false, true).why == Why::AutoFewCpus);
+    CHECK(!choose(AUTO, 6, false, true).on && !choose(AUTO, 0, false, true).on);
     CHECK(!choose(AUTO, 12, true, true).on && choose(AUTO, 12, true, true).why == Why::AutoUnsafe);
     CHECK(!choose(AUTO, 64, true, true).on && !choose(AUTO, 4, true, true).on);
     // (Auto with the gate off: off on every PC, and said so)
@@ -56,10 +56,10 @@ int main() {
             CHECK(!choose(AUTO, cpus, unsafe, false).on && choose(AUTO, cpus, unsafe, false).why == Why::AutoGate);
     // (a value that is none of the row's: Auto)
     CHECK(choose(7, 64, false, true).why == Why::AutoCpus && choose(-1, 64, false, false).why == Why::AutoGate);
-    // (as built: the gate is on, so Auto is its rule: on from 12 logical processors where the mode is safe)
+    // (as built: the gate is on, so Auto is its rule: on from 8 logical processors where the mode is safe)
     CHECK(kAutoEnabled);
-    for (const unsigned cpus : {0u, 8u, 11u}) CHECK(!choose(AUTO, cpus, false).on);
-    for (const unsigned cpus : {12u, 16u, 64u}) CHECK(choose(AUTO, cpus, false).on && !choose(AUTO, cpus, true).on);
+    for (const unsigned cpus : {0u, 4u, 7u}) CHECK(!choose(AUTO, cpus, false).on);
+    for (const unsigned cpus : {8u, 12u, 16u, 64u}) CHECK(choose(AUTO, cpus, false).on && !choose(AUTO, cpus, true).on);
     CHECK(choose(ON, 4, false).on && !choose(OFF, 64, false).on);
     std::printf("PASS: the Threaded rendering rule\n");
 }
@@ -93,7 +93,7 @@ def main():
     # (the gate: one constant, on, and Auto's rule behind it)
     if len(re.findall(r"constexpr bool \w+ = ", rule)) != 1 or "constexpr bool kAutoEnabled = true;" not in rule:
         raise SystemExit("threaded_rendering.h: Auto's gate is not the one constant kAutoEnabled, on (turning it off changes "
-                         "the default for every PC with 12 threads: that is its own change)")
+                         "the default for every PC with 8 threads: that is its own change)")
     choose = block(rule, "constexpr Choice choose(")
     if "bool auto_enabled = kAutoEnabled" not in choose or "if (!auto_enabled) return {false, Why::AutoGate};" not in choose:
         raise SystemExit("threaded_rendering.h: choose() no longer keeps Auto behind the gate")
