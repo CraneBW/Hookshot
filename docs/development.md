@@ -501,8 +501,8 @@ case-sensitive, and an unknown one is ignored.
 | `HOS_THREAD_TIMES=<seconds>` | Every interval, the threads that used over 5% of a core |
 | `HOS_NO_FASTFP` (set) | The fast float regions' plain-SSE copies never taken: every region runs its exact copy, on the same exe (`A64_FF_ON`, `nx2/fastfp.py`'s `FASTFP_HEADER`). For A/B with `HOS_THREAD_TIMES` |
 | `HOS_FPS_LOG` (set), `HOS_PRESENT_TRACE=<csv>` | The game's frame limiter, VRR flags and nominal rate every 300 presents, and the game clock's speed (1.000: real time); a CSV line per game present with host-clock times before queue flushing, around the renderer call, after virtual-core reacquisition, and at the return counter. These are CPU wall times, not GPU completion or scanout; async rendering measures the enqueue call. Unset/empty trace adds no clock reads |
-| `HOS_FPS_MAX=<61-1000>` | A frame rate cap for one run, over the Game frame rate cap row (1000 is Uncapped's) |
-| `HOS_MOVIE_PACE=0` | Leave the pacing at the Game frame rate cap row while a movie plays, instead of raising it to 240 for the movie's pictures (issue #73) |
+| `HOS_FPS_MAX=30` or `HOS_FPS_MAX=<61-1000>` | A frame rate cap for one run, over the Game frame rate cap row (1000 is Uncapped's) |
+| `HOS_MOVIE_PACE=0` | Leave the pacing at the Game frame rate cap row while a movie plays, instead of raising a 60 FPS cap to 240 for the movie's pictures (issue #73); an explicit 30 FPS cap remains 30 |
 | `RX_VK_FRAME_LOG=<csv>` | A CSV line per present: frame, seconds, frame time in ms. Also works with `HOS_HEADLESS`: CPU intervals after submitting the offscreen copy, without swapchain/display waits. Not `RX_VK_FRAMELOG` (no underscore: pictures, above) |
 | `RX_VK_PRESENTS_AHEAD=<1-8>` | How many presents the game may hand over ahead of the render thread (`RX_VK_ASYNC=1`; 1 by default). Not `RX_VK_PRESENT_AHEAD` |
 | `RX_VK_PRESENT_AHEAD=0` | Frame generation's copies into the window submitted each at its own time, as before #1702 (default on: a set's copies go to the GPU together). Not `RX_VK_PRESENTS_AHEAD` |
@@ -887,6 +887,49 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
 
 For numbers, compare the runtime with one made by `rt` from no pack: same base, same caches, one difference.
 
+#### Sharing a PC: the job queue
+
+Several agents (and you) often share one PC: its GPU, its CPUs, its memory and its disk. Builds and game runs on such a PC
+go through `scripts/job_queue.py`, which runs each when it fits and keeps measurements apart from everything else; on a PC of
+your own it costs nothing. `scripts/dev_build.py` builds through it.
+
+```
+python -I scripts/dev_build.py base                 # the base where this checkout left main: one per commit, shared
+python -I scripts/dev_build.py pack                 # this checkout as a pack over it
+python -I scripts/dev_build.py rt                   # build-linux/rt-<checkout>/, a game folder to run
+python -I scripts/dev_build.py rt --empty           # build-linux/rt-base/: the base alone, the other half of an A/B
+python -I scripts/job_queue.py run shots --mode shared -- <your run in that folder>
+python -I scripts/job_queue.py run fps --mode timing -- <your measurement>
+python -I scripts/job_queue.py status               # who plays, what runs, what waits and for what
+```
+
+| Mode | For | Beside it |
+|---|---|---|
+| `build` | `make_game.py`, `dev_packs.py base` / `pack`: heavy on the CPU and memory | 2 at once; never a timed run |
+| `light` | game-free checks, a renderer-only build, copies | 4 at once |
+| `shared` | the game for anything that is not a number: screenshots, logs, checks, A/B flashes in one session | 3 at once (each its own game and data folder) |
+| `gpu` | the game alone on the GPU, not a measurement | builds |
+| `timing` | fps, frame times, hitches: alone on the GPU and on its own CPUs, its memory never swapped out, not while you play | nothing heavy |
+| `timing-cpu` | a measured build (`dev_build.py build --timing`) | GPU runs on the other CPUs |
+| `profile` | a profile recorded in the game | as `timing` |
+
+The rules worth knowing (the script's notes have all of them):
+
+- **Measure with `timing`, everything else with `shared`.** A build beside a timed run once doubled the spread between
+  sessions; a timed run waits for running builds and holds new ones off, gets one L3 cache domain of the CPU (the others
+  go to everything else while it measures) and notes in `job_queue.py history` how busy the rest of the PC was. Keep each
+  GPU job short (one game and config): one long batch holds the queue for everyone.
+- **A job never adds an `OOT_`, `RX_` or `A64_` variable.** `make_game.py lift_key` hashes every one of them: the older queue's
+  `OOT_STATUS_LOCK=<job name>` gave each job its own lift key, so no build under it ever took another's translation from
+  `HOOKSHOT_LIFT_STORE`. `dev_build.py` says which such variables you set yourself.
+- **Nothing on a RAM file system.** Builds, game folders, work folders and test output go on a disk, never in `/tmp` or
+  another tmpfs: two 5 GB test folders in `/tmp` once held 10 GB of memory and swap. A job's `TMPDIR` on a tmpfs moves to
+  `~/.cache/hookshot-queue/tmp/<job>`, and `dev_build.py` refuses a folder on one.
+- **The same build environment everywhere.** `dev_build.py` builds with the build tools a player's build uses (tools.lock,
+  installed once under `~/.cache/hookshot-dev/builder/`), the object and translation stores `dev_packs.py` uses, and one base
+  per commit of main (`~/.cache/hookshot-dev/bases/`), so the second checkout to build anything compiles only what differs.
+  A checkout's own build files (`build`, `vk`, runtimes) stay in its `build-linux/`, and go when the checkout does.
+
 ### Build times
 
 A player's first build of **nightly-56-e7ed2f7a**, measured on **2026-11-13** on Linux: a Ryzen 9 7900X (12 cores,
@@ -1257,3 +1300,5 @@ where no translation is available.
 
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.
+
+`frame_rate_cap=-1` selects 30 FPS in the existing host pacer. This forces real-time stepping without changing the saved Game speed setting; returning to 60 restores that choice. `HOS_FPS_MAX` is read once and overrides the menu, including `HOS_FPS_MAX=30`.
