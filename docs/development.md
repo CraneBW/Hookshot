@@ -608,6 +608,9 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_RETIRE_SECS=<s>`, `RX_VK_RETIRE_MIN_SECS=<s>` | Windows AMD and Intel: how long a retired pool's import (and, with the valve above on there, an idle pool given back) is held after it leaves the page table before its memory is freed (30); under pressure past `RX_VK_IMPORT_HIGH` a retired pool waits `RX_VK_RETIRE_MIN_SECS` (2) instead. Not read elsewhere |
 | `RX_VK_IMAGE_PREALLOC=<blocks>` | Initial 128 MiB image blocks: by default 15% of the real device-local heap, from 2 to 24 blocks (9 on an 8 GiB card); `0` makes them only as needed. They belong to the sampled-texture pool, or the images' pool with `RX_VK_COMPACT=0`, never both. A failed initial allocation retries with no initial blocks. VMA keeps these blocks even when empty: compaction counts only space it can return, and the 97% squeeze waits while only kept texture blocks remain. This avoids charging an unused utility-image pool against the texture budget ([Hookshot issue 2690](https://github.com/NotRexed/Hookshot/issues/2690)); it does not lower the driver's actual memory count in a scene with few textures |
 | `RX_VK_TEST_ALLOWED_MB=<MiB>` | Diagnostic upper bound on the allowance reported to the renderer's eviction policy; does not reduce the real heap or emulate OS paging. To model [Hookshot issue 2690](https://github.com/NotRexed/Hookshot/issues/2690) on a larger card use `7000` with `RX_VK_IMAGE_PREALLOC=9`, since the automatic initial-block count still follows the real heap. Other heap-based defaults, including the mirror budget, also remain real-card defaults unless explicitly overridden |
+| `RX_VK_TEST_ALLOWED_FILE=<file>` | The same bound, read from the number of MiB in that file once a second, so a run can shrink the allowance in play as Windows does when another program takes VRAM (`echo 5000 > <file>`). A missing file or `0` leaves the driver's. Diagnostic only |
+| `RX_VK_TEST_ALLOWED_FOLLOW=1` | With either test bound: once the count is past it, the allowance is reported as the count itself, as AMD's Windows driver does. With `RX_VK_ALLOWED_AT_COUNT=0` the log shows `at the driver's limit, room in the blocks: not squeezed` on any card. Diagnostic only |
+| `RX_VK_ALLOWED_AT_COUNT=0` | An allowance the driver gives as the count itself (within 16 MiB) is taken as it is. By default it is past: the rules take the allowance as a tenth under the count (`vram_compact::past_allowance`), so the 97% squeeze and the hold give back until the driver reports an allowance over the count again. AMD's Windows driver reports a process over what it allows that way; read as within it, the textures were not squeezed while the driver paged VRAM out: frames of 1.2-15.7 s on 8 GB RX 6600s |
 | `RX_VK_REACTIVE=1`, `RX_VK_REACTIVE_SCALE=<0..64>`, `RX_VK_REACTIVE_MAX=<0..1>`, `RX_VK_REACTIVE_DEBUG=1` | A reactive mask for DLSS and FSR 3.1 only, not FSR 4 (`gpu/vk/vk_reactive.h`, off by default: not yet checked in the game): the scene's colour is copied before its blended draws that test depth without writing it (water, smoke, fire, glows), and where the scene differs from the copy at the upscale the upscaler leans on the current frame, so they smear and ghost less. The mask is the difference times the scale (1), at most the maximum (0.9); the debug switch shows it in the picture in magenta. The mask is the whole difference since the copy, so a blended draw after the last transparent run (a full-screen fade) is in it too. The log's `vk: reactive mask:` lines say whether one is made |
 | `RX_VK_NO_DRAWN_WRITEBACK=1` | Small mip-chained textures the GPU drew are not written into guest memory a few frames later (where that memory is still zero, or still their own last write-back), as before: the game's ground garbles after some minutes in one area (its copies of drawn terrain tiles are all zero) |
 | `RX_VK_NO_DRAWN_PAGE_MAP=1` | A texture in a virtual pool that the GPU writes before anything uploads it has no page map noted at that write, as before: once the game has finalized it, its next check takes all of its storage for remapped and uploads it whole from guest memory over what the GPU drew (the game's HUD button labels go blank after a zone change) |
@@ -908,6 +911,42 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
   instead of translating the game again. `0` for none.
 
 For numbers, compare the runtime with one made by `rt` from no pack: same base, same caches, one difference.
+
+#### Sharing a PC: the job queue
+
+Several agents (and you) often share one PC: its GPU, its CPUs, its memory and its disk. Builds and game runs on such a PC
+go through `scripts/job_queue.py`, which runs each when it fits and keeps measurements apart from everything else; on a PC of
+your own it costs nothing.
+
+```
+python -I scripts/job_queue.py run build --mode build -- python -I nx2/make_game.py ...   # a build, when it fits
+python -I scripts/job_queue.py run shots --mode shared -- <your run in that folder>
+python -I scripts/job_queue.py run fps --mode timing -- <your measurement>
+python -I scripts/job_queue.py status               # who plays, what runs, what waits and for what
+```
+
+| Mode | For | Beside it |
+|---|---|---|
+| `build` | `make_game.py`, `dev_packs.py base` / `pack`: heavy on the CPU and memory | 2 at once; never a timed run |
+| `light` | game-free checks, a renderer-only build, copies | 4 at once |
+| `shared` | the game for anything that is not a number: screenshots, logs, checks, A/B flashes in one session | 3 at once (each its own game and data folder) |
+| `gpu` | the game alone on the GPU, not a measurement | builds |
+| `timing` | fps, frame times, hitches: alone on the GPU and on its own CPUs, its memory never swapped out, not while you play | nothing heavy |
+| `timing-cpu` | a measured build | GPU runs on the other CPUs |
+| `profile` | a profile recorded in the game | as `timing` |
+
+The rules worth knowing (the script's notes have all of them):
+
+- **Measure with `timing`, everything else with `shared`.** A build beside a timed run once doubled the spread between
+  sessions; a timed run waits for running builds and holds new ones off, gets one L3 cache domain of the CPU (the others
+  go to everything else while it measures) and notes in `job_queue.py history` how busy the rest of the PC was. Keep each
+  GPU job short (one game and config): one long batch holds the queue for everyone.
+- **A job never adds an `OOT_`, `RX_` or `A64_` variable.** `make_game.py lift_key` hashes every one of them: the older queue's
+  `OOT_STATUS_LOCK=<job name>` gave each job its own lift key, so no build under it ever took another's translation from
+  `HOOKSHOT_LIFT_STORE`.
+- **Nothing on a RAM file system.** Builds, game folders, work folders and test output go on a disk, never in `/tmp` or
+  another tmpfs: two 5 GB test folders in `/tmp` once held 10 GB of memory and swap. A job's `TMPDIR` on a tmpfs moves to
+  `~/.cache/hookshot-queue/tmp/<job>`.
 
 ## The pipeline state list
 
@@ -1230,3 +1269,5 @@ where no translation is available.
 
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.
+
+`frame_rate_cap=-1` selects 30 FPS in the existing host pacer. This forces real-time stepping without changing the saved Game speed setting; returning to 60 restores that choice. `HOS_FPS_MAX` is read once and overrides the menu, including `HOS_FPS_MAX=30`.

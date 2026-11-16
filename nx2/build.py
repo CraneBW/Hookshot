@@ -1887,9 +1887,10 @@ def main():
         exe = os.path.join(out, EXE)   # (+ hookshot.map: crash offsets -> f_<guest address>)
         t = time.time()
         # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name)
+        # (the instrumented objects hold the counters and host/pgo_rt.c writes them: -fprofile-instr-generate at this
+        # final Linux link would make clang look for libclang_rt.profile, which the packaged tools need not have)
         r = run_link([cc] + target() + ["-fuse-ld=lld", "-o", exe] + linker("-Map=" + exe + ".map") +
                      ["-Wl,--gc-sections", "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
-                     (["-fprofile-instr-generate"] if PGO == "gen" else []) +
                      (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS +
                      (["-l:libstdc++.a"] if SYSROOT else ["-lstdc++"]), exe)   # (native/'s C++: static with the AppImage's sysroot)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
