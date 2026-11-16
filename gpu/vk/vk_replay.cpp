@@ -45,6 +45,8 @@
 #include "vk_dlss.h"   // (hookshot: dlss_fg_idle)
 #include "vk_fps.h"
 #include "vk_menu.h"
+#include "oot_cheat_items.h"   // (hookshot: OOT_CHEAT_ITEM_BASE, OOT_CHEAT_AGE_ID: the item wheel's counts and pages)
+#include "oot_wheel_state.h"   // (hookshot: the Item wheel and Cycle items rows' option ids)
 #include "vk_jobs.h"
 #include "vk_shader.h"
 #include "vk_state.h"
@@ -4517,6 +4519,9 @@ void do_present(const nvn_tex* t, const int crop[4], float cover) {
             }
         }
         if (tex && !dev.offscreen && (opts.upscale || opts.sharpness || opts.crt_filter || dev.hdr || wide_sides_possible())) {
+        // (hookshot) the item wheel open: the game's picture covered with its scene before the HUD, dimmed, and the wheel over it
+        // (the game's own item row, its hints and the HUD gone from behind the wheel; before frame interpolation and shots read it)
+        if (tex) framegen_wheel_backdrop(r.cmd, tex->image, tex->format, sw, sh, crop);
             // Keep the sampled view with the same cached image as the direct present, before advancing its age.
             direct_view = texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample);
             tex->last_frame = texture_frame_no();
@@ -6456,6 +6461,10 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_CHEAT_FLIGHT) return menu_player_flight();
         if (id == HOS_OPT_CHEAT_ACTION) return menu_take_cheat_action();
         if (id == HOS_OPT_CHEAT_CAMERA) return menu_free_camera();
+        if (id == HOS_OPT_ITEM_WHEEL) return opts.item_wheel != 0;   // (hookshot: host/oot_wheel.c)
+        if (id == HOS_OPT_CYCLE_ITEMS) return opts.cycle_items;
+        if (id == OOT_CHEAT_AGE_ID) return menu_link_age();
+        if (id >= OOT_CHEAT_ITEM_BASE && id < OOT_CHEAT_ITEM_BASE + 4096) return menu_item_count(id - OOT_CHEAT_ITEM_BASE);
         if (id == HOS_OPT_CHEAT_SPEED) return menu_link_speed();
         if (id == HOS_OPT_HDR_NATIVE) return dev.hdr && opts.hdr == 2;
         if (id == HOS_OPT_HDR_TONEMAP) return scene_tonemap_on();

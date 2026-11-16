@@ -622,6 +622,28 @@ def stand_in_damaged_files(out, romfs):
         os.remove(heads)
 
 
+ROMFS_TABLE = "ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs"   # (the supported version's, in System/Resource)
+def romfs_problem(romfs):
+    """Why a romfs folder chosen by hand is not the supported game's RomFS, or None. A romfs taken from another PC
+    port's folder (a few packed .bin files, no subfolders) was accepted, built for 40 minutes, and the game died in its first
+    second: its own allocator returned null. The game's RomFS has System/Resource/<the table above> and hundreds of folders"""
+    res = os.path.join(romfs, "System", "Resource")
+    if os.path.isfile(os.path.join(res, ROMFS_TABLE)):
+        return None
+    others = sorted(f for f in os.listdir(res) if f.startswith("ResourceSizeTable")) if os.path.isdir(res) else []
+    if others:
+        return ("The romfs folder %s is from another version of the game (%s). Hookshot needs the version whose romfs has "
+                "System\\Resource\\%s: dump the game with its update applied, and use that romfs with the exefs from the same "
+                "dump." % (romfs, others[0], ROMFS_TABLE))
+    try:
+        top = os.listdir(romfs)
+    except OSError:
+        top = []
+    folders = sum(os.path.isdir(os.path.join(romfs, t)) for t in top)
+    return ("The romfs folder %s is not the game's own RomFS: it has no System\\Resource\\%s (at its top: %d files, %d folders; "
+            "the game's has hundreds of folders). Folders taken from another PC port or tool hold the game in their own format "
+            "and do not work here. Use your own dump of the game: the .nup file, or the romfs and exefs folders dumped from it."
+            % (romfs, ROMFS_TABLE, len(top) - folders, folders))
 def check_cache_paths(out, paths):
     """Resolve generated paths and reject symbolic links/reparse points before replacement."""
     root = os.path.realpath(out)
@@ -659,6 +681,10 @@ def check(a, work):
         shutil.rmtree(probe, ignore_errors=True)
     else:
         bid = build_id(os.path.join(a.exefs, "main"))
+        why = romfs_problem(a.romfs) if a.romfs else None
+        if why:
+            say("check", "bad", why)
+            return
     if bid.startswith(BUILD_ID):
         say("check", "ok", "This is the version Hookshot supports (build %s)." % bid[:8])
     else:
@@ -2689,6 +2715,9 @@ def main(a=None):
         check_cache_paths(out, (kept, romfs))
         refuse_dump_links(a.exefs)
         refuse_dump_links(a.romfs)
+        why = romfs_problem(a.romfs)   # (said before anything is read or built)
+        if why:
+            fail(why)
         shutil.copytree(a.exefs, exefs)   # (unpacked in place: the user's copy stays as it is)
         run(PY + ["nx2/unpack.py", exefs])
         # (before the folder's copies are touched: a dump of another version, refused, used to replace .hookshot_exefs first, and
@@ -3026,6 +3055,14 @@ def main(a=None):
         copy_writable(icon, os.path.join(out, "hookshot.png"))   # (a second build overwrites the first's)
     seed_pipelines(out)
     ship_state_list(out)
+    # (hookshot) the item wheel's icons, names and sounds (gpu/vk/vk_wheel.cpp, host/oot_wheel.c, host/nn_audio.c): the game's own,
+    # from the RomFS, at every build (nx2/wheel_assets.py). Without them the wheel shows the items' names in English, silently
+    wheel = os.path.join(out, "wheel")
+    for script, opt, name, without in (("wheel_assets.py", "--icons", "icons.bin", "it shows the items' names"),
+                                       ("wheel_names.py", "--out", "names.bin", "it names the items in English"),
+                                       ("wheel_sounds.py", "--out", "sounds.bin", "it is silent")):
+        if run(PY + [os.path.join(HERE, script), "--romfs", romfs, opt, os.path.join(wheel, name)], check=False, output=sys.stderr):
+            print("the item wheel's %s was not made: %s" % (name, without), flush=True)
     language = os.path.join(out, "language.txt")   # (the same text as host/nn_applet.c writes)
     with open(language, "w", encoding="utf-8", newline="\n") as f:
         f.write("# The game's language. Change the line below to one of the codes listed here, save, and start the game again.\n\n%s\n\n" % a.language)

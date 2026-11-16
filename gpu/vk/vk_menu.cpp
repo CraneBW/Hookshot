@@ -827,6 +827,10 @@ const char* tx_prompts(int v) {
                                               "Keyboard"};
     return t[std::min(std::max(v, 0), (int)HOS_PROMPT_N)];
 }
+const char* tx_cycle_items(int v) {   // (hookshot) the Cycle items row
+    static const char* t[] = {"Off", "Last used", "Basic", "+Bombs", "+Tools"};
+    return t[(unsigned)v < 5 ? v : 0];
+}
 const char* tx_gpu(int v) {
     static char buf[300];
     const int idx = v - 1;
@@ -1296,6 +1300,12 @@ MENU_HINTS(hn_audio_output, 0, "5.1 when the selected/default output has 5.1 or 
            "Stereo, whatever the device has.", "5.1, whatever the device has. Mixed down on stereo speakers.",
            "The stereo average in both ears. Changes live on stereo output; restart from 5.1.")
 MENU_HINTS(hn_text_size, 0, "The game's original size.", "A little larger.", "Larger.", "Much larger.", "Largest.")
+MENU_HINTS(hn_item_wheel, 0, "R and L scroll the game's own item row.",
+           "Pages of 8 items, the same for the child and the adult. Y moves an item; Left/Right or the mouse wheel turn the page.")
+MENU_HINTS(hn_cycle_items, 0, "R and L open the item row (or the wheel) only.",
+           "A tap of R or L: the item that was on ZR before this one, whatever it is. Two taps: back again.",
+           "A tap of R or L: the next or previous arrow, bottle or spell on ZR.", "Basic, and the bombs and bombchus too.",
+           "+Bombs, and the hookshot, hammer, slingshot and boomerang too.")
 MENU_HINTS(hn_background, 0, "Only while the game's window has the focus.",
            "Also behind other windows, for streaming or other apps. The keyboard and mouse still need the game's window.")
 MENU_HINTS(hn_mousecam, 0, "The mouse stands in for the right stick, with its curve and top speed.",
@@ -1540,6 +1550,10 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Skip opening", &opts.skip_opening, 0, 1, 1, tx_onoff,
      "Skips the new-game opening (the story movie and Navi waking Link) and leaves later cutscenes, the Deku Tree "
      "meeting, and the title screen alone.", nullptr, false, true},
+    {TAB_GAMEPLAY, "Item wheel", &opts.item_wheel, 0, 1, 1, tx_onoff,   // (hookshot: host/oot_wheel.c, vk_wheel.cpp)
+     "Hold R or L for a wheel of your items: point at one with either stick and let go to equip it.", hn_item_wheel},
+    {TAB_GAMEPLAY, "Cycle items", &opts.cycle_items, 0, 4, 1, tx_cycle_items,
+     "Changes the item on ZR with a tap of R or L, within its group. Holding R or L still opens the row.", hn_cycle_items},
     {TAB_GAMEPLAY, "Text and language", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     {TAB_GAMEPLAY, "Text speed", &opts.text_speed, 0, 3, 1, tx_text_speed,
      "How fast the letters of dialogue and other messages appear.", hn_text_speed, false, true},
@@ -5639,6 +5653,8 @@ bool fps_take(int64_t now, int64_t shown, int64_t game, int64_t* next, int64_t* 
 // (the game's) and the control bridge's menu_setting and menu_setting_set (its own thread). Recursive: a setter reached from
 // inside menu_tick's frame on the same thread does not lock itself out
 std::recursive_mutex menu_mu;
+int menu_item_count(int i) { return i >= 0 && i < kItems ? item_counts[i].load(std::memory_order_relaxed) : -1; }
+int menu_link_age() { return link_age.load(std::memory_order_relaxed); }
 void menu_option_set(int id, int value) {
     if (id == OOT_CHEAT_AGE_ID) {   // (Link's age: the Switch age row shows it)
         if (link_age.exchange(value, std::memory_order_relaxed) != value && page == 0 && cur_tab == TAB_DEBUG) menu_refresh = true;

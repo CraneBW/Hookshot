@@ -42,6 +42,7 @@
 #include "flat_map.h"
 #include "vk_menu.h"          // (opts.anisotropy: the Anisotropic filtering row; resolution_scale)
 #include "upscaler_rows.h"    // (upscale_lod_bias: which upscalers draw the 3D smaller)
+#include "vk_framegen.h"   // (hookshot: the gameplay upscale's output, for the item wheel's backdrop)
 #include "dlss_actor.h"
 #include "vk_temporal.h"
 #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
@@ -5233,9 +5234,31 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
             return true;
         }();
         (void)bias_read;
-        if (units > 0 && at.n == 0 && at.width == at.height && at.width <= 768 && at.depth) {
+        // (hookshot, an experiment) The broken pots' shards go dark in blocks with straight screen-aligned edges, the ground
+        // around them lit: a shadow projected over a screen rectangle, the shards shadowing themselves inside it, as Link did before
+        // this rule. If the shards' maps are outside it, these take them: RX_VK_SHADOW_BIAS_MAX=<px>, the largest side of a depth
+        // target it applies to (768); RX_VK_SHADOW_BIAS_ANY=1: not square too, 2: and with colour targets (main passes too: their
+        // EQUAL depth tests may break). The log names each target they add it to that the rule above does not
+        static const uint32_t max_side =
+            getenv("RX_VK_SHADOW_BIAS_MAX") ? (uint32_t)std::max(1, atoi(getenv("RX_VK_SHADOW_BIAS_MAX"))) : 768u;
+        static const int any_shape = getenv("RX_VK_SHADOW_BIAS_ANY") ? atoi(getenv("RX_VK_SHADOW_BIAS_ANY")) : 0;
+        const bool rule = at.n == 0 && at.width == at.height && at.width <= 768 && at.depth;
+        const bool wider = at.depth && std::max(at.width, at.height) <= max_side && (at.n == 0 || any_shape >= 2) &&
+                           (at.width == at.height || any_shape >= 1);
+        if (units > 0 && (rule || wider)) {
             d.bias[0] += units, d.bias[2] += slope;
             d.bias_en = true;
+            if (!rule) {
+                static std::mutex m;
+                static std::unordered_set<uint64_t> told;
+                const uint64_t k = (uint64_t)at.width << 40 ^ (uint64_t)at.height << 16 ^ (uint64_t)at.depth_format << 4 ^ (uint64_t)at.n;
+                std::lock_guard lk(m);
+                if (told.size() < 64 && told.insert(k).second)
+                    logf("vk: shadow bias also added (RX_VK_SHADOW_BIAS_MAX / _ANY) to a depth target %ux%u format %d with %d colour "
+                         "targets, program %016llx (the game's bias %s, units %g slope %g)", at.width, at.height, (int)at.depth_format,
+                         at.n, (unsigned long long)(cur_program ? cur_program->key : 0), s.poly.offset_en ? "on" : "off",
+                         s.poly_offset[1], s.poly_offset[0]);
+            }
         }
         // (amd-fix, 11-07) the sun's shadow cascades (square, depth only, past 768): RX_VK_CASCADE_BIAS=<units>,<slope> added;
         // RX_VK_LOG_CASCADE_BIAS=1: what the game asks for them
@@ -5254,6 +5277,24 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
                      d.bias[0], d.bias[1], d.bias[2]);
             }
             if (cu != 0 || cs != 0) d.bias[0] += cu, d.bias[2] += cs, d.bias_en = true;
+        }
+    }
+    {   // (hookshot, a diagnosis) RX_VK_LOG_DEPTH_TARGETS=1: each depth-only target a program draws into, once per size,
+        // format, program and bias: the game's own depth bias and the one drawn with (the characters' shadow maps above). Which maps
+        // the broken pots' shards are drawn into, and whether the rule above takes them
+        static const bool on = getenv("RX_VK_LOG_DEPTH_TARGETS") && atoi(getenv("RX_VK_LOG_DEPTH_TARGETS")) != 0;
+        if (on && at.n == 0 && at.depth) {
+            const uint64_t prog = cur_program ? cur_program->key : 0;
+            const uint64_t k = prog * 0x9e3779b97f4a7c15ull ^ (uint64_t)at.width << 44 ^ (uint64_t)at.height << 24 ^
+                               (uint64_t)at.depth_format << 2 ^ (uint64_t)(s.poly.offset_en != 0) << 1 ^ (uint64_t)(d.bias_en != 0);
+            static std::mutex m;
+            static std::unordered_set<uint64_t> seen;
+            std::lock_guard lk(m);
+            if (seen.size() < 300 && seen.insert(k).second)
+                logf("vk: depth-only target %ux%u format %d, program %016llx: the game's bias %s (units %g clamp %g slope %g), "
+                     "drawn with bias %s (units %g slope %g)", at.width, at.height, (int)at.depth_format, (unsigned long long)prog,
+                     s.poly.offset_en ? "on" : "off", s.poly_offset[1], s.poly_offset[2], s.poly_offset[0], d.bias_en ? "on" : "off",
+                     d.bias[0], d.bias[2]);
         }
     }
     d.cull = sw().no_cull ? VK_CULL_MODE_NONE
@@ -9040,6 +9081,27 @@ static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture
              src->width, src->height, dst->width, dst->height);
     return true;
 }
+/// (hookshot) After the gameplay upscale wrote its output (the game's network, or DLSS in its place: stood_in),
+/// with the Item wheel row on: that picture before the game draws its HUD on it, the wheel's backdrop
+/// (vk_framegen.h framegen_wheel_scene). With the row off (the default) it returns at once
+void wheel_scene_note(VkCommandBuffer cmd, const NvnState& s, const Program& p, bool stood_in) {
+    if (!framegen_wheel_on() || p.stages.empty()) return;
+    const Stage& st = p.stages[0];
+    // (the game's gameplay upscales: the 4/3 network and the full-size pass by their keys, the Render resolution row's fixed
+    // shares by their shape, a network sampling one texture into one image, as dlss_stand_in takes them)
+    if (!stood_in && !gameplay_network(p.key) &&
+        !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 && st.info.image_descriptors.size() == 1))
+        return;
+    if (st.info.image_descriptors.empty()) return;
+    const auto& od = st.info.image_descriptors[0];
+    Texture* out = nullptr;
+    uint32_t level = 0;
+    const uint32_t handle = handle_of(s, st, od, 0);
+    if (handle) texture_view_of(handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
+    if (!out || !out->image || !(out->aspect & VK_IMAGE_ASPECT_COLOR_BIT) || out->samples != VK_SAMPLE_COUNT_1_BIT) return;
+    level = std::min(level, out->levels - 1);
+    framegen_wheel_scene(cmd, out->image, out->format, std::max(1u, out->width >> level), std::max(1u, out->height >> level), level);
+}
 bool taau_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
     if (!taau_key(p.key) || !dev.push_descriptor || !vkCmdPushDescriptorSetKHR || p.stages.empty()) return false;
     const Stage& st = p.stages[0];
@@ -10745,9 +10807,9 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             logf("%s", line);
         }
     }
-    if (fsr3_stand_in(cmd, s, p)) return void(st_dispatches++);
-    if (temporal_stand_in(cmd, s, p)) return void(st_dispatches++);
-    if (taau_stand_in(cmd, s, p)) return void(st_dispatches++);
+    if (fsr3_stand_in(cmd, s, p)) return wheel_scene_note(cmd, s, p, true), void(st_dispatches++);   // (the item wheel's scene)
+    if (temporal_stand_in(cmd, s, p)) return wheel_scene_note(cmd, s, p, true), void(st_dispatches++);   // (the item wheel's scene)
+    if (taau_stand_in(cmd, s, p)) return wheel_scene_note(cmd, s, p, true), void(st_dispatches++);   // (the item wheel's scene)
     const VkPipeline pipe = cpipe();
     if (!pipe) SKIP_HERE();
     dump_ssbos(cmd, p, "before");
@@ -10834,6 +10896,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         }
         last_dispatch_cmd = cmd, last_dispatch_epoch = work_epoch.load(std::memory_order_relaxed);
     }
+    wheel_scene_note(cmd, s, p, false);   // (hookshot: the game's own gameplay upscale, for the item wheel)
     if (dump_on() && dump_ssbo_wanted(p.key)) dump_ssbos(cmd, p, "after");
     if (gprof_on()) {
         char label[96];

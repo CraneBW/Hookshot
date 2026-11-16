@@ -386,6 +386,8 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
 | | Skip title screen | Off, On (after a restart) | Off |
 | | Skip opening | Off, On (skips the new-game opening: the story movie and Navi waking Link; later cutscenes and the title screen stay) | Off |
+| | Item wheel | Off, On (hold R or L for a wheel of your items: point with either stick, let go to equip) | Off |
+| | Cycle items | Off, Last used, Basic, +Bombs, +Tools (a tap of R or L changes the item on ZR within its group) | Off |
 | | Text speed | Normal, 2x, 4x, Instant | Normal |
 | | Text size | Original, 110%, 125%, 150%, 175% (dialogue, Navi and signs) | Original |
 | | Game language | The game's 16 languages, each by its own name (after a restart) | The one built with |

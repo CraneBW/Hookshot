@@ -128,6 +128,10 @@ struct Options {
                           // (vk_menu_i18n.cpp). Saved as menu_language
     int mic = 1;          // (hookshot) the ocarina's microphone: 0 Off, 1 the system's default, 2.. a device as host->mic_name lists it (host/nn_audio_in.c)
     int skip_title = 0;   // (hookshot) start with the most recent save, pressing through the title and its file list (host/oot_autoload.c); read at the start
+    int item_wheel = 0;   // (hookshot) R or L held shows the item row as a wheel (host/oot_wheel.c, vk_wheel.cpp); HOS_ITEM_WHEEL over it
+    int cycle_items = 0;  // (hookshot) a tap of R or L changes the ZR item: 0 off (the default: R and L as the game has them),
+                          // 1 Last used (the item on ZR before this one), 2 Basic, 3 +Bombs, 4 +Tools (within the ZR item's
+                          // group; host/oot_wheel.c cycle_level)
 };
 extern Options opts;
 constexpr int kAutoPreset = 6;   // (the Quality preset Auto (this PC): menu_auto_for_gpu, auto_settings.h)
@@ -164,6 +168,8 @@ int menu_shadow_res();   // (Shadow resolution, HOS_OPT_SHADOW_RES: the size dra
 int menu_damage_taken();   // (Damage taken, HOS_OPT_DAMAGE_TAKEN: 1, Normal, while the tools are off)
 int menu_take_cheat_action();
 void menu_note_frame(bool game_frame, int shown = 1);   // (the frame rates the FPS counter shows)
+int menu_item_count(int i);   // (hookshot) the game side's count of oot_cheat_items.h's item i, -1 unknown: the item wheel's numbers
+int menu_link_age();          // (hookshot) Link's age as the game side said it: 0 child, 1 adult, -1 unknown
 /// The game's picture's size (the Output resolution, its crop) and the window's, at each present: the Window scaling filter
 /// row says when it is not needed
 void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t window_w, uint32_t window_h);
