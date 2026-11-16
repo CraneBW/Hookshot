@@ -130,8 +130,8 @@ def main():
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
     backend = (ROOT / "host/rx_backend.c").read_text(encoding="utf-8")
     ver = int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1))
-    need(ver >= 24 and all(f in api for f in ("(*mod_info)", "(*mod_edit)", "(*mods_changed)", "(*cheat_info)", "(*cheat_set)")),
-         "MkwVkHost has no Mods tab functions (API version 24)")
+    need(ver >= 26 and all(f in api for f in ("(*mod_info)", "(*mod_edit)", "(*mods_changed)", "(*cheat_info)", "(*cheat_set)")),
+         "MkwVkHost has no Mods tab functions (API version 26)")
     need(re.search(r"hos_region_release_gaps,\s*hos_options_file,\s*hos_mod_info,\s*hos_mod_edit,\s*hos_mods_changed,\s*hos_cheat_info,\s*hos_cheat_set", backend),
          "host/rx_backend.c does not give the back end the mods' functions, in MkwVkHost's order")
     titles = re.search(r"tab_titles\[TAB_COUNT\] = \{([^}]*)\}", menu).group(1)

@@ -302,14 +302,14 @@ void hos_text_picture_unlock(void) {}
 uint64_t hos_call_guest_kept(uint64_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
     (void)fn; (void)a0; (void)a1; (void)a2; (void)a3; return 0;
 }
-const char *hos_romfs_dir;   /* (no game RomFS here: mods.c merges no table of its own, the last mod's is the base) */
 int rx_option(int id, int otherwise) { (void)id; return otherwise; }
 void hos_mods_init(const char *image_path);
 int hos_mods_romfs(const char *rel, char *out, size_t cap);
-const char *hos_romfs_dir;
+const char *hos_romfs_dir;   /* (TEST_ROMFS_ON=1: the game's RomFS folder; else none, and mods.c merges no table of its own,
+                                 the last mod's is the base, the prompts' entries merged into it) */
 const char *hos_options_file(void) { return ""; }   /* (prompts.c reads the settings file: none here) */
 int main(int argc, char **argv) {
-    hos_romfs_dir = getenv("TEST_ROMFS");
+    if (getenv("TEST_ROMFS_ON")) hos_romfs_dir = getenv("TEST_ROMFS");
     hos_mods_init(NULL);
     for (int i = 1; i < argc; i++) {
         char out[4096] = "";

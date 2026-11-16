@@ -1934,7 +1934,7 @@ void restart_init() {
         restart_slot[i] = rows[i].restart && rows[i].value ? restart_state.add(row_restart_value(rows[i])) : -1;
         if (restart_slot[i] >= 0) restart_names[restart_slot[i]] = rows[i].name;
     }
-    mods_slot = restart_state.add(0);   // (hookshot: the Mods tab's order and switches, 0 as the game started)
+    mods_slot = can_mods() ? restart_state.add(0) : -1;   // (hookshot: the Mods tab's order and switches, 0 as the game started)
     if (mods_slot >= 0) restart_names[mods_slot] = "the mods";
 }
 int restart_slot_of(const Row& r) { return restart_slot[&r - rows]; }
@@ -3681,7 +3681,7 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
 // selected one; Enter picks a mod up, Up and Down move it, Enter or Esc puts it down. The order and the mods' switches apply at the
 // next start (the restart question names them); a cheat's switch at once.
 bool can_mods() {
-    return host && host->version >= 24 && host->mod_info && host->mod_edit && host->mods_changed && host->cheat_info && host->cheat_set;
+    return host && host->version >= 26 && host->mod_info && host->mod_edit && host->mods_changed && host->cheat_info && host->cheat_set;
 }
 bool mods_present() {
     const char *n, *d, *o;
