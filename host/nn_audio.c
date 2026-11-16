@@ -969,7 +969,7 @@ static void au_opened(HWAVEOUT w) {
     (void)w;
 #endif
 }
-/* The selected/default output's channels (its shared-mode mix format on Windows, SDL's default device on Linux); 2 when
+/* The selected/default output's channels (its shared-mode mix format on Windows, SDL's playback format on Linux); 2 when
    unknown. */
 #ifdef _WIN32
 /* (hookshot) The channels of a mix format that are 5.1 speakers: its channel count when its mask names a centre and a

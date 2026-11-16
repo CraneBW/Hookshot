@@ -379,7 +379,7 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Threaded rendering | Auto, On, Off (after a restart). Auto is On with 8 or more processor threads for the game | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
-| | Output device | Default or a named Windows playback device; applies live | Default |
+| | Output device | Default or a named playback device (Windows, and Linux through SDL); applies live | Default |
 | | Speaker layout | Auto, Stereo, 5.1, Mono (layout changes after a restart; Mono/Stereo live on stereo output) | Auto |
 | | Microphone | Off, Default, or each microphone by name | Default |
 | | Microphone gain | Software input level, 0–400%; applies to new samples without changing system volume | 100% |
@@ -590,10 +590,12 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
   follow a curve so they sound about even: 50% is a quarter of the level (-12 dB). **Mute in background** silences the
   game while another window has the focus; an overlay such as Steam's or Discord's does not count as another window
   while the game was in front.
-- **Output device**, under Audio, selects the Windows playback endpoint by its persistent ID, with Default following
+- **Output device**, under Audio, selects a playback endpoint, with Default following
   the system output. Changes briefly restart the audio stream. A missing endpoint falls back to Default and is retried;
   its saved choice is retained. `HOS_AUDIO_DEVICE` overrides selection for that run without changing the saved choice.
-  Named playback selection is Windows-only; Linux retains the default output.
+  Windows saves the endpoint's persistent ID. Linux uses the loaded SDL2/SDL3 backend and device name, resolved again
+  when opening playback; device numbers are not saved. A renamed device is treated as missing. Identically named
+  Linux outputs are ambiguous and are not offered; use Default and the system mixer to route those.
 - **Speaker layout** is the speakers the game mixes its sound for. Auto is 5.1 when the selected/default output device has 5.1
   or more speakers, else stereo; Stereo or 5.1 chooses one whatever the device has (5.1 on stereo speakers is mixed
   down). Auto counts the speakers Windows names, not the channels: an audio interface whose outputs are not set up as
