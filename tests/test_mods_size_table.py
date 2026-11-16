@@ -327,7 +327,7 @@ int main(int argc, char **argv) {
 
     documented_example_checks(exe, tmp / "documented-example")
 
-    def case(name, mods, ours=OURS, opens=(TABLE, FONT)):
+    def case(name, mods, ours=OURS, opens=(TABLE, FONT), romfs=False):
         """a game folder with the prompts (the faces' font, ours as their table unless None) and mods {folder: {path: bytes}};
         the fixture opens each of opens: {path: what was served}, the merged table's content if served, the log"""
         top = tmp / name
@@ -345,6 +345,8 @@ int main(int argc, char **argv) {
                 (top / "mods" / folder / "romfs" / rel).parent.mkdir(parents=True, exist_ok=True)
                 (top / "mods" / folder / "romfs" / rel).write_bytes(data)
         env = dict(os.environ, TEST_GAME_EXE=str(game / "hookshot"), HOS_MODS=str(top / "mods"), TEST_ROMFS=str(game / "romfs"))
+        if romfs:   # (the game's RomFS folder: prompts.c finds the game's table name in it)
+            env["TEST_ROMFS_ON"] = "1"
         out = subprocess.run([str(exe), *opens], env=env, check=True, capture_output=True, text=True, timeout=60).stdout
         served = {}
         for line in out.splitlines():
@@ -388,7 +390,7 @@ int main(int argc, char **argv) {
     check(("02-b" in log.split("with the button prompts' sizes")[0].splitlines()[-1]), "two mods: 02-b's table:\n" + log)
     check(served[FONT] == "game/cache/prompts/External.bfotf.zs", "two mods: the font")
     # a mod table that cannot take ours: as it is, and the game's own icons
-    served, _, log = case("bad", {"bad": {TABLE: frame(b"NOT A TABLE" * 4)}})
+    served, _, log = case("bad", {"bad": {TABLE: frame(b"NOT A TABLE" * 4)}}, romfs=True)
     check(served == {TABLE: mod_file % "bad", FONT: "(the game's)"}, "a table that cannot be merged: %s" % served)
     check("not a resource size table as the game's" in log and "the game's own icons in texts" in log, "its log:\n" + log)
     # no table of ours (the faces' fonts fit the game's entry): the mod's as it is, and the font
