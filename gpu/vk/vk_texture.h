@@ -42,7 +42,8 @@ struct Texture {
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
     bool cube = false;        // CUBE_COMPATIBLE
     bool astc = false;        // ASTC blocks decoded into RGBA8 (block_w x block_h)
-    bool bc = false;          // (and kept as BC3: big ones, re-encoded on the GPU after decoding; vk_texture.cpp)
+    bool bc = false;          // (and kept as BC1 / BC7 (TICK-031), or BC3: re-encoded on the GPU after decoding; vk_texture.cpp)
+    bool remake = false;      // (TICK-031: kept as BC1, and an upload brought alpha: made again as BC7 by texture_frame)
     bool bc_resized = false;  // (hookshot-amd: its BC3 image is a resized copy, uneven block levels on AMD; vk_texture.cpp)
     int block_w = 1, block_h = 1, bpb = 0;   // the storage's blocks
     // the game's texture
@@ -70,11 +71,13 @@ struct Texture {
     uint32_t checked_epoch = 0;
     uint64_t upload_value = 0;   // (the submission its last upload was recorded in, and the parallel replay's segment
     uint64_t upload_seg = 0;     // that recorded it: one before it in the stream uploads it again)
+    uint64_t dry_value = 0;      // (D4: the submission the parallel replay's dry pass last marked it written in)
     uint64_t last_frame = 0;  // the present it was last used in (the cache's age)
     uint64_t first_render_frame = 0;   // the present it was first rendered into in (0: never)
     uint64_t last_value = 0;  // the timeline value of the last submission that used it
     uint64_t bytes = 0;       // device memory it holds (the texels', or a sparse image's chunks)
     uint64_t pad = 0;         // (what the allocator gave it beyond that: padding and alignment; counted in the budget with bytes)
+    uint64_t ci_key = 0;      // (TICK-031: its image's create info, for spare images: vk_texture.cpp)
     uint32_t id = 0;          // (its creation number: diagnostics tell images at one address apart)
     uint64_t first_seen = 0;  // (the present it was made at)
     uint64_t owned_frame = 0; // (the present its storage was last noted as render targets' (gpu_owned))
@@ -97,8 +100,15 @@ void texture_resident_flush(Texture* tex);
 void texture_begin_recording(VkCommandBuffer upload_cmd, uint64_t value);
 /// true when anything was recorded into the upload command buffer since texture_begin_recording
 bool texture_uploads_recorded();
+/// (TICK-056, RX_VK_SEG_EARLY) the submission part's readback refresh (memory_rb_refresh, once a part) into this thread's upload
+/// command buffer now, as texture_uploads_recorded makes it: before any segment's worker can end its recording first
+bool texture_rb_refresh_now();
 /// The recording's upload command buffer, to record into (its first use orders it after the work before)
 VkCommandBuffer upload_command_buffer();
+/// (TICK-056) this thread's upload command buffer set to `to` (and whether it was used), the one before returned to be set back
+/// the same way: the early mirror pre-sync records its copies on a worker into a command buffer of its own (vk_replay.cpp)
+struct UploadTarget { VkCommandBuffer cmd = VK_NULL_HANDLE; bool used = false; };
+UploadTarget texture_upload_swap(UploadTarget to);
 /// A copy of an RGBA8 region (decoded ASTC kept as RGBA8) into a texture kept as BC3: through the encoder
 bool texture_copy_into_bc(VkCommandBuffer cmd, Texture* src, uint32_t src_level, uint32_t src_layer, int sx, int sy,
                           Texture* dst, uint32_t dst_level, uint32_t dst_layer, int dx, int dy, uint32_t w, uint32_t h,
@@ -126,6 +136,10 @@ void texture_segment_worker(int index);
 /// to it (submit it before the segment's uploads), 0: nothing, -1: something did and it could not be ended (lost: the
 /// replay stops)
 int texture_segment_end(int index);
+/// (RX_VK_POOL_MIRROR) on a parallel segment's worker, upload_command_buffer() is the earliest open segment's init command buffer
+/// from the begin call to the end call (a mirror made there is filled before any segment that could read it); elsewhere nothing
+void* upload_to_earliest_begin();
+void upload_to_earliest_end(void* h);
 /// Changes with every submission (a texture touched in it is not checked again in it)
 uint32_t texture_epoch();
 /// Changes whenever a texture is destroyed (pointers to textures kept elsewhere go stale)
@@ -146,7 +160,7 @@ unsigned view_level(const nvn_view* v);
 unsigned image_level(const Texture* tex, unsigned level);
 unsigned view_layer(const nvn_view* v);
 /// The GPU wrote it (in the submission being recorded)
-void texture_written(Texture* tex);
+void texture_written(Texture* tex, const char* why = "?");   // (why: who wrote it; a reason also notes a virtual-pool texture's page map)
 /// The GPU writes [gpu, gpu + size) in the submission being recorded (a storage buffer, a buffer copy): textures over
 /// it are uploaded again from guest memory once that submission is done
 void texture_gpu_wrote(uint64_t gpu, uint64_t size);
@@ -180,6 +194,8 @@ uint64_t texture_bytes();
 /// A full memory barrier (all commands, all accesses): what separates dependent work for now
 /// (why: its label in RX_VK_PASS_TIMING's barrier lines)
 void full_barrier(VkCommandBuffer cmd, const char* why = "barrier (other)");
+void pass_start_barrier(VkCommandBuffer cmd, const char* why);   // (TICK-016: left out after draws only)
+void dispatch_barrier(VkCommandBuffer cmd, const char* why);
 /// Full barriers recorded and left out (RX_VK_BARRIER_DEDUPE_OFF=1: none), since the start
 void barrier_stats(int64_t* made, int64_t* left_out);
 /// (hookshot) Set around a draw's sampled-texture lookups (vk_draw.cpp): a new ASTC texture there may wait for a later frame
@@ -194,7 +210,13 @@ void note_pass_end(VkCommandBuffer cmd);
 void pass_start_barrier(VkCommandBuffer cmd);
 /// Pass starts with the fragment-stage barrier, since the start
 int64_t pass_barriers_relaxed();
+bool game_barrier_narrow_on();   // (TICK-057: RX_VK_GAME_BARRIER_NARROW)
+void game_fragment_barrier(VkCommandBuffer cmd);   // (TICK-057: the game's ORDER_FRAGMENTS barrier, fragment stages only)
+void trust_stats(int64_t* pass_left, int64_t* pass_attach, int64_t* dispatch_left, int64_t* game_narrow);   // (TICK-057)
+int64_t barriers_left_out_par();   // (TICK-057: of the left out, inside a parallel replay: RX_VK_BARRIER_DEDUPE_PAR)
 void texture_stats(int64_t* uploads, int64_t* astc_gpu, int64_t* bytes_uploaded);
+/// (TICK-051, RX_VK_FRAME_TRACE=1) ASTC transcodes of storage transcoded before, and the texels transcoded (running totals)
+void texture_trace_counts(int64_t* astc_again, int64_t* astc_texels);
 /// (hookshot) whether texture_read_texels' walk of r at that row stride (0: the region's own) and its own image stride
 /// stays within avail bytes of the data it is given (overflow-checked: the stride is the game's)
 bool texels_fit(const nvn_tex* t, const NVNcopyRegion* r, uint64_t row, uint64_t avail);

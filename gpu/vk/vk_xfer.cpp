@@ -227,7 +227,7 @@ void copy_b2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_bt& p, bool to
     full_barrier(cmd);
     if (to_image) {
         vkCmdCopyBufferToImage(cmd, span.buffer, s.tex->image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
-        texture_written(s.tex);
+        texture_written(s.tex, "a buffer-to-texture copy");
     } else {
         vkCmdCopyImageToBuffer(cmd, s.tex->image, VK_IMAGE_LAYOUT_GENERAL, span.buffer, 1, &c);
         const uint64_t guest = host->gpu_guest(p.buf);
@@ -266,7 +266,8 @@ void copy_t2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_tt& p) {
     GprofSpan gp(cmd, "xfer copy texture->texture (with its barriers)");
     full_barrier(cmd);
     const bool same_size = s.w == d.w && s.h == d.h && s.d == d.d;
-    if (s.tex->bc != d.tex->bc || (s.tex->bc && !same_size)) {   // (big ASTC kept as BC3 on one side: vk_texture.cpp)
+    // (decoded ASTC kept as BC on one side, or as two BC formats (TICK-031: BC1 and BC7 copy no blocks into each other))
+    if (s.tex->bc != d.tex->bc || (s.tex->bc && (!same_size || s.tex->format != d.tex->format))) {
         bool done = false;
         if (d.tex->bc && same_size) {
             done = texture_copy_into_bc(cmd, s.tex, s.level, s.layer, s.x, s.y, d.tex, d.level, d.layer, d.x, d.y, s.w, s.h,
@@ -293,7 +294,7 @@ void copy_t2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_tt& p) {
         }
         if (!done) warn(10, "texture copy into or out of a BC3-kept ASTC texture it cannot make: skipped");
         full_barrier(cmd);
-        if (done) texture_written(d.tex);
+        if (done) texture_written(d.tex, "a copy into a BC texture");
         return;
     }
     if (s.tex->samples != VK_SAMPLE_COUNT_1_BIT && d.tex->samples == VK_SAMPLE_COUNT_1_BIT && same_size) {
@@ -315,7 +316,7 @@ void copy_t2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_tt& p) {
                        linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
     }
     full_barrier(cmd);
-    texture_written(d.tex);
+    texture_written(d.tex, "a texture-to-texture copy");
 }
 
 void clear_tex(VkCommandBuffer cmd, NvnState& st, const nvn_p_clear_tex& p) {
@@ -382,6 +383,24 @@ void clear_tex(VkCommandBuffer cmd, NvnState& st, const nvn_p_clear_tex& p) {
     const bool fresh = !s.tex->gpu_written || s.tex->released || s.tex->only_cleared;
     texture_written(s.tex);
     s.tex->only_cleared = fresh && s.tex->aspect == VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
+// (D4, issue 3: the one-frame black world in Zora's Domain) In the parallel replay's dry pass, in stream order: the destination
+// of a texture-to-texture copy marked as the GPU's (texture_written), as dry_mark_written does for a draw's targets. Segments
+// record out of order, and a later segment that samples this texture before the copy's own segment has recorded it found it
+// never written and uploaded stale guest memory over it, in an upload that runs after the earlier segment's copy: the 1280 x 720
+// scene targets of the frame, black for one frame ("parallel: ... written in segment N, uploaded by the later segment M" in
+// the log counted them). RX_VK_NO_DRY_XFER_MARKS=1: as before
+void dry_mark_copy_target(const nvn_p_copy_tt& p) {
+    static const bool off = getenv("RX_VK_NO_DRY_XFER_MARKS") != nullptr;
+    if (off || !p.dst || !p.dst->gpu) return;
+    const nvn_view* view = p.has_dv ? &p.dv : nullptr;
+    Texture* tex = texture_get(p.dst, false);
+    if (!tex) return;
+    const uint32_t level = view_level(view);
+    // (the cases copy_t2t's resolve refuses, or scales into the first level: not marked, as it would not write)
+    if (level < tex->skip ? tex->bc || tex->type != VK_IMAGE_TYPE_2D : level >= tex->skip + tex->levels) return;
+    texture_written(tex, "the dry pass (a texture copy's destination)");
 }
 
 } // namespace mkwvk

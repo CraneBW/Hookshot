@@ -5,14 +5,123 @@
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 #include "vk_internal.h"
+#include "vk_ledger.h"
 #include <vk_mem_alloc.h>
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <mutex>
+#include <map>
+#include <unordered_map>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace mkwvk {
 
 VmaAllocator vma;
+
+// ---- (TICK-038) allocations by kind and memory class, RX_VK_RES_LOG=1 ----
+thread_local MemKind mem_kind_tag = MemKind::Other;
+bool res_log_on() {   // (RX_VK_LEDGER counts the allocations by kind too: vk_ledger.cpp)
+    static const bool v = (getenv("RX_VK_RES_LOG") && atoi(getenv("RX_VK_RES_LOG")) != 0) || ledger_on();
+    return v;
+}
+namespace {
+constexpr int kClasses = 4;   // (0 VRAM, 1 VRAM the CPU maps (BAR), 2 system cached, 3 system uncached)
+std::mutex acct_mu;
+struct AcctEntry { uint8_t kind, cls; uint64_t size; };
+std::unordered_map<VmaAllocation, AcctEntry> acct;
+uint64_t acct_bytes[(int)MemKind::Count][kClasses];
+uint64_t acct_count[(int)MemKind::Count][kClasses];
+void note_alloc(VmaAllocation a, MemKind kind) {
+    if (!res_log_on() || !a) return;
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(vma, a, &info);
+    const VkMemoryPropertyFlags f = dev.memory.memoryTypes[info.memoryType].propertyFlags;
+    const uint8_t cls = (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? ((f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ? 1 : 0)
+                                                                    : ((f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) ? 2 : 3);
+    std::lock_guard lk(acct_mu);
+    acct[a] = {(uint8_t)kind, cls, info.size};
+    acct_bytes[(int)kind][cls] += info.size, acct_count[(int)kind][cls]++;
+}
+void note_free(VmaAllocation a) {
+    if (!res_log_on() || !a) return;
+    std::lock_guard lk(acct_mu);
+    auto it = acct.find(a);
+    if (it == acct.end()) return;
+    acct_bytes[it->second.kind][it->second.cls] -= it->second.size, acct_count[it->second.kind][it->second.cls]--;
+    acct.erase(it);
+}
+MemKind image_kind(const VkImageCreateInfo& ci) {
+    if (mem_kind_tag != MemKind::Other) return mem_kind_tag;
+    return (ci.usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) ? MemKind::Target
+                                                                                                           : MemKind::Texture;
+}
+}  // namespace
+void mem_kinds_log() {
+    if (!res_log_on()) return;
+    static const char* const names[] = {"other", "textures", "render targets", "mirrors", "write-back shadows", "captures",
+                                        "streams", "staging", "readback", "scratch", "BC cache"};
+    char line[1600];
+    int n = snprintf(line, sizeof line, "vk: allocations by kind, MB (VRAM / VRAM mapped / system cached / system uncached, count):");
+    std::lock_guard lk(acct_mu);
+    uint64_t tot[kClasses]{};
+    for (int k = 0; k < (int)MemKind::Count && n < (int)sizeof line - 160; k++) {
+        uint64_t c = 0;
+        for (int j = 0; j < kClasses; j++) c += acct_count[k][j], tot[j] += acct_bytes[k][j];
+        if (!c) continue;
+        n += snprintf(line + n, sizeof line - n, " %s %llu / %llu / %llu / %llu (%llu);", names[k],
+                      (unsigned long long)(acct_bytes[k][0] >> 20), (unsigned long long)(acct_bytes[k][1] >> 20),
+                      (unsigned long long)(acct_bytes[k][2] >> 20), (unsigned long long)(acct_bytes[k][3] >> 20),
+                      (unsigned long long)c);
+    }
+    snprintf(line + n, sizeof line - n, " all %llu / %llu / %llu / %llu", (unsigned long long)(tot[0] >> 20),
+             (unsigned long long)(tot[1] >> 20), (unsigned long long)(tot[2] >> 20), (unsigned long long)(tot[3] >> 20));
+    logf("%s", line);
+}
+
+void mem_kind_totals(uint64_t bytes[][4], uint64_t count[][4]) {
+    std::lock_guard lk(acct_mu);
+    for (int k = 0; k < (int)MemKind::Count; k++)
+        for (int j = 0; j < kClasses; j++) bytes[k][j] = acct_bytes[k][j], count[k][j] = acct_count[k][j];
+}
+
+// ---- (HOS_HOST_SPLIT, host/hos_hostsplit.c) the census of the process's memory outside the game's: host-visible buffers named ----
+// A buffer the back end maps (the captures, the BC cache, staging, readbacks) is a range of this process's address space that the
+// driver made: tagged with its kind and memory class, it is told apart there from the driver's own memory. Only an executable with
+// the export (and the switch on) counts them.
+void host_tag(const void* ptr, uint64_t size, const char* name) {
+#ifdef _WIN32
+    using Tag = void (*)(const void*, uint64_t, const char*);
+    static const Tag tag = (Tag)(void*)GetProcAddress(GetModuleHandleA(nullptr), "hos_mem_tag");
+    if (tag) tag(ptr, size, name);
+#else
+    (void)ptr, (void)size, (void)name;
+#endif
+}
+void host_untag(const void* ptr) {
+#ifdef _WIN32
+    using Untag = void (*)(const void*);
+    static const Untag untag = (Untag)(void*)GetProcAddress(GetModuleHandleA(nullptr), "hos_mem_untag");
+    if (untag) untag(ptr);
+#else
+    (void)ptr;
+#endif
+}
+namespace {
+void tag_mapped(const VmaAllocationInfo& info, MemKind kind) {
+    static const bool named = getenv("HOS_HOST_SPLIT") != nullptr || ledger_on();
+    if (!named || !info.pMappedData) return;
+    static const char* const names[] = {"other", "textures", "render targets", "mirrors", "write-back shadows", "captures",
+                                        "streams", "staging", "readback", "scratch", "BC cache"};
+    const VkMemoryPropertyFlags f = dev.memory.memoryTypes[info.memoryType].propertyFlags;
+    const char* where = (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? "BAR" : (f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) ? "cached" : "uncached";
+    char name[40];
+    snprintf(name, sizeof name, "vk %s, %s", names[(int)kind], where);
+    host_tag(info.pMappedData, info.size, name);
+}
+}  // namespace
 
 bool vma_init(PFN_vkGetInstanceProcAddr gipa) {
     VmaVulkanFunctions f{};
@@ -36,6 +145,7 @@ bool vma_init(PFN_vkGetInstanceProcAddr gipa) {
 // memory type the pool's is not, are allocated as before.
 VmaPool image_pool = VK_NULL_HANDLE;
 bool image_pool_tried = false;
+uint32_t image_type = UINT32_MAX;   // (the pools' memory type, once images_pool found it)
 // (RX_VK_IMAGE_BLOCK_MB=<n>, 16 and up: the block's size. VMA keeps one block empty for the next image, 128 MB of VRAM that a 64 MB block
 // would halve, at twice the memory objects: the driver allows ~4096, the imported pools take ~2400)
 const uint64_t kImageBlock = (getenv("RX_VK_IMAGE_BLOCK_MB") ? (uint64_t)std::max(16, atoi(getenv("RX_VK_IMAGE_BLOCK_MB"))) : 128u) << 20;
@@ -91,25 +201,134 @@ VmaPool images_pool() {
     VmaPoolCreateInfo pi{};
     pi.memoryTypeIndex = type;
     pi.blockSize = kImageBlock;
+    image_type = type;
     if (vmaCreatePool(vma, &pi, &image_pool) != VK_SUCCESS) image_pool = VK_NULL_HANDLE;
     logf("vk: images from a pool of %llu MB blocks (memory type %u)%s", (unsigned long long)(kImageBlock >> 20), type,
          image_pool ? "" : ": not made");
     return image_pool;
 }
 
-bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated, bool target) {
+// ---- (Hookshot, 2026-11-14) RX_VK_IMAGE_GENERATIONS=1: images in pools by generation, an empty generation given back whole ----
+// The image pools' blocks did not empty: after a zone change the game finalizes most of its textures, but the few that stay
+// (made at any time before) sit in every block. The play sessions at 2560x1440 showed 33 blocks of 4224 MB holding 835 images of
+// 652 MB right after one (3.5 GB free inside the blocks, the heaps at 84%), so the mirrors' VRAM rule gave mirrors back for
+// nothing. Here images go to the current generation's pool, a new generation starts once one has had RX_VK_IMAGE_GEN_MB
+// (default 512) of images made in it, and a generation that is not the current one is destroyed with its blocks when its last
+// image goes. Images made together (a zone's) mostly go together, and those that stay keep their own generation's blocks only.
+// Blocks of RX_VK_IMAGE_GEN_BLOCK_MB (default 64). Textures only: render targets in generations (tried, PC 3050 castle-move)
+// spread over 10-14 live generations of 3.4-4 GB holding 0.9-1.1 GB, as the dynamic resolution makes new ones all the time
+// and a few of each generation stay (the heaps at 97-109%, images refused); they keep their own pool as before. 0: as before.
+bool image_generations_on() {
+    static const bool v = [] {
+        const char* e = getenv("RX_VK_IMAGE_GENERATIONS");
+        const bool on = e && atoi(e) != 0;
+        if (on) logf("vk: images in pools by generation, an empty generation given back with its blocks (RX_VK_IMAGE_GENERATIONS=1)");
+        return on;
+    }();
+    return v;
+}
+namespace {
+struct ImageGen {
+    VmaPool pool = VK_NULL_HANDLE;
+    uint64_t made_bytes = 0;   // (images made in it in all)
+    int64_t live = 0;          // (its images now)
+};
+std::mutex gen_mu;
+std::map<uint64_t, ImageGen> gens[2];   // [textures, render targets]: by number, the last one the current
+uint64_t gen_next = 1;
+std::unordered_map<VmaAllocation, std::pair<int, uint64_t>> gen_of;   // (an image's family and generation)
+int64_t st_gens_made = 0, st_gens_freed = 0;
+uint64_t gen_bytes() {
+    static const uint64_t v = (uint64_t)std::max(64, getenv("RX_VK_IMAGE_GEN_MB") ? atoi(getenv("RX_VK_IMAGE_GEN_MB")) : 512) << 20;
+    return v;
+}
+uint64_t gen_block() {
+    static const uint64_t v = (uint64_t)std::max(16, getenv("RX_VK_IMAGE_GEN_BLOCK_MB") ? atoi(getenv("RX_VK_IMAGE_GEN_BLOCK_MB")) : 64) << 20;
+    return v;
+}
+/// the pool images of that family go to now: the current generation's, a new one when it is full (gen_mu held)
+VmaPool gen_current(int family, uint32_t type, uint64_t* number) {
+    auto& g = gens[family];
+    if (g.empty() || std::prev(g.end())->second.made_bytes >= gen_bytes()) {
+        VmaPoolCreateInfo pi{};
+        pi.memoryTypeIndex = type;
+        pi.blockSize = gen_block();
+        ImageGen ng;
+        if (vmaCreatePool(vma, &pi, &ng.pool) != VK_SUCCESS) return VK_NULL_HANDLE;
+        const uint64_t n = gen_next++;
+        g[n] = ng;
+        st_gens_made++;
+        // (the generation before, now not the current one, goes at once if its images went meanwhile)
+        if (g.size() > 1) {
+            auto before = std::prev(std::prev(g.end()));
+            if (before->second.live == 0) {
+                vmaDestroyPool(vma, before->second.pool);
+                g.erase(before);
+                st_gens_freed++;
+            }
+        }
+    }
+    auto cur = std::prev(g.end());
+    *number = cur->first;
+    return cur->second.pool;
+}
+}  // namespace
+
+uint64_t big_image_bytes() {   // (TICK-023: RX_VK_BIG_IMAGE_MB, 16 by default; 0: none forced dedicated)
+    static const uint64_t big = (uint64_t)(getenv("RX_VK_BIG_IMAGE_MB") ? std::max(0, atoi(getenv("RX_VK_BIG_IMAGE_MB"))) : 16) << 20;
+    return big;
+}
+std::atomic<int> vram_alloc_failures{0};   // (TICK-023: images VRAM refused, read by the texture budget)
+static bool create_image_(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated, bool target) {
     VmaAllocationCreateInfo ai{};
     ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     // (in VRAM or not at all: an image VMA puts in system memory when VRAM is full is read over PCIe every frame,
     // and takes the RAM the game and everything else on the machine need)
     ai.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     if (dev.memory_budget) ai.flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+    // (TICK-023) a large image (16 MB and up at 4 bytes a texel: the 4096 x 4096 render targets, the terrain's arrays) gets a memory
+    // object of its own: in the 128 MB blocks, the ones evicted left their space free in blocks still holding others (4 GB free in
+    // the blocks after a walk in Kokiri, the driver's count unchanged), so evicting them gave nothing back. RX_VK_BIG_IMAGE_MB=<n>
+    // (0: in the pool, as before)
+    // (TICK-030) not a block-compressed image (BLOCK_TEXEL_VIEW_COMPATIBLE: the game's BC textures, which shaders write
+    // through raw R32G32(B32A32)_UINT block views): Castle Town's ground (BC5/BC6H/BC7, 3064 x 2656, 2288 x 6112,
+    // 1144 x 3056 x 3, 8-14 MB but 32-56 MB by the 4-bytes estimate) in memory of their own rendered flat teal from its
+    // first frame, the same images in the pool right (bisected by RX_VK_BIG_IMAGE_MB: 16 and 32 teal, 64 and 0 right).
+    // The re-encoded BC3 arrays (written by buffer copies) are asked for by vk_texture.cpp by their real size
+    const uint64_t big = big_image_bytes();
+    if (big && !(ci.flags & VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT) &&
+        (uint64_t)ci.extent.width * ci.extent.height * ci.extent.depth * ci.arrayLayers * 4 >= big)
+        dedicated = true;
     if (dedicated) {   // (a memory object of its own, which freeing gives back whole: a pool's block is kept by VMA when it empties)
         VmaAllocationCreateInfo dai = ai;
         dai.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
-        if (vmaCreateImage(vma, &ci, &dai, &image, &allocation, nullptr) == VK_SUCCESS) return true;
+        if (vmaCreateImage(vma, &ci, &dai, &image, &allocation, nullptr) == VK_SUCCESS) {
+            static std::atomic<int> told{0};
+            if (getenv("RX_VK_LOG_DEDICATED") && told++ < 200)
+                logf("vk: dedicated image %ux%ux%u x%u levels %u format %d usage %#x flags %#x tiling %d", ci.extent.width,
+                     ci.extent.height, ci.extent.depth, ci.arrayLayers, ci.mipLevels, (int)ci.format, ci.usage, ci.flags, (int)ci.tiling);
+            return true;
+        }
     }
     static const bool no_pool = getenv("RX_VK_NO_IMAGE_POOL") != nullptr;
+    if (!no_pool && !target && image_generations_on() && images_pool() && image_type != UINT32_MAX) {   // (RX_VK_IMAGE_GENERATIONS, above)
+        const int family = 0;
+        std::lock_guard lk(gen_mu);   // (held through the make: a generation is never destroyed under it)
+        uint64_t number = 0;
+        if (VmaPool gp = gen_current(family, image_type, &number)) {
+            VmaAllocationCreateInfo gai = ai;
+            gai.pool = gp;
+            gai.usage = VMA_MEMORY_USAGE_UNKNOWN;
+            if (vmaCreateImage(vma, &ci, &gai, &image, &allocation, nullptr) == VK_SUCCESS) {
+                VmaAllocationInfo info{};
+                vmaGetAllocationInfo(vma, allocation, &info);
+                ImageGen& g = gens[family][number];
+                g.live++, g.made_bytes += info.size;
+                gen_of[allocation] = {family, number};
+                return true;
+            }
+        }
+    }
     if (VmaPool pool = no_pool ? VK_NULL_HANDLE : target && target_images_pool() ? target_images_pool() : images_pool()) {
         VmaAllocationCreateInfo pai = ai;
         pai.pool = pool;
@@ -117,6 +336,9 @@ bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& al
         if (vmaCreateImage(vma, &ci, &pai, &image, &allocation, nullptr) == VK_SUCCESS) return true;
     }
     if (vmaCreateImage(vma, &ci, &ai, &image, &allocation, nullptr) == VK_SUCCESS) return true;
+    // (TICK-023) noted for the texture budget: the next check (texture_end_frame, every 10 presents) evicts the least recently
+    // used before the next image is refused too, instead of waiting for the driver's count
+    vram_alloc_failures.fetch_add(1, std::memory_order_relaxed);
     // (hookshot) VRAM is full (a 4 GB card at a high resolution, #96): an image left unmade is a black screen, so it goes
     // to system memory instead, slow but drawn
     if (getenv("RX_VK_IMAGES_VRAM_ONLY")) return false;
@@ -127,7 +349,31 @@ bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& al
     if (told++ < 4) logf("vk: VRAM full: a %ux%u image (format %d) in system memory", ci.extent.width, ci.extent.height, (int)ci.format);
     return true;
 }
+bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated, bool target) {
+    if (!create_image_(ci, image, allocation, dedicated, target)) return false;
+    note_alloc(allocation, image_kind(ci));
+    return true;
+}
 void destroy_image(VkImage image, VmaAllocation allocation) {
+    note_free(allocation);
+    if (image_generations_on() && allocation) {
+        std::lock_guard lk(gen_mu);
+        const auto it = gen_of.find(allocation);
+        if (it != gen_of.end()) {
+            const auto [family, number] = it->second;
+            gen_of.erase(it);
+            vmaDestroyImage(vma, image, allocation);
+            auto& g = gens[family];
+            const auto gi = g.find(number);
+            // (its last image gone and not the current generation: the pool and its blocks back to the driver)
+            if (gi != g.end() && --gi->second.live == 0 && gi != std::prev(g.end())) {
+                vmaDestroyPool(vma, gi->second.pool);
+                g.erase(gi);
+                st_gens_freed++;
+            }
+            return;
+        }
+    }
     vmaDestroyImage(vma, image, allocation);
 }
 uint64_t allocation_size(VmaAllocation allocation) {
@@ -150,6 +396,8 @@ bool create_buffer(uint64_t size, VkBufferUsageFlags usage, bool host_visible, V
     VmaAllocationInfo info{};
     if (vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, &info) != VK_SUCCESS) return false;
     if (mapped) *mapped = info.pMappedData;
+    tag_mapped(info, mem_kind_tag);
+    note_alloc(allocation, mem_kind_tag);
     return true;
 }
 /// A buffer in cached host memory, mapped: written on one thread, read back on the CPU too (the captures: the game's
@@ -166,6 +414,8 @@ bool create_buffer_cached(uint64_t size, VkBufferUsageFlags usage, VkBuffer& buf
     VmaAllocationInfo info{};
     if (vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, &info) != VK_SUCCESS) return false;
     if (mapped) *mapped = info.pMappedData;
+    tag_mapped(info, mem_kind_tag);
+    note_alloc(allocation, mem_kind_tag);
     return true;
 }
 void flush_mapped(VmaAllocation allocation, uint64_t size) {
@@ -175,6 +425,13 @@ void invalidate_mapped(VmaAllocation allocation, uint64_t size) {
     if (size) vmaInvalidateAllocation(vma, allocation, 0, size);
 }
 void destroy_buffer(VkBuffer buffer, VmaAllocation allocation) {
+    static const bool named = getenv("HOS_HOST_SPLIT") != nullptr || ledger_on();
+    if (named && allocation) {   // (HOS_HOST_SPLIT: its range is no longer named)
+        VmaAllocationInfo info{};
+        vmaGetAllocationInfo(vma, allocation, &info);
+        if (info.pMappedData) host_untag(info.pMappedData);
+    }
+    note_free(allocation);
     vmaDestroyBuffer(vma, buffer, allocation);
 }
 bool create_device_buffer(uint64_t size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& allocation, bool dedicated) {
@@ -186,11 +443,41 @@ bool create_device_buffer(uint64_t size, VkBufferUsageFlags usage, VkBuffer& buf
     ai.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     if (dev.memory_budget) ai.flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
     if (dedicated) ai.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
-    return vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, nullptr) == VK_SUCCESS;
+    if (vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, nullptr) != VK_SUCCESS) return false;
+    note_alloc(allocation, mem_kind_tag);
+    return true;
 }
-/// (every heap: what VMA has in blocks and allocations there, what the process uses of it, its budget; one line)
+void log_alloc_where(const char* what, VmaAllocation allocation) {
+    if (!allocation) return;
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(vma, allocation, &info);
+    const VkMemoryType& t = dev.memory.memoryTypes[info.memoryType];
+    const VkMemoryPropertyFlags f = t.propertyFlags;
+    logf("vk: %s: %llu KB in memory type %u, heap %u (%s)%s%s%s", what, (unsigned long long)(info.size >> 10), info.memoryType,
+         t.heapIndex, (dev.memory.memoryHeaps[t.heapIndex].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) ? "device" : "system",
+         (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? " device-local" : "", (f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ? " host-visible" : "",
+         (f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) ? " cached" : "");
+}
 /// The image pools: their blocks, the images in them, and the free ranges between them (every 600 presents, with the heaps)
 void vma_log_image_blocks() {
+    if (image_generations_on()) {   // (RX_VK_IMAGE_GENERATIONS: the live generations, their blocks and images)
+        std::lock_guard lk(gen_mu);
+        for (int family = 0; family < 2; family++) {
+            VmaStatistics sum{};
+            uint32_t ranges = 0;
+            for (const auto& [n, g] : gens[family]) {
+                VmaDetailedStatistics d{};
+                vmaCalculatePoolStatistics(vma, g.pool, &d);
+                sum.blockCount += d.statistics.blockCount, sum.blockBytes += d.statistics.blockBytes;
+                sum.allocationCount += d.statistics.allocationCount, sum.allocationBytes += d.statistics.allocationBytes;
+                ranges += d.unusedRangeCount;
+            }
+            logf("vk: image generations%s (RX_VK_IMAGE_GENERATIONS): %zu live, %lld made, %lld given back so far; %u blocks %llu MB, "
+                 "%u images %llu MB; %u free ranges", family ? " (render targets)" : "", gens[family].size(), (long long)st_gens_made,
+                 (long long)st_gens_freed, sum.blockCount, (unsigned long long)(sum.blockBytes >> 20), sum.allocationCount,
+                 (unsigned long long)(sum.allocationBytes >> 20), ranges);
+        }
+    }
     for (VmaPool pool : {image_pool, target_image_pool}) {
         if (!pool) continue;
         VmaDetailedStatistics d{};
@@ -202,6 +489,7 @@ void vma_log_image_blocks() {
              (unsigned long long)(d.unusedRangeSizeMax >> 20));
     }
 }
+/// (every heap: what VMA has in blocks and allocations there, what the process uses of it, its budget; one line)
 void vma_log_heaps() {
     VmaBudget b[VK_MAX_MEMORY_HEAPS]{};
     vmaGetHeapBudgets(vma, b);
@@ -232,6 +520,30 @@ bool vram_usage(uint64_t* used, uint64_t* budget, uint64_t* block_free) {
     *used = u, *budget = t;
     if (block_free) *block_free = f;
     return t != 0;
+}
+
+void vma_ledger_stats(uint64_t out[8]) {
+    for (int i = 0; i < 8; i++) out[i] = 0;
+    {
+        std::lock_guard lk(gen_mu);
+        for (const auto& [n, g] : gens[0]) {
+            VmaDetailedStatistics d{};
+            vmaCalculatePoolStatistics(vma, g.pool, &d);
+            out[0] += d.statistics.blockBytes, out[1] += d.statistics.allocationBytes;
+        }
+    }
+    for (int k = 0; k < 2; k++) {
+        const VmaPool pool = k ? target_image_pool : image_pool;
+        if (!pool) continue;
+        VmaDetailedStatistics d{};
+        vmaCalculatePoolStatistics(vma, pool, &d);
+        out[2 * k] += d.statistics.blockBytes, out[2 * k + 1] += d.statistics.allocationBytes;
+    }
+    VmaBudget b[VK_MAX_MEMORY_HEAPS]{};
+    vmaGetHeapBudgets(vma, b);
+    for (uint32_t h = 0; h < dev.memory.memoryHeapCount; h++)
+        if (dev.memory.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            out[4] += b[h].statistics.blockBytes, out[5] += b[h].statistics.allocationBytes, out[6] += b[h].usage, out[7] += b[h].budget;
 }
 
 /// The system-memory heaps the GPU reaches: what the process uses there (the imported guest memory too: pinned by the

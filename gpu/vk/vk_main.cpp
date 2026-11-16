@@ -19,10 +19,13 @@
 #include "vk_framegen.h"
 #include "vk_internal.h"
 #include "gpu_choice.h"
+#include "sparse_queue.h"
 #include "vk_menu.h"
 #include "vk_dlss.h"
+#include "vk_fsr4.h"
 #include "vk_reflex.h"
 #include "vk_progress.h"
+#include "vk_tl_clock.h"   // (RX_VK_TL: the timeline's host time domain)
 
 namespace vkx {
 #define VKX_DEFINE(f) PFN_##f f;
@@ -68,7 +71,7 @@ namespace mkwvk {
 
 std::vector<std::string> gpu_device_names;
 const MkwVkHost* host;
-int64_t prof_ns[PROF_COUNT];
+SplitCount prof_ns[PROF_COUNT];
 Device dev;
 PFN_vkGetInstanceProcAddr instance_proc() { return vkx::instance_proc_addr(); }
 
@@ -211,6 +214,23 @@ bool pick_device() {
     return true;
 }
 
+/// (longshot #2306, #444) Whether the shaders' float adds to storage buffers are asked to be the GPU's own atomic (create_device):
+/// RX_VK_NATIVE_FADD (0, false, off, no or empty is off, any other value on); unset, with Intel's Windows driver on the Arc
+/// B-series cards, Battlemage (PCI device 0xE2xx; run on a B580, 0xE20B, in Kokiri Forest: the compare-exchange loop lost the
+/// device in the sky's light sums, on entering it in every run), from the driver that was run, 101.9154, on (Intel's Windows
+/// driverVersion is 101 << 14 | 9154). Longshot also turns it on by default with NVIDIA's driver (0.4-0.6 ms of GPU time less,
+/// 7%, in Kakariko on an RTX 4090); here NVIDIA keeps the loop until it is measured on this renderer (RX_VK_NATIVE_FADD=1),
+/// so that nothing changes there, nor the translator's stamp. Every other GPU keeps the loop too
+static bool env_off(const char* v) {
+    std::string s(v);
+    for (char& c : s) c = (char)tolower((unsigned char)c);
+    return s.empty() || s == "0" || s == "false" || s == "off" || s == "no";
+}
+static bool native_fadd_wanted(const char* env, VkDriverId driver, uint32_t device, uint32_t version) {
+    if (env) return !env_off(env);
+    return driver == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS && (device & 0xFF00u) == 0xE200u && version >= (101u << 14 | 9154u);
+}
+
 bool create_device() {
     uint32_t n = 0;
     vkEnumerateDeviceExtensionProperties(dev.physical, nullptr, &n, nullptr);
@@ -242,6 +262,7 @@ bool create_device() {
     optional(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME, dev.stencil_export);
     optional(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, dev.memory_budget);
     optional(VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME, dev.view_2d_of_3d);
+    dev.pci_bus_info = has_extension(exts, VK_EXT_PCI_BUS_INFO_EXTENSION_NAME);   // (properties only: nothing to enable)
     // (hookshot) on by default: with a marker before each draw and dispatch the device has not been lost (five
     // runs); without them it was, every run, shortly after OoT's first gameplay frames (nvlddmkm event 153; the
     // extension alone, RX_VK_CHECKPOINTS=ext, did not keep it). The race they hide is not found yet.
@@ -253,8 +274,49 @@ bool create_device() {
         optional(VK_AMD_BUFFER_MARKER_EXTENSION_NAME, dev.buffer_marker);
     optional(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, dev.device_fault);
     optional(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, dev.coop_matrix);
+    // (longshot #2306) the GPU's own float add on storage buffers: the game's RED/ATOM.ADD.F32 become one OpAtomicFAddEXT instead
+    // of a compare-exchange loop, which gives up after CAS_LOOP_MAX_TRIES attempts and loses that add (eden
+    // spirv_emit_context.cpp DefineStorageBuffers). By default on Battlemage only (native_fadd_wanted); RX_VK_NATIVE_FADD=1
+    // asks for it on any GPU, =0 keeps the loop on every one, the extension not even enabled
+    const char* const fadd_env = getenv("RX_VK_NATIVE_FADD");
+    VkPhysicalDeviceDriverProperties fadd_driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    {
+        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        p2.pNext = &fadd_driver;
+        vkGetPhysicalDeviceProperties2(dev.physical, &p2);
+    }
+    const bool fadd_wanted = native_fadd_wanted(fadd_env, fadd_driver.driverID, dev.props.deviceID, dev.props.driverVersion);
+    bool atomic_float = false;
+    if (fadd_wanted) optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, atomic_float);
     optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, dev.swap_mutable);   // (hookshot: the overlays, vk_imgui.cpp)
+    if (getenv("RX_VK_TL") || getenv("RX_VK_TL_S")) optional(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME, dev.calibrated_ts);   // (stream R2: the timeline's GPU side)
+#ifndef _WIN32
+    // (Linux) tl_gpu_dump asks for the device's and the host clock's time (vk_tl_clock.h: CLOCK_MONOTONIC, the shim's
+    // QueryPerformanceCounter); a domain the device does not list may not be asked for, so the GPU side (and RX_VK_TL_PROBE) is off
+    if (dev.calibrated_ts) {
+        const auto domains_fn = (PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT)instance_proc()(dev.instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT");
+        uint32_t nd = 0;
+        VkTimeDomainEXT domains[16];
+        if (domains_fn && domains_fn(dev.physical, &nd, nullptr) == VK_SUCCESS) {
+            nd = std::min<uint32_t>(nd, 16);
+            if (domains_fn(dev.physical, &nd, domains) < 0) nd = 0;
+        } else {
+            nd = 0;
+        }
+        std::string names;
+        for (uint32_t i = 0; i < nd; i++) names += std::string(i ? ", " : "") + tl_time_domain_name(domains[i]);
+        if (tl_time_domains_usable(domains, nd)) {
+            logf("vk: tl: GPU side calibrated against %s (domains: %s)", tl_time_domain_name(tl_host_time_domain()), names.c_str());
+        } else {
+            logf("vk: tl: GPU side off: the device lists no %s time domain beside DEVICE (domains: %s)", tl_time_domain_name(tl_host_time_domain()),
+                 names.empty() ? "none" : names.c_str());
+            dev.calibrated_ts = false;
+        }
+    }
+#endif
     dlss_device_extensions(want, exts);   // (hookshot: NVIDIA DLSS's, vk_dlss.cpp)
+    bool fsr_descriptor_buffer = false;   // (hookshot, linux: only with a Vulkan FSR 4 library beside the game, vk_fsr4.cpp)
+    if (fsr4_wants_descriptor_buffer()) optional(VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME, fsr_descriptor_buffer);
     reflex_device_extensions(want, exts);   // (hookshot: NVIDIA Reflex's, vk_reflex.cpp)
 
     // the queue: one family for graphics, compute and transfer
@@ -270,8 +332,10 @@ bool create_device() {
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     q.queueFamilyIndex = dev.queue_family;
+    const float priorities[2] = {getenv("RX_VK_QUEUE_PRIO") ? (float)atof(getenv("RX_VK_QUEUE_PRIO")) : 1.0f, 1.0f};   // (stream R2: RX_VK_QUEUE_PRIO, a diagnostic)
     q.queueCount = 1;
-    q.pQueuePriorities = &priority;
+    if (getenv("RX_VK_TL_PROBE") && atoi(getenv("RX_VK_TL_PROBE")) >= 2 && families[dev.queue_family].queueCount >= 2) q.queueCount = 2;   // (stream R2)
+    q.pQueuePriorities = priorities;
     // (hookshot) The presents on a queue of a compute family of their own, beside the replay's (RX_VK_PRESENT_QUEUE=1 / 0: on /
     // off; on by default with NVIDIA's driver on Windows, where it was measured). On the replay's queue vkQueuePresentKHR blocked
     // with dev.present_mu held, ~0.8 ms a present with frame interpolation at 4x and up to 8, and the game's main and presentation
@@ -297,10 +361,34 @@ bool create_device() {
             if ((families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
                 compute_family = i;
     }
-    VkDeviceQueueCreateInfo qs[2] = {q, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}};
-    qs[1].queueFamilyIndex = compute_family;
-    qs[1].queueCount = 1;
-    qs[1].pQueuePriorities = &priority;
+    VkDeviceQueueCreateInfo qs[3] = {q, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}};
+    uint32_t queue_infos = 1;
+    if (compute_family != UINT32_MAX) {
+        qs[queue_infos].queueFamilyIndex = compute_family;
+        qs[queue_infos].queueCount = 1;
+        qs[queue_infos].pQueuePriorities = &priority;
+        queue_infos++;
+    }
+    // (Linux, issue 14: RX_VK_SPARSE_QUEUE=1) a queue of another family for the binds of the pools made of several dma-bufs,
+    // whose fence on the replay's queue waited for every frame queued before it (sparse_queue.h). Off: no queue more
+    dev.sparse_family = UINT32_MAX;
+#ifdef __linux__
+    if (const char* e = getenv("RX_VK_SPARSE_QUEUE"); e && atoi(e) != 0) {
+        static_assert(sparse_queue::kSparseBinding == VK_QUEUE_SPARSE_BINDING_BIT && sparse_queue::kGraphics == VK_QUEUE_GRAPHICS_BIT);
+        std::vector<uint32_t> flags(n);
+        for (uint32_t i = 0; i < n; i++) flags[i] = families[i].queueFlags;
+        dev.sparse_family = sparse_queue::pick_family(flags.data(), n, dev.queue_family, compute_family);
+        if (dev.sparse_family != UINT32_MAX) {
+            qs[queue_infos].queueFamilyIndex = dev.sparse_family;
+            qs[queue_infos].queueCount = 1;
+            qs[queue_infos].pQueuePriorities = &priority;
+            queue_infos++;
+            logf("vk: RX_VK_SPARSE_QUEUE: the pools' sparse binds on a queue of family %u (flags %#x), not the replay's",
+                 dev.sparse_family, flags[dev.sparse_family]);
+        } else
+            logf("vk: RX_VK_SPARSE_QUEUE: the pools' sparse binds stay on the replay's queue (no other family has sparse binding)");
+    }
+#endif
 
     // features: what the hardware has of what the replay uses (all of them on the GPUs MKW-class hardware maps to)
     VkPhysicalDeviceMeshShaderFeaturesEXT mesh{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
@@ -335,12 +423,32 @@ bool create_device() {
     if (dev.view_2d_of_3d) *tail = &v2d3d, tail = &v2d3d.pNext;
     VkPhysicalDeviceCooperativeMatrixFeaturesKHR coop{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
     if (dev.coop_matrix) *tail = &coop, tail = &coop.pNext;
+    VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT};
+    if (fsr_descriptor_buffer) *tail = &descriptor_buffer, tail = &descriptor_buffer.pNext;
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT afloat{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT};
+    if (atomic_float) *tail = &afloat, tail = &afloat.pNext;
     reflex_device_features(tail);   // (present ids, when NVIDIA Reflex's extensions are there)
     vkGetPhysicalDeviceFeatures2(dev.physical, &f);
+    descriptor_buffer.descriptorBufferCaptureReplay = VK_FALSE;
     dev.view_2d_of_3d = dev.view_2d_of_3d && v2d3d.sampler2DViewOf3D;
     coop.cooperativeMatrixRobustBufferAccess = VK_FALSE;
     dev.coop_matrix = dev.coop_matrix && coop.cooperativeMatrix &&
                       f12.vulkanMemoryModel && f12.vulkanMemoryModelDeviceScope;
+    {   // (only the float add on buffers on: the one the translator emits)
+        dev.float_atomic_add = atomic_float && afloat.shaderBufferFloat32AtomicAdd;
+        void* const next = afloat.pNext;
+        afloat = VkPhysicalDeviceShaderAtomicFloatFeaturesEXT{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT};
+        afloat.pNext = next;
+        afloat.shaderBufferFloat32AtomicAdd = dev.float_atomic_add ? VK_TRUE : VK_FALSE;
+        const char* const how = dev.float_atomic_add ? "native (VK_EXT_shader_atomic_float)"
+                                : !fadd_wanted       ? "compare-exchange loop"
+                                : atomic_float       ? "compare-exchange loop (no shaderBufferFloat32AtomicAdd)"
+                                                     : "compare-exchange loop (no VK_EXT_shader_atomic_float)";
+        if (fadd_env) logf("vk: float atomic add on storage buffers: %s, RX_VK_NATIVE_FADD=%s", how, fadd_env);
+        else logf("vk: float atomic add on storage buffers: %s, %s", how,
+                  fadd_wanted ? "Intel's Windows driver, Battlemage"
+                              : "by default only with Intel's Windows driver on Battlemage (RX_VK_NATIVE_FADD=1: native where the GPU has it)");
+    }
     // (bounds-checked buffer access: an out-of-range access dropped instead of faulting the device. On by default: the GPU
     // culling pass 53caac5f faulted the device while a save loaded, about one start in three, and the scene's lighting read garbage
     // for single frames (the black flashes); with it, neither in A/B runs at the same GPU time. Lichii's OoT branch keeps it on too.
@@ -386,6 +494,18 @@ bool create_device() {
     dev.eds3_blend = dev.dynamic_state3 && eds3.extendedDynamicState3ColorBlendEnable &&
                      eds3.extendedDynamicState3ColorBlendEquation && eds3.extendedDynamicState3ColorWriteMask;
     dev.eds3_a2c = dev.dynamic_state3 && eds3.extendedDynamicState3AlphaToCoverageEnable;
+    {   // (hookshot) which denorm modes a shader may declare: all programs say them, and not every device has them (strip_float_controls)
+        VkPhysicalDeviceVulkan12Properties p12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        p2.pNext = &p12;
+        vkGetPhysicalDeviceProperties2(dev.physical, &p2);
+        dev.denorm_preserve_widths = (p12.shaderDenormPreserveFloat16 ? 1u : 0u) | (p12.shaderDenormPreserveFloat32 ? 2u : 0u) |
+                                     (p12.shaderDenormPreserveFloat64 ? 4u : 0u);
+        dev.denorm_flush_widths = (p12.shaderDenormFlushToZeroFloat16 ? 1u : 0u) | (p12.shaderDenormFlushToZeroFloat32 ? 2u : 0u) |
+                                  (p12.shaderDenormFlushToZeroFloat64 ? 4u : 0u);
+        logf("vk: float controls: denorm preserve widths %#x, flush to zero %#x (modes the device lacks are taken out of the shaders)",
+             dev.denorm_preserve_widths, dev.denorm_flush_widths);
+    }
     dev.vk12 = f12;
     dev.vk13 = f13;
     {   // (hookshot, after TotK Recomp's vk_caps.c) NVN's programs are written for 32 lanes: the translator is told 32, and the lane
@@ -420,7 +540,7 @@ bool create_device() {
     dev.sparse_buffers = (families[dev.queue_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) && f.features.sparseBinding;
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     ci.pNext = &f;
-    ci.queueCreateInfoCount = compute_family != UINT32_MAX ? 2 : 1;
+    ci.queueCreateInfoCount = queue_infos;
     ci.pQueueCreateInfos = qs;
     ci.enabledExtensionCount = (uint32_t)want.size();
     ci.ppEnabledExtensionNames = want.data();
@@ -432,9 +552,13 @@ bool create_device() {
 
     load_device(dev.device);
     vkGetDeviceQueue(dev.device, dev.queue_family, 0, &dev.queue);
+    dev.probe_queue = VK_NULL_HANDLE;
+    if (q.queueCount >= 2) vkGetDeviceQueue(dev.device, dev.queue_family, 1, &dev.probe_queue);
     dev.present_queue = VK_NULL_HANDLE;
     dev.present_family = dev.queue_family;
     if (compute_family != UINT32_MAX) vkGetDeviceQueue(dev.device, compute_family, 0, &dev.present_queue), dev.present_family = compute_family;
+    dev.sparse_queue = VK_NULL_HANDLE;
+    if (dev.sparse_family != UINT32_MAX) vkGetDeviceQueue(dev.device, dev.sparse_family, 0, &dev.sparse_queue);
     if (dev.buffer_marker) buffer_markers_init();
     coopmat_init();
     reflex_device_created();
@@ -490,10 +614,16 @@ bool create_swapchain(uint32_t width, uint32_t height) {
         return false;
     }
     if (caps.currentExtent.width != UINT32_MAX) width = caps.currentExtent.width, height = caps.currentExtent.height;
-    logf("vk: surface caps images %u..%u extent %ux%u..%ux%u usage %#x alpha %#x transform %#x",
-         caps.minImageCount, caps.maxImageCount, caps.minImageExtent.width, caps.minImageExtent.height,
-         caps.maxImageExtent.width, caps.maxImageExtent.height, caps.supportedUsageFlags,
-         caps.supportedCompositeAlpha, caps.supportedTransforms);
+    // (a minimised window has a 0x0 surface and the game presents every frame: said once, not a thousand times)
+    static bool told_empty;
+    if (width && height) told_empty = false;
+    if ((width && height) || !told_empty) {
+        told_empty = !width || !height;
+        logf("vk: surface caps images %u..%u extent %ux%u..%ux%u usage %#x alpha %#x transform %#x",
+             caps.minImageCount, caps.maxImageCount, caps.minImageExtent.width, caps.minImageExtent.height,
+             caps.maxImageExtent.width, caps.maxImageExtent.height, caps.supportedUsageFlags,
+             caps.supportedCompositeAlpha, caps.supportedTransforms);
+    }
     if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
         logf("vk: surface does not support transfer-destination swapchain images");
         return false;
@@ -648,6 +778,7 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     dev.swap_rendered = std::move(rendered);
     dev.swap_format = fmt.format;
     dev.swap_extent = {width, height};
+    dev.present_mode_name = mode == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox" : mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "fifo";
     dev.swap_images = std::move(images);
     logf("vk: swapchain %ux%u, %u images, %s", width, height, n,
          mode == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox" : mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "fifo");
@@ -708,6 +839,7 @@ void prepare_with_screen() {
     std::thread worker([] {
         const bool update = prepare_is_update();   // (an update, RX_VK_PREPARE_BACKGROUND=1: what the notes name now, the rest in play)
         const bool prepared = !update && prepare_run(prep_progress, false);
+        if (!update && !prepared && !prepare_stopped() && state_list_pending()) state_list_run();
         if (prepared && !prepare_stopped()) {   // (a first start only: the pipelines the notes predict, into the driver's cache)
             prep_done.store(0), prep_total.store(0);
             prep_stage.store(1);
@@ -808,6 +940,7 @@ bool started_up() {
         fflush(stdout);
         part = 0;
         const bool prepared = prepare_run(progress, false);
+        if (!prepared && state_list_pending()) state_list_run();   // (the builder's step: a list shipped after the last prepare)
         part = 1;
         if (prepared) predict_run(progress);
         part = 2;
@@ -867,8 +1000,9 @@ bool started_up() {
         };
         const bool update = prepare_is_update();   // (an update: what the notes name now, the rest in play)
         if (!update && prepare_run(progress, false)) predict_run(progress);
-        if (update) state_list_run();
-        precompile_run(progress);
+        else if (!update && state_list_pending()) state_list_run();
+        if (update && !prepare_is_lazy_update()) state_list_run();   // (a lazy update does it in play, first)
+        precompile_run(progress, precompile_blocking());   // (TICK-008: queued and built behind the game unless waited for)
         if (update) prepare_background();
         if (console) CloseHandle(console), console = nullptr, FreeConsole();
     }
