@@ -8043,7 +8043,7 @@ bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
     for (uint32_t i = 0; i < n; i++) regions[i] = {args.offset + (uint64_t)i * stride + 4 * word, off + (uint64_t)i * 12, 4};
     vkCmdCopyBuffer(cmd, args.buffer, mesh_ring, n, regions.data());
     {   // (diagnosis, default off) RX_VK_G3_MESHCOUNT=1: the same counts into a host-visible twin of the ring, for mesh_count_note
-        static const bool on = getenv("RX_VK_G3_MESHCOUNT") != nullptr;
+        static const bool on = env_on("RX_VK_G3_MESHCOUNT");
         if (on) {
             if (!mesh_dbg && !create_buffer(kMeshRing, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, mesh_dbg, mesh_dbg_mem, &mesh_dbg_ptr)) mesh_dbg = VK_NULL_HANDLE;
             if (mesh_dbg) {
