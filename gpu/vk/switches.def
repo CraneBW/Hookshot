@@ -893,6 +893,7 @@ SW(RX_VK_SPARE_FRAMES, tune, int, "0: no spare images kept", "Keeps released ima
 SW(RX_VK_SPARSE, kill, bool, "sparse resident 2D images used where the queue and device support them", "0 turns off sparse resident images (the terrain's huge arrays); sparse buffers are not affected.")
 SW(RX_VK_SPARSE_IDLE, attempt, bool, "off: sparse binds are queued without waiting for the queue to go idle", "Waits for the GPU queue to be idle before each sparse texture bind.")
 SW(RX_VK_SPARSE_QUEUE, kill, bool, "on: sparse buffers' binds go to a queue family of their own where the replay's has no sparse binding", "=0 asks only the replay's family, as before.")
+SW(RX_VK_SPARSE_SPARE_MB, tune, int, "4096 MB of address space, never more than a quarter of the device's sparse address space", "The address space the freed sparse mirrors' buffers kept for the next mirror of their size may hold together; 0 keeps none: every one is destroyed at once, as before.")
 GONE(RX_VK_SPARSE_WAIT, "2026-11-16", "it does nothing: sparse binds are never waited for on the CPU")
 SW(RX_VK_SPLIT_BEFORE_DRAW, hw, bool, "on for Intel (vendor 0x8086), off elsewhere", "1 ends a submission's part only right before a plain draw; 0 after its 120th draw or dispatch.")
 SW(RX_VK_SPLIT_UBFLUSH, hw, bool, "off on Intel without VRAM mirrors (iGPUs), on elsewhere", "1 writes uniform updates into game memory at each part's end; 0 only at the last part's.")
