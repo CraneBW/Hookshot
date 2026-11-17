@@ -9172,9 +9172,9 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             FINE_SCOPE(FT_HAZARD);
             begin_pass(cmd, at);
         }
-        pass().prog = p.key;
-        if (!pass().first_prog) pass().first_prog = p.key;
-        st_draws++, pass().draws++;
+        ps.prog = p.key;
+        if (!ps.first_prog) ps.first_prog = p.key;
+        st_draws++, ps.draws++;
         if (const int64_t k = st_occ_proxy_skips.fetch_add(1, std::memory_order_relaxed) + 1; k % 200000 == 0)
             logf("vk: draws left out, writing and sampling nothing (RX_VK_OCC_PROXY_SKIP): %lld so far, frame %llu", (long long)k,
                  (unsigned long long)texture_frame_no());
