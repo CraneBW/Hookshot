@@ -124,12 +124,17 @@ def check_source():
                         ("fallback_size::parse_limit(e, v)", "the switch is not read as digits only")):
         if needle not in refused:
             raise SystemExit("compute_refused: " + why)
-    # (Mesa's Intel compiler spills in rounds of spilled/2: set before the instance, on Linux, never over the player's own value)
-    main = (ROOT / "gpu/vk/vk_main.cpp").read_text(encoding="utf-8")
+    # (Mesa's Intel compiler spills in rounds of spilled/2: set at the host's start on Linux, before any thread (a setenv is not
+    # safe once another thread can getenv, so not in the Vulkan back end), never over the player's own value)
+    host = (ROOT / "host/hos_main.c").read_text(encoding="utf-8")
     rate = 'setenv("shader_spilling_rate", "2", 0);'
-    if main.count(rate) != 1 or main.index(rate) > main.index("vkCreateInstance(&ci, nullptr, &dev.instance)"):
-        raise SystemExit("the spilling rate is not set to 2 before the Vulkan instance, or overrides the player's")
-    if main.rfind("#ifndef _WIN32", 0, main.index(rate)) < main.rfind("#endif", 0, main.index(rate)):
+    vk_main = (ROOT / "gpu/vk/vk_main.cpp").read_text(encoding="utf-8")
+    if host.count(rate) != 1 or "shader_spilling_rate\", \"" in vk_main or 'setenv("shader_spilling_rate"' in vk_main:
+        raise SystemExit("the spilling rate is not set to 2 once at the host's start, or overrides the player's")
+    at = host.index(rate)
+    if host.index("submit_thread_at_start();", host.index("int main(") if "int main(" in host else 0) > at:
+        raise SystemExit("the spilling rate is set before hookshot_env.txt is read (after submit_thread_at_start, as its setenv)")
+    if host.rfind("#ifdef __linux__", 0, at) < host.rfind("#endif", 0, at):
         raise SystemExit("the spilling rate is set outside the Linux build")
     turn = block(draw, "struct ComputeTurn {")
     refuse = "if (gate && compute_refused(compute_described, compute_pinned(ci))) gate = nullptr, stopped = true;"
