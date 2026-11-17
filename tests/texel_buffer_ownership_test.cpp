@@ -94,6 +94,9 @@ uint64_t st_retired_imports_freed = 0, st_retired_import_bytes_freed = 0;
 uint64_t dead_import_bytes = 0;   // Retired allocations still count until their GPU work completes.
 uint64_t evicted_import_bytes = 0;
 std::deque<std::map<uint64_t, Pool>::node_type> evicted_pools;
+struct MsyncArena { VkBuffer buffer; VmaAllocation allocation; uint64_t value; };   // (reap_mirrors lets the old ones go)
+std::vector<MsyncArena> msync_arenas;
+void release_uncovered(uint64_t, uint64_t) {}   // (vk_memory.cpp: freed guest ranges back to Windows; none here)
 void logf(const char*, ...) {}
 const char* getenv(const char*) { return nullptr; }   // (unrelated diagnostic toggle in reap_mirrors)
 bool env_on(const char* name) { const char* v = getenv(name); return v && !env_value_off(v); }   // (the switches through the stand-in)
@@ -223,6 +226,10 @@ void run(const std::string& test) {
             assert(dead_import_bytes == 0);
             assert(destruction_order == std::vector<char>({'V', 'B'}));
             if (test == "reuse-handle") { auto next = get(tex); assert(next && next != first && creates == 2); }
+        } else if (test == "mirror") {   // (a view made over a VRAM mirror goes when the mirror is let go)
+            dead_mirrors.push_back({4, first_pool.buffer, nullptr});
+            mem_completed = 3; reap_mirrors(); assert(live.count(first) && destroyed_views == 0);
+            mem_completed = 4; reap_mirrors(); assert(live.empty() && destroyed_views == 1 && dead_mirrors.empty());
         } else if (test == "eviction") {
             std::map<uint64_t, Pool> pools; first_pool.retired_value = 5;
             pools.emplace(first_pool.lo, first_pool); evicted_pools.push_back(pools.extract(pools.begin()));
