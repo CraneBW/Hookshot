@@ -81,7 +81,7 @@ PARSER = r'''
 #include <stddef.h>
 #include "audio_output_devices.h"
 #include "gpu/vk/vk_api.h"
-_Static_assert(MKWVK_API_VERSION >= 31, "fullscreen monitor selection extends the out-of-memory ABI");
+_Static_assert(MKWVK_API_VERSION >= 32, "fullscreen monitor selection extends the out-of-memory ABI");
 _Static_assert(offsetof(MkwVkHost, options_path) > offsetof(MkwVkHost, take_text), "options_path after take_text");
 _Static_assert(offsetof(MkwVkHost, audio_output_count) > offsetof(MkwVkHost, options_path),
                "playback after options_path (the mods' and cheats' callbacks between them)");

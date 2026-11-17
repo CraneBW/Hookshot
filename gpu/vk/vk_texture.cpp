@@ -47,6 +47,8 @@
 #include "vk_jobs.h"
 #include "gone_ring.h"   //
 #include "texture_budget.h"
+#include "texture_ahead.h"
+#include "vk_paths.h"
 
 #include <span>
 
@@ -72,6 +74,7 @@
 #include "guest_holes.h"
 #include "target_overlap.h"
 #include "target_pool.h"
+#include "page_marks.h"   // (vw_ever: invalidate_quick)
 #include "dead_targets.h"
 #include "host_shaders/block_linear_unswizzle_2d_comp_spv.h"
 #ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
@@ -2390,7 +2393,11 @@ void upload_frame_report() {
     up_slowest.clear();
 }
 bool upload_inner(Texture& tex, const Ranges* dirty);
+// (hookshot, smoothness: textures prepared ahead, further down) a first upload a draw asked for is remembered
+thread_local bool ahead_running = false;
+void ahead_learn(const Texture& tex);
 bool upload(Texture& tex, const Ranges* dirty) {
+    if (!tex.uploaded && !ahead_running) ahead_learn(tex);
     const auto t0 = std::chrono::steady_clock::now();
     up_route = UP_CPU;
     const int kind = tex.uploaded ? UK_AGAIN : tex.astc ? UK_ASTC_NEW : UK_OTHER_NEW;
@@ -3070,9 +3077,11 @@ bool low_vram_texture_mips() {
     // Windows paged the game out (3-6 fps). With 16 GB of RAM or less it counts as small whatever the driver allows
     static const bool shared = dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && system_ram_bytes() &&
                                system_ram_bytes() <= (16ull << 30);
-    // (Minimum's settings, opts.budget 1: Minimum, Auto (this PC) at Minimum's tier, or Custom after either, which keeps them: the
-    // Debug tab's Set up for a weak laptop leaves the preset on Custom)
-    return !disabled && (small || shared) && (opts.preset == 1 || opts.budget == 1);
+    // (Minimum's settings, memory tier 1: Minimum, Auto (this PC) at Minimum's tier, or Custom after either, which keeps them: the
+    // Debug tab's Set up for a weak laptop leaves the preset on Custom. Custom with no preset behind it goes by Auto's tier for
+    // this PC: a Steam Deck on an options file from before memory_budget drew the terrain's 1365x1365x90 arrays at full size, and
+    // the arrivals that decode them again took twice as long, 1.0 against 2.2-2.4 s at the save's load)
+    return !disabled && (small || shared) && (opts.preset == 1 || menu_memory_tier() == 1);
 }
 
 // (the parked textures' commit check: short while the commit Windows has left (commit_headroom) is under the reserve the
@@ -4116,6 +4125,148 @@ bool upload_defer(Texture& tex) {
     return true;
 }
 }  // namespace
+
+// ---- (hookshot, smoothness) textures prepared ahead of their first draw: texture_ahead.h says why and holds the rules ----
+// RX_VK_TEX_AHEAD=1: on (off without it: measured on a Steam Deck only, after a save is loaded). RX_VK_TEX_AHEAD_MS=<n>: what a
+// light frame may spend preparing (12 ms). The list of textures drawn before: the game folder's cache/hookshot_textures_drawn.bin
+namespace {
+bool ahead_on() {
+    static const bool on = [] {
+        const char* e = getenv("RX_VK_TEX_AHEAD");
+        return e && atoi(e) != 0;
+    }();
+    return on;
+}
+std::mutex ahead_mu;   // (the host's threads announce textures, the replay's prepare them: the queue, the list, the counts)
+texture_ahead::Queue<nvn_tex> ahead_queue;
+std::unordered_set<uint64_t> ahead_drawn;   // (the signatures of the textures a draw has sampled: this run's and the file's)
+bool ahead_loaded = false, ahead_dirty = false;
+std::atomic<int64_t> ahead_allow_ns{0}, ahead_spent_ns{0};   // (this frame's allowance and what the replay has spent of it)
+uint64_t ahead_budget_bytes = 0;                  // (the cache's budget as texture_frame last had it; 0: not known yet, no room)
+struct AheadCounts {
+    int64_t prepared, bytes, ns, not_drawn_before, learnt, late, not_soon, stale, no_room;
+} ahead_n{};
+
+int64_t ahead_now_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+/// Block formats (ASTC, BC: a material's textures, never a render target's storage) in the game's own memory (a virtual
+/// pool's mapping moves)
+bool ahead_wanted(const nvn_texdesc& d, uint64_t gpu, uint64_t size) {
+    if (!gpu || gpu >= (1ull << 39) || !size) return false;
+    int bw = 1, bh = 1;
+    return nvn_block_size(d.format, &bw, &bh) > 0 && (bw > 1 || bh > 1);
+}
+/// The list's entry for a texture: what it is, and where the game put it (texture_ahead::place says why)
+uint64_t ahead_signature(const nvn_texdesc& d, const nvn_texlayout& L, uint64_t gpu) {
+    uint64_t avail = 0;
+    const uint8_t* p = host->gpu_ptr(gpu, &avail);
+    return texture_ahead::place(texture_ahead::signature((uint32_t)d.format, d.width, d.height, d.depth, d.levels, L.size,
+                                                         p && avail >= L.size ? p : nullptr),
+                                gpu);
+}
+void ahead_load() {   // (ahead_mu held)
+    if (ahead_loaded) return;
+    ahead_loaded = true;
+    const bool ok = texture_ahead::load_drawn(cache_path("hookshot_textures_drawn.bin").c_str(), &ahead_drawn);
+    logf("vk: textures ahead: %zu textures drawn before are known%s (RX_VK_TEX_AHEAD)", ahead_drawn.size(),
+         ok ? "" : " (no list yet: this run starts it)");
+}
+/// A first upload a draw asked for: the texture is remembered, for the next time the game makes it
+void ahead_learn(const Texture& tex) {
+    if (!ahead_on() || !ahead_wanted(tex.d, tex.gpu, tex.L.size)) return;
+    std::lock_guard lk(ahead_mu);
+    // (only one first drawn soon after the game made it: a load's. One met minutes later in play would be prepared at
+    // every load from then on, for nothing most of the time)
+    int64_t made = 0;
+    if (!ahead_queue.made_at(tex.gpu, &made) || !texture_ahead::learnable(made, ahead_now_ms())) {
+        ahead_n.not_soon++;
+        return;
+    }
+    const uint64_t s = ahead_signature(tex.d, tex.L, tex.gpu);
+    if (!s) return;
+    ahead_load();
+    if (texture_ahead::remember(&ahead_drawn, s))
+        ahead_dirty = true, ahead_n.learnt++;
+    else
+        ahead_n.late++;   // (known, and its first draw came before it was prepared)
+}
+}  // namespace
+void texture_ahead_made(const nvn_tex* t) {
+    if (!ahead_on() || !t || !ahead_wanted(t->d, t->gpu, t->L.size)) return;
+    std::lock_guard lk(ahead_mu);
+    ahead_queue.made(t->gpu, ahead_now_ms(), *t);
+}
+void texture_ahead_gone(const nvn_tex* t) {
+    if (!ahead_on() || !t) return;
+    std::lock_guard lk(ahead_mu);
+    ahead_queue.gone(t->gpu);
+}
+void texture_ahead_frame(int64_t draws) {
+    if (!ahead_on()) return;
+    static const int64_t budget_ns = (int64_t)((getenv("RX_VK_TEX_AHEAD_MS") ? atof(getenv("RX_VK_TEX_AHEAD_MS")) : 12.0) * 1e6);
+    ahead_allow_ns = texture_ahead::allowance_ns(draws, budget_ns);
+    ahead_spent_ns = 0;
+    std::lock_guard lk(ahead_mu);
+    ahead_n.stale += ahead_queue.trim(ahead_now_ms());
+    static uint64_t frames = 0;
+    if (++frames % 300) return;
+    if (ahead_dirty) {
+        ahead_dirty = false;
+        if (!texture_ahead::save_drawn(cache_path("hookshot_textures_drawn.bin").c_str(), ahead_drawn)) {
+            static bool told = false;
+            if (!told) told = true, logf("vk: textures ahead: the list of textures drawn could not be written (cache/)");
+        }
+    }
+    static AheadCounts last{};
+    if (std::memcmp(&last, &ahead_n, sizeof last)) {
+        logf("vk: textures ahead: %lld prepared so far (%.0f MB of images, %.0f ms); a draw's first uploads: %lld new to the list, "
+             "%lld known and not prepared in time, %lld drawn too long after they were made to be kept; made and never drawn "
+             "before %lld, let go for their age %lld; %zu waiting, %zu in the list%s",
+             (long long)ahead_n.prepared, ahead_n.bytes / 1048576.0, ahead_n.ns / 1e6, (long long)ahead_n.learnt,
+             (long long)ahead_n.late, (long long)ahead_n.not_soon, (long long)ahead_n.not_drawn_before, (long long)ahead_n.stale,
+             ahead_queue.waiting(),
+             ahead_drawn.size(), ahead_n.no_room ? "; the cache had no room at times" : "");
+        last = ahead_n;
+    }
+}
+void texture_ahead_run() {
+    if (!ahead_on() || ahead_spent_ns >= ahead_allow_ns) return;
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto spent = [&] {
+        return ahead_spent_ns +
+               std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+    };
+    const int64_t now = ahead_now_ms();
+    ahead_running = true;
+    while (spent() < ahead_allow_ns) {
+        nvn_tex t;
+        bool known = false;
+        {
+            std::lock_guard lk(ahead_mu);
+            ahead_load();
+            if (!texture_ahead::room(total_bytes, ahead_budget_bytes)) {
+                ahead_n.no_room++;
+                break;
+            }
+            if (!ahead_queue.take(now, &t)) break;
+            known = ahead_drawn.count(ahead_signature(t.d, t.L, t.gpu)) != 0;
+            if (!known) ahead_n.not_drawn_before++;
+        }
+        if (!known) continue;
+        // (as a draw's first use of it would: made, and uploaded from the game's memory, into this recording's uploads)
+        const uint64_t bytes0 = total_bytes;
+        if (texture_get(&t, true)) {
+            std::lock_guard lk(ahead_mu);
+            ahead_n.prepared++, ahead_n.bytes += (int64_t)(total_bytes - std::min(total_bytes, bytes0));
+        }
+    }
+    ahead_running = false;
+    const int64_t ns = spent() - ahead_spent_ns;
+    ahead_spent_ns += ns;
+    std::lock_guard lk(ahead_mu);
+    ahead_n.ns += ns;
+}
 Texture* texture_touch(Texture* tex, bool for_sampling) {
     tex->last_frame = frame_no;
     tex->last_value = rec_value;
@@ -4731,6 +4882,10 @@ namespace {
 constexpr uint64_t kFlushMax = 16ull << 20;   // (the small ones: render targets that size and more are not)
 std::mutex vw_mu;
 std::map<uint64_t, uint64_t> vw;   // (storage start -> end of the GPU-written textures of virtual pools that may be flushed)
+// (hookshot) and the 4 KB pages (GPU addresses below 512 GB) of every texture ever listed there, read without vw_mu: for
+// invalidate_quick (vk_replay.cpp), on the game's thread with its virtual core held. Marked under vw_mu as a texture is listed,
+// never taken off (page_marks.h: the order)
+PageMarks<(1ull << 39 >> 12), (1ull << 16)> vw_ever;
 bool flushable(const Texture& t) {
     if (!t.guest_size || t.guest_size > kFlushMax || t.astc || t.bc || t.sparse || t.skip ||
         t.samples != VK_SAMPLE_COUNT_1_BIT || t.aspect != VK_IMAGE_ASPECT_COLOR_BIT || t.bpb <= 0 || !t.image ||
@@ -4743,6 +4898,7 @@ bool flushable(const Texture& t) {
 void vw_note(Texture& t) {
     if (t.vw_listed || !flushable(t)) return;
     std::lock_guard lk(vw_mu);
+    vw_ever.mark(t.gpu >> 12, (t.gpu + t.guest_size - 1) >> 12);
     uint64_t& end = vw[t.gpu];
     end = std::max(end, t.gpu + t.guest_size);
     t.vw_listed = true;
@@ -5253,6 +5409,14 @@ bool texture_gpu_written_in(uint64_t lo, uint64_t size) {
     for (auto it = vw.lower_bound(lo > kFlushMax ? lo - kFlushMax : 0); it != vw.end() && it->first < hi; ++it)
         if (it->second > lo) return true;
     return false;
+}
+
+/// (hookshot) Whether a texture the GPU wrote was ever listed in [lo, lo + size), texture_gpu_written_in's list, without its lock
+/// (invalidate_quick): false only where texture_gpu_written_in is false. Ranges reaching past 512 GB are not followed: true
+bool texture_gpu_written_ever(uint64_t lo, uint64_t size) {
+    if (!size) return false;
+    if (lo >= (1ull << 39) || size > (1ull << 39) - lo) return true;
+    return vw_ever.any(lo >> 12, (lo + size - 1) >> 12);
 }
 
 int texture_flush_to_guest(uint64_t lo, uint64_t size) {
@@ -6334,6 +6498,7 @@ void texture_frame(uint64_t completed) {
     pool_pressure = !known ? 0 : (used > allowed / 100 * 97) ? 2 : (pressure > allowed / 10 * 9) ? 1 : 0;   // (target pool: halve at >90%, flush at >97%)
     compact.pressed = known && vram_compact::pressed(used, allowed);   // (hookshot, RX_VK_COMPACT: by the driver's own count)
     const uint64_t size_budget = budget;   // (the budget as a size, before the rules that take an excess off it: rule_target)
+    ahead_budget_bytes = size_budget;      // (and what textures prepared ahead stay under: texture_ahead_run)
     if (known && pressure > allowed / 10 * 9) {
         const uint64_t over = pressure - allowed / 10 * 9;
         const uint64_t damped_over = policy_rule::squeeze_damped(allowed) ? (over / 4) : over;   // (device_policy.h: under 8 GB allowed)
