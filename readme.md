@@ -356,6 +356,7 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | NVIDIA Reflex | Off, On, On + Boost (shown only on NVIDIA GPUs with `VK_NV_low_latency2`) | Off |
 | | AMD Anti-Lag 2 | Off, On (shown only on AMD GPUs with `VK_AMD_anti_lag`) | Off |
 | | Fullscreen | Off, On (the same as <kbd>F11</kbd>) | Off |
+| | Fullscreen monitor | Auto (current monitor), or a named connected screen. While windowed, chooses the next fullscreen destination; while fullscreen, moves the game. An unavailable choice is retained with a temporary fallback. | Auto (current monitor) |
 | | V-Sync | Auto, On, Off | Auto |
 | | Window scaling filter | Off, Catmull-Rom, Lanczos | Off |
 | | CRT filter | Off, Lottes aperture grille, Lottes consumer TV, Hyllian Fast, zfast CRT (changes at once; Native HDR bypasses it) | Off |

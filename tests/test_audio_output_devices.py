@@ -59,15 +59,18 @@ def check_host_callbacks(api, backend):
                 'audio_output_count': 'hos_audio_output_count', 'audio_output_info': 'hos_audio_output_info',
                 'audio_output_select': 'hos_audio_output_select', 'audio_output_state': 'hos_audio_output_state',
                 'mic_test': 'hos_mic_test', 'main_thread_times': 'host_main_thread_times',
-                'out_of_memory': 'host_out_of_memory'}
+                'out_of_memory': 'host_out_of_memory',
+                'monitor_count': 'hos_monitor_count', 'monitor_info': 'hos_monitor_info',
+                'monitor_select': 'hos_monitor_select'}
     assert len(fields) == len(table), 'Host interface/initializer lengths differ'
     # (the end of the table: playback, the microphone test (28), the frame trace's main_thread_times (29), the renderer's
-    # out_of_memory (30); take_text and
+    # out_of_memory (30), the fullscreen monitor's three (31); take_text and
     # options_path come earlier, the mods' and cheats' callbacks between them and playback)
     tail = ['audio_output_count', 'audio_output_info', 'audio_output_select', 'audio_output_state', 'mic_test',
-            'main_thread_times', 'out_of_memory']
-    assert fields[-len(tail):] == tail, 'Mic test must follow playback (version 29 appends main_thread_times, 30 out_of_memory)'
-    assert fields.index('take_text') < fields.index('options_path') < fields.index('audio_output_count'),         'take_text and options_path must come before playback'
+            'main_thread_times', 'out_of_memory', 'monitor_count', 'monitor_info', 'monitor_select']
+    assert fields[-len(tail):] == tail, 'Mic test must follow playback (29 appends main_thread_times, 30 out_of_memory, 31 the monitor callbacks)'
+    assert fields.index('take_text') < fields.index('options_path') < fields.index('audio_output_count'), \
+        'take_text and options_path must come before playback'
     for field, value in expected.items():
         assert table[fields.index(field)] == value, 'Wrong host callback slot: ' + field
 
@@ -78,7 +81,7 @@ PARSER = r'''
 #include <stddef.h>
 #include "audio_output_devices.h"
 #include "gpu/vk/vk_api.h"
-_Static_assert(MKWVK_API_VERSION >= 28, "microphone test needs a new ABI version");
+_Static_assert(MKWVK_API_VERSION >= 31, "fullscreen monitor selection extends the out-of-memory ABI");
 _Static_assert(offsetof(MkwVkHost, options_path) > offsetof(MkwVkHost, take_text), "options_path after take_text");
 _Static_assert(offsetof(MkwVkHost, audio_output_count) > offsetof(MkwVkHost, options_path),
                "playback after options_path (the mods' and cheats' callbacks between them)");
@@ -88,6 +91,12 @@ _Static_assert(offsetof(MkwVkHost, main_thread_times) == offsetof(MkwVkHost, mic
                "append the main thread's times after the microphone test without shifting earlier callbacks");
 _Static_assert(offsetof(MkwVkHost, out_of_memory) == offsetof(MkwVkHost, main_thread_times) + sizeof(((MkwVkHost *)0)->main_thread_times),
                "append the renderer's out-of-memory stop after the main thread's times without shifting earlier callbacks");
+_Static_assert(offsetof(MkwVkHost, monitor_count) == offsetof(MkwVkHost, out_of_memory) + sizeof(((MkwVkHost *)0)->out_of_memory),
+               "append monitor selection without shifting the out-of-memory callback");
+_Static_assert(offsetof(MkwVkHost, monitor_info) == offsetof(MkwVkHost, monitor_count) + sizeof(((MkwVkHost *)0)->monitor_count),
+               "monitor info slot follows monitor count");
+_Static_assert(offsetof(MkwVkHost, monitor_select) == offsetof(MkwVkHost, monitor_info) + sizeof(((MkwVkHost *)0)->monitor_info),
+               "monitor select slot follows monitor info");
 int main(void) {
     char id[HOS_OUTPUT_ID_CAP] = "old";
     assert(audio_output_copy_id(id, sizeof id, "opaque=id") && !strcmp(id, "opaque=id"));
