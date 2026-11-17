@@ -140,6 +140,7 @@ void hos_control_log(const char *line) { (void)line; }
 void hos_log_flush(void) {}
 static void log_flush(void) {}
 void hos_backtrace(void) {}
+void hl_trace_on_crash(Ctx *c, uint64_t why) { (void)c, (void)why; }   /* (HL_TRACE: off here) */
 void hos_hostcall_stats(void) {}
 /* HOS_LOG */
 /* HOS_FATAL */
@@ -148,6 +149,10 @@ void rx_close_asked(void) {}
 /* CONTROL_QUIT */
 static int relaunch_asked = 1;
 static void relaunch(void) { assert(marker == NO_FILE && !ready); }
+/* (hos_window_closed_exit first waits for a file the game is writing: none here) */
+static int64_t hos_now_ns(void) { return 0; }
+static void hos_sleep_ns(int64_t ns) { (void)ns; }
+int hos_fs_writing(void) { return 0; }
 /* WINDOW_EXIT */
 static int game_argc;
 static char **game_argv;

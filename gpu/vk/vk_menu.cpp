@@ -4141,8 +4141,9 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
 // report_default has the Aspect ratio's, the Game language's and Frame generation by's.
 // The DLSS model's depends on RX_VK_DLSS_PRESET, and on the card's memory (CNN (E) under 7 GB).
 bool report_default_depends_on_pc(const Row& r) {
+    // (Shadow resolution too: a preset puts it back to Auto, the size for this PC's memory, menu_shadow_res)
     if (r.value == &opts.sharpness || r.value == &opts.pace || r.value == &opts.realtime ||
-        r.value == &opts.handheld)
+        r.value == &opts.handheld || r.value == &opts.shadow_res)
         return opts.preset != 0 || auto_for != 0;
     return r.value == &opts.output_res || r.value == &opts.resolution || r.value == &opts.dlss ||
            r.value == &opts.preset || r.value == &opts.upscale ||

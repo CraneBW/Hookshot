@@ -462,7 +462,7 @@ static int cmp_text(const void *a, const void *b) { return strcmp(*(char *const 
 /* The game's switches and what loads code into it, NAME=VALUE, a value only as hos_crash_value_shown allows (the menu's
    switches()) */
 static void put_switches(Buf *b) {
-    static const char *const prefixes[] = {"RX_", "HOS_", "HOOKSHOT_", "EDEN_", "NVN_", "SDL_"};
+    static const char *const prefixes[] = {"RX_", "HOS_", "HL_", "HOOKSHOT_", "EDEN_", "NVN_", "SDL_"};
     static const char *const hooks[] = {"VK_INSTANCE_LAYERS", "VK_LOADER_LAYERS_ENABLE", "VK_DRIVER_FILES", "VK_ICD_FILENAMES",
                                         "ENABLE_VKBASALT", "MANGOHUD", "LD_PRELOAD"};
     char *lines[512];
