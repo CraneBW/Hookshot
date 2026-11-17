@@ -24,6 +24,7 @@ struct Stage {
     bool subgroups = true;   // its SPIR-V asks for a subgroup capability (spirv_uses_subgroups); true when not known
     Shader::Info info;
     std::vector<uint8_t> c1;   // its c1 constants (the code area's tail)
+    uint32_t spirv_words = 0;   // (its SPIR-V's size in 32-bit words, for a program read back from the program cache; 0: not known)
     // (hookshot) its SPIR-V's OpPhi instructions (fallback_size_policy.h), noted where the SPIR-V is written to or read from the
     // program cache (vk_progcache.cpp), which every translated program passes. Not in vk_shader.cpp, whose bytes are part of
     // the translator's stamp: a change there translates every player's programs again

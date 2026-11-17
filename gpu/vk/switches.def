@@ -766,6 +766,8 @@ SW(RX_VK_PRECOMPILE_STALL_S, tune, int, "30 seconds", "Seconds without progress 
 SW(RX_VK_PRECOMPILE_WAIT, attempt, bool, "off: the precompile queues its pipelines and the game starts", "=1 waits at the start until they are built.")
 SW(RX_VK_PRECOPY_KICK, attempt, enum, "0: the capture pre-copy runs on its timer", "With RX_VK_CAPTURE_PRECOPY=1: 1 copies once a kick from the host as the main thread leaves its end-of-frame wait; 2 one round a frame kicked by the renderer.")
 SW(RX_VK_PRECOPY_US, tune, int, "250 us (50 to 100000)", "The capture pre-copy thread's period.")
+SW(RX_VK_PREDICT_MAX_KWORDS, tune, int, "300: a program over 300k words of SPIR-V is left out of the prediction", "Sets the size (thousands of SPIR-V words) over which the prediction leaves a program to the draw that needs it; 0 means no limit.")
+SW(RX_VK_PREDICT_RESERVE_MB, tune, int, "3072: the prediction stops with under 3 GB of the system's commit left", "Sets the system commit (MB) under which the prediction stops and leaves the rest to play; 0 means it does not look (Windows).")
 SW(RX_VK_PREDICT_S, tune, int, "0: no time budget, every predicted pipeline is built", "Stops building the predicted pipelines after this many seconds; the rest are built in play.")
 SW(RX_VK_PREDICT_STALL_S, tune, int, "30 seconds (0: wait for all)", "Seconds without progress after which the prediction leaves the last stragglers to play.")
 SW(RX_VK_PREFETCH_CHUNKS, attempt, int, "0: off", "How many neighbouring chunks on each side of an on-demand import are imported ahead in the background.")

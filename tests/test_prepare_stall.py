@@ -71,7 +71,14 @@ using VkPrimitiveTopology = int;
 struct NvnState { int unused = 0; };
 struct Targets {};
 struct PipeNote { uint64_t key, prog, variant; uint32_t topo; NvnState s; };
-struct Program { uint64_t key; uint64_t variant; bool mesh = false, fallback = false; };
+struct Stage { uint32_t spirv_words = 0; };
+struct Program { uint64_t key; uint64_t variant; bool mesh = false, fallback = false; std::vector<Stage> stages; };
+namespace predictlimits {   // (gpu/vk/predict_limits.h: no limit here)
+constexpr unsigned long long kDefaultMaxKWords = 0, kDefaultReserveMB = 0;
+inline bool too_big(uint64_t, unsigned long long) { return false; }
+inline bool low_commit(unsigned long long, unsigned long long) { return false; }
+}
+unsigned long long commit_left_mb() { return ~0ull; }
 // (the prediction's own parts, beside the stall guard: its counts, the unfinished-run marker, the sample, the driver cache's size,
 // the pool's size, and the duplicate check's key, one per note here (each note its own pipeline))
 struct PredictCounts { size_t vertex_types = 0, output_types = 0, variants_unfit = 0, notes_unfit = 0, refit = 0; };
@@ -128,7 +135,7 @@ std::vector<std::unique_ptr<PipeNote>> predict_pipelines(const std::vector<std::
     return v;
 }
 void program_cache_borrow(uint64_t key, const std::function<void(Program&)>& fn) {
-    Program p{key, 0};
+    Program p{key, 0, false, false, {}};
     fn(p);
 }
 void ensure_layout(Program&) {}

@@ -65,6 +65,7 @@
 #include "vk_texture.h"
 #include "vk_ledger.h"   // (RX_VK_LEDGER)
 #include "ubo_memo.h"    // (HL_UBO_MEMO)
+#include "predict_limits.h"   // (what the prediction of pipelines holds itself to)
 #include "movie_upscale_policy.h"
 #include "skip_code.h"
 #include "driver_faults.h"
@@ -11735,6 +11736,21 @@ bool compile_all() {
     }();
     return all;
 }
+namespace {
+/// The commit the system still has to give (MB): its limit, RAM and the page file, less what every process has committed. A C++
+/// allocation that finds none is refused ("0 MB of commit left"): the game's own, and any other program's. The driver's compiles
+/// ask the process's heaps for what they need, and a program of a million SPIR-V words took gigabytes of them. Windows' rule: on
+/// Linux the kernel overcommits, and this says there is no limit
+unsigned long long commit_left_mb() {
+#ifdef _WIN32
+    MEMORYSTATUSEX m{};
+    m.dwLength = sizeof m;
+    return GlobalMemoryStatusEx(&m) ? (unsigned long long)(m.ullAvailPageFile >> 20) : ~0ull;
+#else
+    return ~0ull;
+#endif
+}
+}  // namespace
 void predict_run(void (*progress)(size_t done, size_t total)) {
     const auto t0 = std::chrono::steady_clock::now();
     std::vector<std::unique_ptr<PipeNote>> notes = pipe_notes_read();
@@ -11775,7 +11791,8 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
         std::unordered_map<uint64_t, std::vector<const PipeNote*>> by_program;
         std::vector<uint64_t> keys;
         std::atomic<size_t> next{0}, done{0}, made{0}, same{0};
-        std::atomic<bool> out_of_time{false}, abandoned{false}, graphics_begun{false};
+        std::atomic<bool> out_of_time{false}, out_of_memory{false}, abandoned{false}, graphics_begun{false};
+        std::atomic<size_t> too_big{0}, too_big_pipelines{0};   // (programs left out for their size, and their pipelines)
         std::mutex first_graphics, keys_mu;
         std::vector<uint64_t> made_keys;   // (each made pipeline's key, as play looks it up: predicted_keys_write)
     };
@@ -11794,6 +11811,17 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     // priority. Now the bar counts them from the start (PrepareBar), closing the window stops them (prepare_stopped, kept for the
     // next start), and they take every CPU: nothing else runs before the game
     static const int budget_s = getenv("RX_VK_PREDICT_S") ? atoi(getenv("RX_VK_PREDICT_S")) : 0;
+    // (The pipelines are made for the driver's own cache and let go. On an RTX 3050 with 32 GB, a program of 502k SPIR-V words and one
+    // of 1014k (the game's two largest) each took the driver's compiler over three minutes and, still growing past 11 GB of the
+    // process's commit, all the PC had: C++ allocations were refused at the commit limit, the compile failed and the memory stayed
+    // taken (start-up 532 s, 36-39 GB at its peak; without them 246 s and 4.3 GB). The others, up to 133k words, take 25 s and a few
+    // hundred MB. Over RX_VK_PREDICT_MAX_KWORDS (300: 300k words; 0: no limit) a program is left to the draw that needs it, as it was
+    // before the prediction; and the prediction stops, the rest left to play, when the system has less than
+    // RX_VK_PREDICT_RESERVE_MB (3072) of commit left: predict_limits.h)
+    static const unsigned long long max_kwords = getenv("RX_VK_PREDICT_MAX_KWORDS") ? strtoull(getenv("RX_VK_PREDICT_MAX_KWORDS"), nullptr, 10)
+                                                                                    : predictlimits::kDefaultMaxKWords;
+    static const unsigned long long reserve_mb = getenv("RX_VK_PREDICT_RESERVE_MB") ? strtoull(getenv("RX_VK_PREDICT_RESERVE_MB"), nullptr, 10)
+                                                                                    : predictlimits::kDefaultReserveMB;
     const auto worker = [pre, t0] {
         ub_thread_off();   // (a background thread: see ub_thread_off)
         driver_cache_only = true;
@@ -11801,6 +11829,12 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
             if (prepare_stopped() || pre->abandoned.load()) return;
             if (budget_s > 0 && std::chrono::steady_clock::now() - t0 > std::chrono::seconds(budget_s)) {
                 pre->out_of_time = true;
+                return;
+            }
+            if (predictlimits::low_commit(commit_left_mb(), reserve_mb)) {
+                if (!pre->out_of_memory.exchange(true))
+                    logf("vk: predicted pipelines: %llu MB of commit left (RX_VK_PREDICT_RESERVE_MB %llu): the prediction stops here, "
+                         "the builds in hand are let finish, the rest are built in play", commit_left_mb(), reserve_mb);
                 return;
             }
             const size_t i = pre->next++;
@@ -11815,6 +11849,15 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
             std::vector<uint64_t> made_keys;
             program_cache_borrow(pre->keys[i], [&](Program& p) {
                 ensure_layout(p);
+                uint64_t words = 0;
+                for (const Stage& st : p.stages) words += st.spirv_words;
+                if (predictlimits::too_big(words, max_kwords)) {   // (counted done below, with the notes no variant answered)
+                    pre->too_big++, pre->too_big_pipelines += list.size();
+                    logf("vk: predicted pipelines: program %016llx left out, %llu k words of SPIR-V (RX_VK_PREDICT_MAX_KWORDS %llu): its "
+                         "driver compile takes minutes and gigabytes; a draw that needs it builds it", (unsigned long long)p.key,
+                         (unsigned long long)(words / 1000), max_kwords);
+                    return;
+                }
                 for (const PipeNote* n : list)
                     if (n->variant == p.variant && !pre->abandoned.load()) {   // (gone on without it: no more of its list)
                         // (a mesh fallback program's own topology: its donor's may be an ordinary draw's, pipeline_topology)
@@ -11864,7 +11907,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     bool gone_on = false;
     auto log_at = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     const auto built0 = std::chrono::steady_clock::now();
-    while (next.load() < pre->keys.size() + threads.size() && !prepare_stopped() && !out_of_time.load()) {
+    while (next.load() < pre->keys.size() + threads.size() && !prepare_stopped() && !out_of_time.load() && !pre->out_of_memory.load()) {
         if (progress) progress(done.load(), predicted_n);
         prepare_progress_log("predicted pipelines", done.load(), predicted_n, built0, log_at);
         Sleep(100);
@@ -11895,8 +11938,13 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
          left_out.variants_unfit, left_out.notes_unfit, left_out.refit,
          gone_on ? " (gone on without the pipelines the driver did not finish)"
          : out_of_time.load() ? " (the time budget, RX_VK_PREDICT_S, ran out: the rest are built in play)"
+         : pre->out_of_memory.load() ? " (the system's commit ran low, RX_VK_PREDICT_RESERVE_MB: the rest are built in play)"
          : prepare_stopped() ? " (stopped: the window was closed; the driver keeps what was built)" : "");
-    if (!prepare_stopped() && !out_of_time.load() && !gone_on) {
+    if (pre->too_big.load())
+        logf("vk: predicted pipelines: %zu programs (%zu pipelines) left out for their size: built when a draw needs them", pre->too_big.load(),
+             pre->too_big_pipelines.load());
+    const bool cut = out_of_time.load() || pre->out_of_memory.load();   // (a budget ran out: what was built is not the whole)
+    if (!prepare_stopped() && !cut && !gone_on) {
         predicted_sample_write(pre->predicted);
         predicted_keys_write(pre->made_keys);
     }

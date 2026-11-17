@@ -534,6 +534,7 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
                 break;
             }
             st.module = make_module(spirv, key, nullptr);
+            st.spirv_words = (uint32_t)spirv.size();   // (the prediction's size limit, predict_limits.h)
             st.phis = fallback_size::spirv_phis(spirv.data(), spirv.size());
             st.subgroups = spirv_uses_subgroups(spirv);
             ok = ok && st.module;
