@@ -185,7 +185,8 @@ def check_fsr3():
         sys.exit("FAIL: FSR 3.1 on the chain does not take HDR colour while the game presents PQ (or keeps its history when that changes)")
     if "ai.reset = f.reset || c.hdr_changed;" not in function(fsr3, "bool chain_evaluate("):
         sys.exit("FAIL: FSR 3.1 on the chain keeps its history across a change of colour encoding")
-    if ".hdr = chain_hdr," not in fsr3 or "bool chain_hdr() { return chain_state().hdr; }" not in fsr3:
+    # (chain_hdr answers the chain's own state, and also upstream's linear path while the scene's tone mapping runs)
+    if ".hdr = chain_hdr," not in fsr3 or "return chain_state().hdr" not in function(fsr3, "bool chain_hdr("):
         sys.exit("FAIL: vk_fsr3.cpp's chain engine does not tell the chain it takes HDR colour")
     if "-DFFX_FSR3UPSCALER_OPTION_HDR_COLOR_INPUT=1" not in (ROOT / "scripts" / "fsr3_shaders.py").read_text(encoding="utf-8"):
         sys.exit("FAIL: FSR 3.1's passes are not built for HDR colour")

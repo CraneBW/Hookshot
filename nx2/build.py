@@ -261,7 +261,8 @@ def link_program(cmd):
     except OSError:
         return None
     for line in reversed((r.stderr or "").splitlines()):
-        m = re.match(r'^\s*"([^"]+)"', line)
+        # (a command line starts with a space: clang quotes its words, GCC leaves the program's unquoted, collect2's path)
+        m = re.match(r'^\s*"([^"]+)"', line) or re.match(r'^\s+(/\S+|[A-Za-z]:[\\/]\S+)', line)
         if m:   # (Windows: clang names ld.lld without its .exe)
             return next((p for p in (m.group(1), m.group(1) + ".exe", shutil.which(m.group(1))) if p and os.path.isfile(p)), None)
     return None

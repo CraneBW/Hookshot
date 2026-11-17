@@ -263,6 +263,7 @@ int pcache_play_save_gate(int, std::uint64_t, std::uint64_t, std::int64_t) { ret
 
 std::string cache_path(const char*) { return pcache_dir; }
 uint64_t program_cache_stamp() { return 17; }
+void cache_sets_switch() {}   // (vk_progcache.cpp: another GPU's caches set aside first, gpu_sets.h; none here)
 namespace pcache_stamp {
 struct Dropped { size_t files; uint64_t bytes; };
 Dropped check(const std::string&, uint64_t) { return {0, 0}; }

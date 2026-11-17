@@ -701,7 +701,7 @@ inline int64_t prof_now() {
         const uint64_t c0 = HOOKSHOT_RDTSC();
         QueryPerformanceCounter(&a);
         volatile int sink = 0;
-        for (int i = 0; i < 400000; i++) { HOOKSHOT_PAUSE(); sink += 1; }
+        for (int i = 0; i < 400000; i++) { HOOKSHOT_PAUSE(); sink = sink + 1; }   // (not +=: C++20 deprecates it on a volatile
         const uint64_t c1 = HOOKSHOT_RDTSC();
         QueryPerformanceCounter(&b);
         const int64_t dns = perf_ticks_to_ns(b.QuadPart - a.QuadPart, f.QuadPart);
