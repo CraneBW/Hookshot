@@ -45,6 +45,10 @@ static_assert(mkwvk::kQueueGraphics == VK_QUEUE_GRAPHICS_BIT && mkwvk::kQueueCom
 #ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "hookshot_env.h"
 #endif
+#include "switches.h"   // (the switches' table: what the run has set, said at the start)
+#ifndef _WIN32
+extern char** environ;
+#endif
 
 namespace vkx {
 #define VKX_DEFINE(f) PFN_##f f;
@@ -1792,8 +1796,22 @@ void auto_profile() {
     menu_auto_for_gpu(p, hw);
 }
 
+/// The process's environment, for switches::report (start(): its own #ifdef block stays the Linux start's alone)
+static const char* const* process_environment() {
+#ifdef _WIN32
+    return _environ;
+#else
+    return environ;
+#endif
+}
+
 int start(void* hwnd) {
     main_window = (HWND)hwnd;
+    // (which switches the run has set, and any RX_ name set that is none: switches.h)
+    {
+        const char* const* env = process_environment();
+        switches::report(env, [](const char* line) { logf("%s", line); });
+    }
     auto_profile();   // (the Quality preset Auto (this PC): before the game first asks its mode, which reads the options)
     if (!hwnd) {   // (HOS_HEADLESS: no window; the frames are rendered all the same, RX_VK_SHOTS writes them out)
         dev.offscreen = true;
