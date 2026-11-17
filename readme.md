@@ -540,7 +540,8 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
   **Sharpness** also work when Frame generation is Off.
 - **Anisotropic filtering** keeps textures sharp on surfaces seen at a slant: the paths and floors ahead of Link. The game
   asks for 1x or 2x, which at a PC's resolutions smears the ground a few metres off; 16x costs little on most cards, and
-  Game's is the console's own. `RX_VK_ANISO=<n>` sets it for one run (0: the game's).
+  Game's is the console's own. `RX_VK_ANISO=<n>` sets it for one run (0: the game's). It is for the game's textures:
+  a picture the game drew itself and reads back (one level, no mipmaps) keeps the game's own anisotropy.
 - **Foliage distance**, **Object detail**, **Grass density**, **Shadow distance**, **Contact shadows** and **Base quality**
   change how far the game draws its small plants, detailed models, grass and shadows, live. They are hotoni's Graphics-Menu
   mod for Lichii (its exefs part, which Hookshot cannot load: see Mods) written again for Hookshot. Higher distances cost
