@@ -37,6 +37,7 @@
 #include "hookshot_env.h"
 #include "fallback_loaded.h"
 #include "fallback_size_policy.h"
+#include "gpu_sets.h"
 #include "vk_paths.h"
 #include "vk_internal.h"
 #include "vk_progcache.h"
@@ -71,6 +72,31 @@ uint64_t program_cache_stamp() {
         return h;
     }();
     return stamp;
+}
+
+void cache_sets_switch() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        if (env_on("RX_VK_NO_GPU_SETS")) return;
+        uint64_t build = translator_build_stamp();
+        const uint32_t format = kProgramCacheFormat;
+        for (size_t i = 0; i < sizeof format; i++) build = (build ^ ((const uint8_t*)&format)[i]) * 1099511628211ull;
+        const std::string dir = cache_path("");   // (the game folder's cache/, with its separator: vk_paths.h)
+        const gpu_sets::Result r = gpu_sets::switch_to(dir, build, program_cache_stamp(), dev.props.deviceName);
+        using gpu_sets::What;
+        if (r.aside)
+            logf("vk: the shader caches: those of the GPU used before (%016llx) kept aside in cache/%s%016llx: %zu files, %llu MB",
+                 (unsigned long long)r.from, gpu_sets::kAsidePrefix, (unsigned long long)r.from, r.aside,
+                 (unsigned long long)(r.aside_bytes >> 20));
+        if (r.what == What::kRestored)
+            logf("vk: the shader caches: %s's taken back from aside: %zu files, %llu MB", dev.props.deviceName, r.back,
+                 (unsigned long long)(r.back_bytes >> 20));
+        else if (r.what == What::kSetAside)
+            logf("vk: the shader caches: %s's start here (none kept aside for it)", dev.props.deviceName);
+        if (r.dropped_sets)
+            logf("vk: the shader caches: %zu sets aside let go (another build's, or more than %zu: %llu MB)", r.dropped_sets,
+                 gpu_sets::kKeep, (unsigned long long)(r.dropped_bytes >> 20));
+    });
 }
 
 // ---- (hookshot) The program cache, hookshot_programs.bin beside the executable: what translation made, by the key of the
@@ -127,6 +153,7 @@ void idx_write(const std::string& path, uint64_t stamp, const std::vector<std::p
 
 
 void disk_init() {
+    cache_sets_switch();   // (another GPU's caches aside first: gpu_sets.h)
     static std::once_flag once;
     std::call_once(once, [] {
         if (env_on("RX_VK_NO_PROGRAM_CACHE")) return;

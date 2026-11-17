@@ -1645,10 +1645,31 @@ void prepare_with_screen() {
     prep_running.store(false);
     logf("vk: start-up: the shaders took %.1f s", std::chrono::duration<double>(clock::now() - t0).count());
 }
+// (hookshot) An integrated GPU prepares nothing before the game: each shader and pipeline is made when it is first drawn, as with
+// RX_VK_PRECOMPILE=0. Before the game, a first start on a desktop Ryzen's Radeon (2 compute units) made 160 shaders a minute of
+// 38,809 and then the 32,713 noted pipelines at about one a second: four hours and more before the title screen, where the same
+// start with this rule played within two minutes (Kokiri Forest, 2026-11-16; the first minutes slower while the area's shaders
+// are made). A Steam Deck keeps the preparation before the game (25-30 minutes on its APU, set up for it). RX_VK_PREPARE_IGPU=1:
+// an integrated GPU prepares before the game too, as before
+bool igpu_prepares_in_play() {
+    static const bool on = [] {
+        const VkPhysicalDeviceProperties& p = dev.props;
+        if (p.deviceType != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU || env_on("RX_VK_PREPARE_IGPU")) return false;
+        const char* deck = getenv("SteamDeck");
+        return !((deck && atoi(deck) == 1) || strstr(p.deviceName, "Custom GPU 0405") || strstr(p.deviceName, "Custom GPU 0932"));
+    }();
+    return on;
+}
 bool started_up() {
     if (const char* e = getenv("RX_VK_START_DELAY")) Sleep((DWORD)atoi(e) * 1000);   // (diagnosis: a long start, as the first one is)
     if (!replay_start()) return false;
     driver_cache_log("at the start");
+    if (prepare_only() && igpu_prepares_in_play()) {   // (the Builder's step: nothing before the game on this GPU)
+        logf("vk: preparation: an integrated GPU (%s): its shaders are made in play (RX_VK_PREPARE_IGPU=1: here)", dev.props.deviceName);
+        printf("@@stage shaders Preparing shaders\n@@progress 1.000\n");
+        fflush(stdout);
+        return true;
+    }
     if (prepare_only()) {
         // (three parts: the programs, the pipelines the notes predict, then those they name, on one bar whose total has all three
         // from the start: PrepareBar. The fixed shares it had (70%, 20%, 10%) kept the predicted pipelines' minutes in a fifth)
@@ -1698,6 +1719,12 @@ bool started_up() {
                  prepare_left_workers() ? "pipelines left in the driver" : "the driver faulted");
             prepare_end(0);
         }
+        return true;
+    }
+    if (igpu_prepares_in_play() && precompile_wanted()) {
+        logf("vk: an integrated GPU (%s): the shaders and pipelines are made when each is first drawn, none before the game "
+             "(RX_VK_PREPARE_IGPU=1: before it)", dev.props.deviceName);
+        precompile_index_only();
         return true;
     }
     if (FILE* f = fopen(skipped_path().c_str(), "rb")) {

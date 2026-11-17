@@ -1199,6 +1199,7 @@ bool pcache_load_off() {
 /// 388) With the file not read (pcache_load_off) they go too: a start that reads it would drop them, and kept they were 1.2 GB
 /// of disk after every update that changed the translator
 bool pcache_drop_stale() {
+    cache_sets_switch();   // (another GPU's caches aside first, this one's back: gpu_sets.h)
     static const bool dropped = [] {
         static const bool by_stamp = [] { const char* e = getenv("RX_VK_PCACHE_STAMP"); return !e || !env_value_off(e); }();
         if (!by_stamp) return false;
@@ -1657,7 +1658,7 @@ std::string pipe_notes_path() { return cache_path("hookshot_pipelines.bin"); }
 /// (hookshot) hookshot_pipelines.bin.built: a precompile that got to its end built every note there was into the pipeline cache
 /// (its stamp, and how many). RX_VK_LOAD=create loads pipelines from the caches alone, and only once this says they are there.
 /// What adds notes without building them (state_list_prepare) removes it; a note play adds was built by play, into its cache
-std::string precompile_built_path() { return pipe_notes_path() + ".built"; }
+std::string precompile_built_path() { return cache_sets_switch(), pipe_notes_path() + ".built"; }   // (gpu_sets.h first)
 void precompile_built_write(size_t notes) {
     // (not by a --prepare-shaders run: on NVIDIA the pipeline cache that process writes does not answer the play process
     // ("kept 0 of 32"), so the first play after a preparation found none of the noted pipelines in a cache and compiled them
@@ -10376,7 +10377,7 @@ std::atomic<bool> prepare_saving_now{false};   // (precompile_warm: the pipeline
 void prepare_stop() { prepare_halt.store(true); }
 bool prepare_stopped() { return prepare_halt.load(std::memory_order_relaxed); }
 bool prepare_saving() { return prepare_saving_now.load(std::memory_order_relaxed); }
-std::string prepared_path() { return cache_path("hookshot_prepared.bin"); }
+std::string prepared_path() { return cache_sets_switch(), cache_path("hookshot_prepared.bin"); }   // (gpu_sets.h first)
 // (hookshot) What the last prepare here was made for, in hookshot_prepared.bin: the translator (program_cache_stamp), and since the
 // seed grows apart from it (4221050d: networks, the movie upscaler, the particle sets, 19 compute programs more) the seed it went
 // through (hookshot_shaders.bin), by a hash of its contents. By the translator alone, a folder prepared before such an update never

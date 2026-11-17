@@ -1374,6 +1374,27 @@ void mesh_nocull(Shader::IR::Program& program, uint64_t code_key) {
 // the stamp, with a version of their own (kProgramCacheFormat): a change to how the cache is read or scheduled no longer throws
 // every player's translated programs away
 } // namespace
+/// (hookshot) The part of translator_stamp that is the build alone, the same on every GPU: the translator and the C++ library the
+/// records are laid out by. gpu_sets.h keeps another GPU's caches aside only while this is the same (another build's are no use)
+uint64_t translator_build_stamp() {
+    uint64_t h = 0xCBF29CE484222325ull;
+    const auto add = [&h](const void* d, size_t n) {
+        for (size_t i = 0; i < n; i++) h = (h ^ ((const uint8_t*)d)[i]) * 1099511628211ull;
+    };
+    const uint64_t translator = HOOKSHOT_SHADER_STAMP;
+    add(&translator, sizeof translator);
+    const uint32_t abi[] = {(uint32_t)sizeof(Shader::Info), (uint32_t)sizeof(Program), (uint32_t)sizeof(std::vector<uint32_t>),
+#if defined(_LIBCPP_VERSION)
+                            1u, (uint32_t)_LIBCPP_VERSION
+#elif defined(_MSVC_STL_VERSION)
+                            2u, (uint32_t)_MSVC_STL_VERSION
+#else
+                            3u, 0u
+#endif
+    };
+    add(abi, sizeof abi);
+    return h;
+}
 uint64_t translator_stamp() {
     uint64_t h = 0xCBF29CE484222325ull;
     const auto add = [&h](const void* d, size_t n) {
