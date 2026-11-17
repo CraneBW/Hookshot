@@ -533,7 +533,8 @@ def read_stamp(path):
     stamp that cannot be read is "", which no unpack's stamp equals"""
     with open(path, "rb") as f:
         raw = f.read()
-    for encoding in ("utf-8", locale.getencoding()):   # (getencoding: the code page also in Python's UTF-8 mode)
+    # (getencoding: the code page also in Python's UTF-8 mode; Python 3.11 and later, getpreferredencoding before)
+    for encoding in ("utf-8", getattr(locale, "getencoding", locale.getpreferredencoding)()):
         try:
             return raw.decode(encoding)
         except UnicodeDecodeError:
