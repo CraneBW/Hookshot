@@ -2610,6 +2610,14 @@ int main(int argc, char **argv) {
        thread: its setenv is safe only while this is the one thread. HL_TRACE's dump threads, a constructor's, are the one
        exception, as for load_hookshot_env's own setenv) */
     submit_thread_at_start();
+    /* (hookshot) Mesa's Intel compiler (driconf shader_spilling_rate, read when the driver loads, ignored by the others; set
+       here, before any thread, not in the Vulkan back end, where a setenv is not safe): when a program does not fit its
+       registers it spills some and allocates the whole program again, rounds of one at first and then of (spilled so far /
+       rate). Held to 32 lanes an Iris Xe has 32 registers a lane, and the game's large compute programs spill thousands: at
+       Mesa 26.2's default abccf81b45c5eb50, which play dispatches, was not built after 20 minutes and 13 GB, at 2 in 32 s and
+       1.7 GB; 7a548525c239b91b 531 s and 7.6 GB, at 2 87 s and 4 GB (i9-13900H, 2026-11-14). The programs that do not spill
+       are built as before. A value the player set is kept */
+    setenv("shader_spilling_rate", "2", 0);
 #endif
     game_argc = argc, game_argv = argv;
     int prepare_shaders = 0;

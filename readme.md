@@ -468,7 +468,8 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
   runs (RTX 40 and newer, at 2x to 8x; AMD FSR 3.1 makes the frames it does not, such as Frame generation's Auto), and the
   default there; **FSR 3.1 FG**, AMD FSR 3.1's frame interpolation (any GPU it runs on, at every multiplier and at Auto,
   from the scene's depth and motion; below), the default everywhere else; **Built-in FG**, the renderer's own. **Frame pacing** shows frames at an even interval: less stutter, up to one frame of delay. It paces
-  the frames that frame generation shows, so it has no effect while Frame generation is Off.
+  the frames that frame generation shows, so it has no effect while Frame generation is Off. A fixed multiplier shows each
+  frame at its own time on the game's timeline whether Frame pacing is On or Off (with V-Sync On, one a refresh at most).
 - **Game frame rate cap** limits the frames the game renders. With a cap of 60 and Frame generation at 2x, the output
   can reach 120 FPS. Choose **Auto** in Frame generation to target the display's refresh rate instead of a fixed multiplier.
   **30 FPS** reduces rendering work for handhelds and slower PCs while keeping real-time game speed. It is the last option
@@ -1058,7 +1059,11 @@ the settings in the in-game menu.
 
 On **Minimum (4GB)**, when the driver reports a nonzero VRAM budget of at most 4.5 GiB, sampled ASTC textures use
 a 1024 dimension limit and an 8 MiB decoded-size threshold for leaving out their top mip levels. This lowers texture
-detail to reduce the working set. Other presets and larger or unknown budgets keep the 2048 / 64 MiB defaults;
+detail to reduce the working set. The same holds on Auto (this PC) at Minimum, and on Custom after either; Custom with
+no preset behind it (chosen on the Quality preset row, or an options file from before `memory_budget` existed) goes by
+what Auto picks for this PC, which is Minimum on every integrated GPU and on cards of 4.5 GB or less. Applying Low or a
+higher preset, or `RX_VK_LOW_VRAM_MIPS=0`, keeps full-size textures there. Other presets and larger or unknown budgets
+keep the 2048 / 64 MiB defaults;
 uncompressed render targets, depth images and the separate `RX_VK_TEX_MAX_MB` allocation limit keep their handling.
 The driver budget is sampled at the first texture creation and kept for the session. It is a heuristic, not a physical
 VRAM measurement: other applications can lower the budget even on a larger card.

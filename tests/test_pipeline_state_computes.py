@@ -273,7 +273,7 @@ def check_source(draw):
                  'return dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA ? "listed" : nullptr;'):
         if line not in which:
             raise SystemExit("precompile_computes_which: no `%s`" % line)
-    if draw.count('getenv("RX_VK_PRECOMPILE_COMPUTES")') != 1 or draw.count("computes_plan(precompile_computes_which(),") != 3:
+    if draw.count('getenv("RX_VK_PRECOMPILE_COMPUTES")') != 1 or draw.count("computes_plan(precompile_computes_which(),") != 4:   # (and Hookshot's precompile_index_only)
         raise SystemExit("a compute plan is made from something other than precompile_computes_which")
     if "computes_read()" in pre or "state_record_compute(" in pre or "state_record_compute(" in body_of("void state_list_prepare("):
         raise SystemExit("precompile_run reads the learned list past the plan, or the prepare writes compute records")

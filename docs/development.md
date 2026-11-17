@@ -897,6 +897,7 @@ The report keeps its per-program counts and adds `code` rows with the native sta
 recorded, including programs loaded from the cache. The four keys are vertex/mesh/compute, fragment, task and the
 header-only stage; zero means no key was available. Distinct tuples for the same program stay separate. These are
 recorded-query identities, not a complete draw replay or display timestamps. The queries can perturb frame timing.
+
 #### An all-O2 build
 
 The lifted chunks compile at `-O1` by default (`OPT` in `nx2/build.py`); the hot pieces at `-O2`. `HOOKSHOT_CHUNK_OPT=all`

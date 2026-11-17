@@ -209,6 +209,11 @@ def stamped_may_differ(paths, source):
     return source in paths or any(p.endswith(HEADERS) for p in paths)
 
 
+# (modules the build imports that are the lift's own: nx2/chunks.py, which an all-O2 build's chunk_parts cuts the lifted C
+# with, and the translator under it. A change to it shows in the objects the lift and the build make from it)
+LIFT_MODULES = {"chunks"}
+
+
 def build_scripts(root):
     """nx2/build.py and every Python module it imports (as make_game.lift_sources finds the lift's: a64-kit's folders, then nx2/),
     and nx2/make_game.py, which sets build.py's environment (the hot order, the profile)"""
@@ -230,6 +235,8 @@ def build_scripts(root):
             else:
                 continue
             for name in names:
+                if name.split(".")[0] in LIFT_MODULES:   # (the lift's: a change shows in the objects it makes)
+                    continue
                 for d in path:
                     m = os.path.join(d, name.split(".")[0] + ".py")
                     if os.path.isfile(m):
