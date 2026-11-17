@@ -15,6 +15,12 @@ struct Lang {
     const Entry* entries;
     int count;
 };
+/// A language and its table, the count its table's length (vk_menu_i18n.cpp table() loads that many: counts written by hand
+/// fell behind when texts were added, and the texts past them showed in English)
+template <int N>
+constexpr Lang lang(const char* code, const char* name, const Entry (&entries)[N]) {
+    return {code, name, entries, N};
+}
 inline constexpr Entry kpt_BR[] = {
     {" (Default fallback)", " (usando o padrão)"},
     {" (native)", " (nativa)"},
@@ -7913,19 +7919,19 @@ inline constexpr Entry kzh_Hant[] = {
 };
 inline constexpr Lang kLangs[] = {
     {"en", "English", nullptr, 0},
-    {"pt-BR", "Português (Brasil)", kpt_BR, 599},
-    {"es-419", "Español (Latinoamérica)", kes_419, 604},
-    {"es", "Español (España)", kes, 606},
-    {"fr", "Français", kfr, 618},
-    {"de", "Deutsch", kde, 596},
-    {"it", "Italiano", kit, 600},
-    {"nl", "Nederlands", knl, 591},
-    {"pl", "Polski", kpl, 600},
-    {"ru", "Русский", kru, 612},
-    {"ja", "日本語", kja, 622},
-    {"ko", "한국어", kko, 610},
-    {"zh-Hans", "简体中文", kzh_Hans, 606},
-    {"zh-Hant", "繁體中文", kzh_Hant, 606},
+    lang("pt-BR", "Português (Brasil)", kpt_BR),
+    lang("es-419", "Español (Latinoamérica)", kes_419),
+    lang("es", "Español (España)", kes),
+    lang("fr", "Français", kfr),
+    lang("de", "Deutsch", kde),
+    lang("it", "Italiano", kit),
+    lang("nl", "Nederlands", knl),
+    lang("pl", "Polski", kpl),
+    lang("ru", "Русский", kru),
+    lang("ja", "日本語", kja),
+    lang("ko", "한국어", kko),
+    lang("zh-Hans", "简体中文", kzh_Hans),
+    lang("zh-Hant", "繁體中文", kzh_Hant),
 };
 inline constexpr int kLangCount = sizeof kLangs / sizeof kLangs[0];
 }  // namespace mkwvk::menu_i18n

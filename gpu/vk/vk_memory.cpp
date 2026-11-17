@@ -5622,7 +5622,13 @@ void mirror_sync(Pool& p) {
     }
     if (!coalesced) {
         for (const auto& [buf, rs] : cap_runs) {
-            if (msync_pass_on() && msync_pass_add(p, buf, rs)) {
+            if (msync_pass_on() && msync_pass_add(p, buf, rs)) {   // (as the pass's chunks: dispatched below, or after the presync's loop)
+                if (p.shadow) {   // (RX_VK_PASS_TIMING: a span of their own; the copies' span below times both)
+                    GprofSpan gp(upload_command_buffer(), "msync shadow copies (CPU pages from a capture -> shadow)");
+                    gp.items = (int)rs.size();
+                    for (const VkBufferCopy& r : rs) gp.bytes += r.size;
+                    shadow_sync_copy(upload_command_buffer(), buf, p, rs);   // (the shadow as the mirror, as below: the pass writes the mirror only)
+                }
                 for (const VkBufferCopy& r : rs) st_sync_bytes += (int64_t)r.size;
                 st_sync_copies += (int64_t)rs.size();
                 continue;
@@ -7346,6 +7352,7 @@ void sparse_grow_all(const std::vector<Pool*>& pools) {
     }
     VkCommandBuffer up = upload_command_buffer();
     full_barrier(up, "barrier (sparse fill: after the work before it wrote guest memory)");
+    bool filled = false;
     for (Got& g : gots) {
         Pool& p = *g.p;
         const uint64_t b = sparse_block(p), n = p.hi - p.lo;
@@ -7370,6 +7377,7 @@ void sparse_grow_all(const std::vector<Pool*>& pools) {
             }
         }
         if (!fill.empty()) {
+            filled = true;
             {
                 GprofSpan gp(up, "sparse fill (guest memory -> a mirror's new blocks)");
                 for (const VkBufferCopy& c : fill) gp.bytes += c.size;
@@ -7399,6 +7407,9 @@ void sparse_grow_all(const std::vector<Pool*>& pools) {
         mirror_bytes += g.blocks.size() * b;
         st_sparse_grown += (int64_t)g.blocks.size();
     }
+    // (RX_VK_MSYNC_PASS: a mirror sync after this in the uploads reads and writes these bytes in the pass's dispatch, which
+    // the copies' barrier above does not order)
+    if (filled && msync_pass_on()) full_barrier(up, "barrier (sparse fill: before the mirror syncs' pass)");
     pools_gen.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -7771,7 +7782,10 @@ bool wbd_pipe_ready() {
         }
     }
     const bool ok = wbd_pipe.pipe != VK_NULL_HANDLE;
-    logf("vk: write-back diff %s", ok ? "on (RX_VK_WB_DIFF=0: off)" : "off: its pipeline was not made");
+    // (hookshot: the mirror syncs' pass makes it too, RX_VK_MSYNC_PASS, with the diff itself off or on)
+    logf("vk: write-back diff %s", !ok           ? "off: its pipeline was not made"
+                                   : wb_diff_on() ? "on (RX_VK_WB_DIFF=0: off)"
+                                                  : "off (RX_VK_WB_DIFF=0); its pipeline made for the mirror syncs' pass");
     return ok;
 }
 void shadow_written_to(std::vector<uint32_t>& list, const uint32_t* pages, int64_t n) {
