@@ -3087,10 +3087,8 @@ bool occ_sync(VkCommandBuffer& cmd) {
     // Measured on an Intel iGPU only (no mirrors), so the default there; with mirrors (Arc discrete) the write goes to the
     // mirror, and it was not tested there: left as before. RX_VK_SPLIT_UBFLUSH=1: written at each part's end, as before,
     // =0: at the last part's on any GPU)
-    static const bool part_flush = [] {
-        const char* e = getenv("RX_VK_SPLIT_UBFLUSH");
-        return e ? env_on("RX_VK_SPLIT_UBFLUSH") : dev.props.vendorID != 0x8086 || pools_mirrored();
-    }();
+    // (device_policy.h split_ub_flush, as split_part's: not on Intel without mirrors; then the switch)
+    const bool part_flush = dev.policy.split_ub_flush;
     if (part_flush) flush_ub_updates(cmd);
     memory_end_submission(cmd, rec_cur->part);
     full_barrier(cmd, "barrier (recording end)");

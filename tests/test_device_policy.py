@@ -109,7 +109,7 @@ PCS = [
          facts=(0x10DE, 0x1F82, "MESA_NVK", 0, "DISCRETE_GPU", "Mesa 26.0.1", "NVIDIA GeForce GTX 1650 (NVK TU117)", 0, 0,
                 4096, 3900, 16000, 8, 8, 0, 1, 0, 0, 0, 1, 1, 32, 32, 0),
          on="inline_deku_web_loads dma_buf_imports allowance_at_count_rule mirrors split_ub_flush presenter_queue "
-            "small_vram_textures astc_bc_all room_in_blocks_rule squeeze_damped dlss_cnn drop_modules_small_ram",
+            "small_vram_textures astc_bc_all room_in_blocks_rule squeeze_damped dlss_cnn drop_modules_small_ram threaded_auto_cpus",
          num=(0, 0, 0, 1, 85, 4, 2200, 1365, 325, 243, 487, 32, 128, 10, 32, 16, 97, 1, 2, 2, 4, 4, 2)),
     # (Navi 22: task + mesh draws on the compute fallback, and with it the retry without the optimizer)
     dict(name="RX 6700 XT, AMD's Windows driver (RDNA 2 compiler)",
@@ -118,7 +118,7 @@ PCS = [
          on="fetch_bounds nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallback allowance_at_count_rule "
             "mirrors split_ub_flush warp64 fsr4_tune room_in_blocks_rule threaded_auto_cpus",
-         num=(0, 0, 0, 2, 0, 4, 7158, 2048, 768, 512, 1437, -1, 256, 24, 64, 32, 97, 4, 4, 4, 6, 6, 3)),
+         num=(0, 0, 0, 2, 85, 4, 7158, 2048, 768, 512, 1437, -1, 256, 24, 64, 32, 97, 4, 4, 4, 6, 6, 3)),
     # (the card has the float add, but no run on AMD has shown it right: the loop. The study doubts the fragment shuffles'
     # fallback and the unoptimized mesh programs on LLPC, where neither was measured)
     dict(name="RX 9070 XT, AMD's Windows driver (LLPC)",
@@ -127,7 +127,7 @@ PCS = [
          on="fetch_bounds gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
             "fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 fsr4_tune room_in_blocks_rule rdna4 "
             "threaded_auto_cpus",
-         num=(0, 0, 0, 2, 0, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
+         num=(0, 0, 0, 2, 85, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
     # (Compute for its mesh programs, with no Mesa version that ends it, which the study doubts.
     # Corrected: fault_gate_serial is off, as issue 996 is AMD's Windows driver's; by the vendor it was on here)
     dict(name="RX 6800 XT, RADV",
@@ -144,7 +144,7 @@ PCS = [
                 8192, 8000, 16000, 8, 8, 0, 1, 1, 0, 0, 0, 1, 64, 64, 0),
          on="fetch_bounds gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
             "split_ub_flush warp64 mma_unroll_try fsr4_tune astc_bc_all room_in_blocks_rule squeeze_damped "
-            "drop_modules_small_ram",
+            "drop_modules_small_ram threaded_auto_cpus",
          num=(0, 2, 50000, 1, 85, 4, 4778, 2048, 666, 500, 1000, -1, 256, 24, 32, 16, 97, 1, 2, 2, 4, 4, 2)),
     # (corrected: batched submits are on. Vega is GFX9, not GCN 1-4: it has 16-bit stage inputs, which is the one
     # definition of GCN (DeviceFacts::radv_gcn); batch_on's own, no stage pinned to 32 lanes and 64-lane waves, took it
@@ -154,7 +154,7 @@ PCS = [
                 8176, 7900, 16000, 8, 8, 0, 1, 1, 0, 0, 1, 1, 64, 64, 0),
          on="fetch_bounds gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors split_ub_flush "
             "warp64 batch_submits mma_unroll_try fsr4_tune astc_bc_all room_in_blocks_rule squeeze_damped "
-            "drop_modules_small_ram",
+            "drop_modules_small_ram threaded_auto_cpus",
          num=(0, 2, 0, 1, 85, 4, 4769, 2044, 658, 493, 987, -1, 256, 12, 32, 16, 97, 1, 2, 2, 4, 4, 2)),
     # (no mirrors, so 16 MB chunks; the mirrors' budget is worked out all the same, by the heap. Uniform updates are still
     # written at each part's end and no snapshot is taken, which the study doubts for every GPU without mirrors.
@@ -164,7 +164,7 @@ PCS = [
                 7168, 6800, 14800, 8, 8, 1, 1, 1, 0, 0, 1, 1, 64, 64, 0xFF),
          on="fetch_bounds gather_offset position_invariant dma_buf_imports allowance_at_count_rule "
             "split_ub_flush warp64 batch_submits mma_unroll_try fsr4_tune gpu_clock_peak small_vram_textures astc_bc_all "
-            "squeeze_damped linux_hold_caps_budget drop_modules_small_ram",
+            "squeeze_damped linux_hold_caps_budget drop_modules_small_ram threaded_auto_cpus",
          num=(0, 2, 0, 1, 85, 16, 2560, 1792, 566, 425, 512, -1, 256, 0, 32, 16, 90, 1, 2, 2, 4, 4, 2)),
     # (corrected, twice: mesh_mode is Automatic (0), so its own mesh shaders, as the deadlock of issue 2245 is RADV's and
     # the rule now asks for RADV; "AMD off Windows" gave AMDVLK Compute. And fault_gate_serial is off, as on RADV.
@@ -209,7 +209,7 @@ PCS = [
                 11850, 10000, 15800, 8, 8, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
          on="fetch_bounds gather_offset position_invariant split_before_draw dma_buf_imports "
             "allowance_at_count_rule ub_snapshot global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
-            "drop_modules_small_ram",
+            "drop_modules_small_ram threaded_auto_cpus",
          num=(64, 0, 0, 1, 85, 16, 2560, 2048, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 2, 2, 4, 4, 2)),
     # (neither discrete nor integrated: no mirrors, yet a dedicated card's budgets, blocks at the start and 97% line.
     # The study doubts it: the two tests are not a partition)
@@ -240,7 +240,7 @@ PCS = [
          on="fetch_bounds nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 fsr4_tune "
             "astc_bc_all room_in_blocks_rule squeeze_damped threaded_auto_cpus",
-         num=(0, 0, 0, 2, 0, 4, 4769, 2044, 614, 461, 922, -1, 256, 12, 32, 16, 97, 1, 4, 4, 6, 6, 3)),
+         num=(0, 0, 0, 2, 85, 4, 4769, 2044, 614, 461, 922, -1, 256, 12, 32, 16, 97, 1, 4, 4, 6, 6, 3)),
     # (ASTC on the CPU. The process may use 8 of the PC's 24 threads: the workers go by the 24, Threaded rendering's Auto
     # by the 8, which the study names as two ways of counting)
     dict(name="Ryzen 9 7900X's graphics (32 GB), AMD's Windows driver, on 8 of 24 threads",
@@ -248,8 +248,8 @@ PCS = [
                 16300, 10232, 32600, 24, 8, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
          on="fetch_bounds nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial astc_on_cpu allowance_at_count_rule split_ub_flush warp64 fsr4_tune "
-            "astc_bc_all",
-         num=(0, 0, 0, 2, 0, 16, 4096, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
+            "astc_bc_all threaded_auto_cpus",
+         num=(0, 0, 0, 2, 85, 16, 4096, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
 ]
 
 # The switches (device_policy_env). The fields a switch can set, in the Sw enum's order (its bit in set_by_switch), and what
@@ -550,9 +550,12 @@ def check_source():
     sources = {}
     for path, marker, needs in (
         ("vk_texture.cpp", "bool astc_on_cpu() {", ("const bool v = dev.policy.astc_on_cpu;",)),
-        ("vk_texture.cpp", "void texture_frame(uint64_t completed)",
+        # (Hookshot's staging_keep() holds the staging rule, which texture_frame and the arenas' spares ask)
+        ("vk_texture.cpp", "uint64_t staging_keep() {",
          ("if (dev.policy.set(Sw::staging_keep)) return dev.policy.staging_keep;",
-          "return policy_rule::staging_keep(vram_usage(&used, &allowed) ? allowed : 0);",
+          "return policy_rule::staging_keep(vram_usage(&used, &allowed) ? allowed : 0);")),
+        ("vk_texture.cpp", "void texture_frame(uint64_t completed)",
+         ("const uint64_t keep = staging_keep();",
           "policy_rule::squeeze_damped(allowed) ? (over / 4) : over;",
           "own = policy_rule::integrated_texture_budget(driver_budget, system_ram);")),
         ("vk_replay.cpp", "bool batch_on() {", ("const bool v = dev.policy.batch_submits;",)),

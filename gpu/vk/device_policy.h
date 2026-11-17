@@ -309,8 +309,8 @@ struct DevicePolicy {
     // device right after give-backs (issues 17, 309, 571); 0 kept is only by the switch (retired_give_back.h Mode).
     // RX_VK_KEEP_RETIRED. Site (vk_memory.cpp retired_mode), step 2
     int retired_mode = 1;
-    // Idle imports given back past this share of the system heap's budget: 85, and 0 (off) on the same Windows drivers,
-    // for the same losses. RX_VK_IMPORT_HIGH. Site (vk_memory.cpp), step 2
+    // Idle imports given back past this share of the system heap's budget: 85, and 0 (off) on Windows with Intel's driver,
+    // for the same losses (AMD's gives them back too since 11-17: kept, new imports were refused past ~7 GB). RX_VK_IMPORT_HIGH. Site (vk_memory.cpp), step 2
     int idle_import_high_pct = 85;
     // An allowance the driver gives as the count itself is taken a tenth lower (AMD's Windows driver, #933, #1025). On
     // every PC: vram_usage sees the driver do it, and no fact here chooses. Site (vk_vma.cpp), step 2
@@ -485,7 +485,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     p.dma_buf_imports = !f.windows && f.driver_id != VK_DRIVER_ID_NVIDIA_PROPRIETARY;
     p.nv_checkpoints = f.nv_checkpoints_ext;
     p.retired_mode = (int)retired_give_back::mode(false, false, f.windows, f.nvidia());
-    p.idle_import_high_pct = f.windows && !f.nvidia() ? 0 : 85;
+    p.idle_import_high_pct = f.windows && !f.nvidia() && !f.amd() ? 0 : 85;
     p.allowance_at_count_rule = true;
 
     // what the device can do
