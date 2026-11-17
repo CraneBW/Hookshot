@@ -213,7 +213,7 @@ To go back, install the [latest release](https://git.notrexed.dev/Hookshot/Hooks
   `%LOCALAPPDATA%\Hookshot\save-backups` on Windows, `~/.local/share/hookshot/save-backups` on Linux). A game folder with no
   saves, such as a new install or one built again into another folder, gets the newest backup back at its first start; a
   folder that has saves is never touched. To go back to an older backup, copy its `save` folder over the game's own.
-  To carry on with a save from an emulator (Lichii, Eglantine, Orchid, ...) or NX2navi, or to take yours there, see
+  To carry on with a save from an emulator (Lichii, Eglantine, Orchid, ...) or another PC port, or to take yours there, see
   [using a save from an emulator](docs/saves.md).
 - To uninstall, delete the game folder, the builder's folder and the shortcuts.
 

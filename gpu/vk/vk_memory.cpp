@@ -1082,8 +1082,8 @@ bool gpu_page(uint64_t page) {
 // (RX_VK_PROTECT_BARE=1, an experiment for the one-frame foliage flicker and the floating trees) The ranges a shader writes
 // through a table pointer (vk_draw.cpp: a bare entry, only its first 64 bytes marked written) are GPU-written pages the
 // mirror syncs know nothing of: a CPU write anywhere on such a page copied the CPU's whole page over the GPU's records
-// (NX2navi found the same: "trees drawn from records lost that way stretched into columns reaching the sky", and culled
-// foliage drew garbage for a frame). Pages noted here keep the GPU's version when the CPU also wrote them since the
+// (trees drawn from records lost that way stretched into columns reaching the sky, and culled foliage drew garbage for
+// a frame). Pages noted here keep the GPU's version when the CPU also wrote them since the
 // pool's last sync. Nothing is copied back to guest memory (that overwrote the CPU's own data beside them once).
 std::mutex prot_mu;
 std::unordered_map<uint32_t, uint32_t> prot_pages;   // page -> gen_now when a shader last wrote through it

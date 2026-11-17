@@ -700,7 +700,7 @@ void EmitContext::DefineLocalMemory(const IR::Program& program) {
     const Id element_type{TypeStruct(U32[1])};
     const Id type{TypeArray(element_type, Const(num_elements))};
     const Id pointer{TypePointer(spv::StorageClass::Private, type)};
-    // (NX2navi ee6fbaf, maxwell.md 3.12) Local memory read before the shader writes it: the game's code finds 0 there on the
+    // (maxwell.md 3.12) Local memory read before the shader writes it: the game's code finds 0 there on the
     // Switch; a Private array with no initializer is undefined, and NVIDIA's driver hands such a read another warp lane's
     // values (Ocarina's clustered-light loop then added other pixels' light: objects lit neon, floors in 4x8 tiles). It
     // starts at zero now. EDEN_NX2_LOCAL_ZERO=0: no initializer (the old behaviour)

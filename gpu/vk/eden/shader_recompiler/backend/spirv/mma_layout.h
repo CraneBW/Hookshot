@@ -22,12 +22,12 @@ inline uint32_t mma_software_form = 0;
 inline bool mma_software_quad = false;
 // (amd-fix) float colour outputs carry no NaN or infinity to their target (EmitSetFragColor): one NaN texel spreads
 // through bloom/blur/downsample averages into glowing blocks (OoT's flowers on AMD, Hookshot issue 606). On for every
-// card since v2.0.6 (vk_coopmat.cpp coopmat_init); RX_VK_NAN_GUARD=0 turns it off. Idea from NX2navi patch 0027.
+// card since v2.0.6 (vk_coopmat.cpp coopmat_init); RX_VK_NAN_GUARD=0 turns it off.
 inline bool frag_nan_guard = false;
 // (amd-fix) gl_Position decorated Invariant (vertex and mesh outputs): the game draws a depth pre-pass, then the colour
 // pass again with depth EQUAL; Maxwell computes the same position in both, AMD's compiler may not without Invariant, and
 // the colour pass is then rejected in spots: holes showing the bright sky, blown up by bloom (the glowing flowers).
-// On for every card but NVIDIA (vk_coopmat.cpp); RX_VK_NO_INVARIANT=1 off. From NX2navi patch 0007.
+// On for every card but NVIDIA (vk_coopmat.cpp); RX_VK_NO_INVARIANT=1 off.
 inline bool position_invariant = false;
 // (hookshot) An out-of-bounds texel fetch answers zero, as NVIDIA's GPUs answer it (measured on an RTX 3090), rather than
 // whatever the host's does (EmitImageFetch). Vulkan leaves it undefined without robustImageAccess; on AMD the ground fog's
