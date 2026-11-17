@@ -49,6 +49,7 @@ static_assert(mkwvk::kQueueGraphics == VK_QUEUE_GRAPHICS_BIT && mkwvk::kQueueCom
 #ifndef _WIN32
 extern char** environ;
 #endif
+#include "vk_push_fix.h"
 
 namespace vkx {
 #define VKX_DEFINE(f) PFN_##f f;
@@ -272,6 +273,35 @@ void guard_shader_modules() {
 void guard_shader_modules() {}
 #endif
 
+// (hookshot) The mesh shader fallback's task programs read the task payloads' address from the push constants by the
+// member's byte offset (64) where SPIR-V takes the member's index (3): an access chain past the block's last member. Such a module
+// is invalid, and NVIDIA's compiler faulted on it (vkCreateComputePipelines, "a fault in the driver", 10 ms). A GTX 1060's and a
+// GTX 1070's logs ended there: their first task + mesh draw (a5da9f84b72d1471, Kokiri Forest after a save is loaded) "could not be
+// made", the next fallback compile never returned, and the picture stayed black with the game running behind it. Measured with
+// RX_VK_FORCE_MESH_FALLBACK=1 on an RTX 3060 Ti: the same fault on a5da9f84b72d1471, then the render thread's last line. The
+// translator makes them so, and the program caches players have keep them: here, as each module is made, such an index becomes
+// the index of the member at that offset (vk_push_fix.h). Only on a GPU that runs the fallback. RX_VK_NO_PUSH_FIX=1: the modules
+// as they are
+PFN_vkCreateShaderModule unfixed_create_shader_module = nullptr;
+std::atomic<int> push_fixes_told{0};
+VKAPI_ATTR VkResult VKAPI_CALL fixing_create_shader_module(VkDevice d, const VkShaderModuleCreateInfo* ci,
+                                                           const VkAllocationCallbacks* a, VkShaderModule* m) {
+    std::vector<uint32_t> w;
+    const size_t fixed = ci && ci->pCode && !(ci->codeSize % 4) ? push_offset_fix(ci->pCode, ci->codeSize / 4, w) : 0;
+    if (!fixed) return unfixed_create_shader_module(d, ci, a, m);
+    if (push_fixes_told++ < 4)
+        logf("vk: fallback: %zu push constant access%s by byte offset made by member index", fixed, fixed == 1 ? "" : "es");
+    VkShaderModuleCreateInfo with = *ci;
+    with.pCode = w.data();
+    with.codeSize = w.size() * 4;
+    return unfixed_create_shader_module(d, &with, a, m);
+}
+void fix_fallback_modules() {
+    if (!dev.mesh_fallback || getenv("RX_VK_NO_PUSH_FIX") || !vkx::vkCreateShaderModule) return;
+    unfixed_create_shader_module = vkx::vkCreateShaderModule;   // (the guard's, or the driver's)
+    vkx::vkCreateShaderModule = fixing_create_shader_module;
+}
+
 bool has_extension(const std::vector<VkExtensionProperties>& all, const char* name) {
     for (const auto& e : all)
         if (!std::strcmp(e.extensionName, name)) return true;
@@ -425,6 +455,57 @@ static bool native_fadd_wanted(const char* env, VkDriverId driver, uint32_t devi
     return ((device & 0xFF00u) == 0x7D00u && version >= (101u << 14 | 9175u)) ||   // (Meteor Lake, Arrow Lake)
            ((device & 0xFF00u) == 0xE200u && version >= (101u << 14 | 9154u)) ||   // (Battlemage)
            ((device & 0xFF00u) == 0xB000u && version >= (101u << 14 | 9150u));     // (Panther Lake)
+}
+
+// (hookshot) What the translated shaders take for granted (vk_shader.cpp make_profile and host_info: no device asked) and
+// this GPU lacks, said once at start. A shader that uses one of these anyway is invalid for the driver, which may refuse its pipeline
+// or fault in its compiler. The GTX 10 cards' logs ended on a fallback compute pipeline that "could not be made", on drivers whose
+// features nobody here could read: this line names those missing, in the log a player already sends, to compare with ours
+void log_shader_needs(const VkPhysicalDeviceFeatures& f, const VkPhysicalDeviceVulkan11Features& f11,
+                      const VkPhysicalDeviceVulkan12Features& f12, const VkPhysicalDeviceVulkan13Features& f13) {
+    VkPhysicalDeviceVulkan12Properties p12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+    VkPhysicalDeviceVulkan11Properties p11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES};
+    p11.pNext = &p12;
+    VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    p2.pNext = &p11;
+    vkGetPhysicalDeviceProperties2(dev.physical, &p2);
+    const VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    const VkSubgroupFeatureFlags ops = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_VOTE_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT |
+                                       VK_SUBGROUP_FEATURE_SHUFFLE_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT |
+                                       VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_QUAD_BIT;
+    const struct { bool have; const char* name; } needs[] = {
+        {f12.shaderFloat16 != VK_FALSE, "shaderFloat16"},
+        {f12.shaderInt8 != VK_FALSE, "shaderInt8"},
+        {f.shaderInt16 != VK_FALSE, "shaderInt16"},
+        {f.shaderInt64 != VK_FALSE, "shaderInt64"},
+        {f.shaderFloat64 != VK_FALSE, "shaderFloat64"},
+        {f12.storageBuffer8BitAccess && f12.uniformAndStorageBuffer8BitAccess, "8-bit storage"},
+        {f11.storageBuffer16BitAccess && f11.uniformAndStorageBuffer16BitAccess, "16-bit storage"},
+        {f12.shaderBufferInt64Atomics != VK_FALSE, "shaderBufferInt64Atomics"},
+        {f12.shaderSharedInt64Atomics != VK_FALSE, "shaderSharedInt64Atomics"},
+        {f13.shaderDemoteToHelperInvocation != VK_FALSE, "shaderDemoteToHelperInvocation"},
+        {f.shaderStorageImageReadWithoutFormat && f.shaderStorageImageWriteWithoutFormat, "storage images without format"},
+        {f.shaderImageGatherExtended != VK_FALSE, "shaderImageGatherExtended"},
+        {f.multiViewport != VK_FALSE, "multiViewport"},
+        {f12.shaderOutputViewportIndex && f12.shaderOutputLayer, "shaderOutputViewportIndex/Layer"},
+        {f12.shaderSampledImageArrayNonUniformIndexing != VK_FALSE, "shaderSampledImageArrayNonUniformIndexing"},
+        {f.fragmentStoresAndAtomics && f.vertexPipelineStoresAndAtomics, "stores and atomics in vertex/fragment stages"},
+        {p12.shaderDenormPreserveFloat32 != VK_FALSE, "shaderDenormPreserveFloat32"},
+        {p12.shaderDenormFlushToZeroFloat32 != VK_FALSE, "shaderDenormFlushToZeroFloat32"},
+        {p12.shaderSignedZeroInfNanPreserveFloat16 && p12.shaderSignedZeroInfNanPreserveFloat32, "shaderSignedZeroInfNanPreserve 16/32"},
+        {p12.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE, "denormBehaviorIndependence"},
+        {p12.roundingModeIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE, "roundingModeIndependence"},
+        {(p11.subgroupSupportedStages & stages) == stages, "subgroups in vertex/fragment/compute"},
+        {(p11.subgroupSupportedOperations & ops) == ops, "subgroup vote/ballot/shuffle/arithmetic/quad"},
+    };
+    std::string missing;
+    for (const auto& n : needs)
+        if (!n.have) missing += missing.empty() ? n.name : std::string(", ") + n.name;
+    // (an RTX 3060 Ti, driver 0x9a170000, reports neither of the two fp32 denormal modes and runs every program: a name here is
+    // where to look, not a fault by itself)
+    logf("vk: shader features the translation assumes and this GPU does not report: %s (subgroup ops %#x on stages %#x; shared "
+         "memory %u bytes)", missing.empty() ? "none" : missing.c_str(), (unsigned)p11.subgroupSupportedOperations,
+         (unsigned)p11.subgroupSupportedStages, dev.props.limits.maxComputeSharedMemorySize);
 }
 
 bool create_device() {
@@ -705,6 +786,7 @@ bool create_device() {
     }
     antilag_device_features(tail);   // (AMD Anti-Lag 2's, when its extension is there)
     vkGetPhysicalDeviceFeatures2(dev.physical, &f);
+    log_shader_needs(f.features, f11, f12, f13);   // (what the translation assumes and this GPU does not report, once)
     if (module_id && module_idf.shaderModuleIdentifier) module_ids_on();
     descriptor_buffer.descriptorBufferCaptureReplay = VK_FALSE;
     dev.view_2d_of_3d = dev.view_2d_of_3d && v2d3d.sampler2DViewOf3D;
@@ -834,7 +916,7 @@ bool create_device() {
     // (task and mesh shader counts in pipeline statistics, a feature of their own: RADV has it off on RDNA2, and a query
     // pool made with those counts all the same can hang the GPU)
     dev.mesh_queries = dev.mesh_shader && mesh.meshShaderQueries;
-    // (hookshot, issue 640) RDNA1 and older GPUs: no mesh shaders, but task and mesh programs run as compute shaders
+    // (hookshot) RDNA1 and older GPUs: no mesh shaders, but task and mesh programs run as compute shaders
     // that write their vertices to buffers, drawn through an ordinary graphics pipeline. It needs buffer device addresses.
     dev.mesh_fallback = !dev.mesh_shader && f12.bufferDeviceAddress && !env_on("RX_VK_NO_MESH_FALLBACK");
     if (dev.mesh_fallback) logf("vk: no mesh shaders: task and mesh programs run as compute shaders (issue 640 fallback)");
@@ -898,6 +980,7 @@ bool create_device() {
     // fallback, a start keeps the fallback's programs ready, and loads at create have not been shown to be as good there)
     programs_load_decide(dev.mesh_shader && !dev.mesh_fallback && !dev.task_mesh_fallback);
     guard_shader_modules();   // (hookshot)
+    fix_fallback_modules();   // (hookshot: after the guard, through it)
     vkGetDeviceQueue(dev.device, dev.queue_family, 0, &dev.queue);
     dev.probe_queue = VK_NULL_HANDLE;
     if (q.queueCount >= 2) vkGetDeviceQueue(dev.device, dev.queue_family, 1, &dev.probe_queue);

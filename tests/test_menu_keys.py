@@ -81,8 +81,11 @@ KEYBOARD = r'''
 enum {
     VK_INSERT = 0x2d, VK_UP = 0x26, VK_DOWN = 0x28, VK_LEFT = 0x25, VK_RIGHT = 0x27,
     VK_ESCAPE = 0x1b, VK_F1 = 0x70, VK_RETURN = 0x0d, VK_DELETE = 0x2e, VK_BACK = 8,
-    VK_TAB = 9, VK_PRIOR = 0x21, VK_NEXT = 0x22, VK_HOME = 0x24, VK_END = 0x23, VK_F10 = 0x79
+    VK_TAB = 9, VK_PRIOR = 0x21, VK_NEXT = 0x22, VK_HOME = 0x24, VK_END = 0x23, VK_F10 = 0x79, VK_F12 = 0x7B
 };
+static int listening;   // (a control waiting for its key: the menu's; 0 here unless a case sets it)
+enum { HOS_BIND_KEY = 1 };   // (vk_api.h: F12 bound to no game button here)
+static std::atomic<bool> screenshot_want{false};   // (F12: vk_menu.cpp)
 using HWND = int;
 using DWORD = unsigned;
 static int down_key, queued_key;
@@ -108,7 +111,8 @@ static struct {
     int64_t (*now_ns)();
     void (*audio_output_select)(const char*);
     void (*monitor_select)(const char*);
-} queue_host{take_key_press, nullptr, nullptr, nullptr, nullptr}, *host;
+    int (*binding)(int, int, int);   // (F12 bound to a game button: none here)
+} queue_host{take_key_press, nullptr, nullptr, nullptr, nullptr, nullptr}, *host;
 
 static bool keyboard_toggle(int mode, int key, bool queued, bool has_focus = true) {
     opts.menu_shortcut = mode;
@@ -146,7 +150,7 @@ static void test_keyboard() {
 
 // (menu_tick's Esc block, after the keys are read: what it reaches, stubbed)
 static std::atomic<bool> open_now;
-static int page, ask_sel, listening;
+static int page, ask_sel;
 static bool quick_debug, debug_warning, editing, tab_left, tab_right;
 static constexpr int TAB_DEBUG = 1;
 static int cur_tab, tab_selected[2];

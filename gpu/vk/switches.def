@@ -413,6 +413,7 @@ SW(RX_VK_NO_PREDICT, kill, bool, "off: predict_run builds the predicted pipeline
 SW(RX_VK_NO_PREDICT_CHECK, kill, bool, "off: the start after a preparation samples the driver's cache and logs it", "Skips the logged background sample of predicted pipelines asked of the driver's cache.")
 SW(RX_VK_NO_PRESYNC, kill, bool, "off: mirrors are synced once before a command buffer's parallel segments", "Skips the mirror pre-sync before parallel segments, as before.")
 SW(RX_VK_NO_PROGRAM_CACHE, kill, bool, "program cache and pipeline notes read and written", "1 neither reads nor writes hookshot_programs.bin and the pipeline and compute notes.")
+SW(RX_VK_NO_PUSH_FIX, kill, bool, "off: without mesh shaders, the fallback's task modules' push-constant accesses by byte offset are made by member index", "=1 leaves the modules as translated (NVIDIA's compiler faulted on them: a black picture after a save loads).")
 SW(RX_VK_NO_RB_REFRESH, kill, bool, "off: small readback pages are refreshed from guest memory into the mirror each submission", "Turns off the refresh of small CPU-read result pages (meters, counters) into the mirror.")
 SW(RX_VK_NO_READBACK_WAIT, kill, bool, "off: a CPU read of GPU results waits for the submission that writes them back", "Stops CPU reads of GPU results from waiting for their write-back, and stops noting written-back pages.")
 SW(RX_VK_NO_SLOT_CACHE, kill, bool, "off: a program's texture slots are cached between draws", "=1 looks every texture slot up again at each draw.")

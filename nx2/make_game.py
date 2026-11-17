@@ -623,14 +623,21 @@ def stand_in_damaged_files(out, romfs):
 
 
 ROMFS_TABLE = "ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs"   # (the supported version's, in System/Resource)
-def romfs_problem(romfs):
+def romfs_problem(romfs, nup=None):
     """Why a romfs folder chosen by hand is not the supported game's RomFS, or None. A romfs taken from another PC
     port's folder (a few packed .bin files, no subfolders) was accepted, built for 40 minutes, and the game died in its first
-    second: its own allocator returned null. The game's RomFS has System/Resource/<the table above> and hundreds of folders"""
+    second: its own allocator returned null. The game's RomFS has System/Resource/<the table above> and hundreds of folders.
+    nup: the romfs was read from this .nup file, whose code is the supported build's: a dump with the update's code and the
+    first version's files was built in full, and the game then said at each start that its files are another version's"""
     res = os.path.join(romfs, "System", "Resource")
     if os.path.isfile(os.path.join(res, ROMFS_TABLE)):
         return None
     others = sorted(f for f in os.listdir(res) if f.startswith("ResourceSizeTable")) if os.path.isdir(res) else []
+    if nup:
+        return ("The game files in %s are %s (Hookshot needs the version whose files have System\\Resource\\%s), while its code is "
+                "the supported version's. The game's code and files must be from the same version: dump the game again with its "
+                "update applied to the whole game, files included, and choose that dump."
+                % (nup, "from another version of the game (%s)" % others[0] if others else "not the game's own RomFS", ROMFS_TABLE))
     if others:
         return ("The romfs folder %s is from another version of the game (%s). Hookshot needs the version whose romfs has "
                 "System\\Resource\\%s: dump the game with its update applied, and use that romfs with the exefs from the same "
@@ -2815,6 +2822,9 @@ def main(a=None):
                 if not os.path.isdir(os.path.join(game, "romfs")):
                     fail("The package did not contain a romfs folder.")
                 check_unpacked_romfs(os.path.join(game, "romfs"), "Your .nup file %s" % a.nup)
+                why = romfs_problem(os.path.join(game, "romfs"), nup=a.nup)   # (the files' version, said before anything is built)
+                if why:
+                    fail(why)
             except (OSError, SystemExit):
                 try:
                     shutil.rmtree(game)
@@ -3161,7 +3171,8 @@ def main(a=None):
         note_shader_list(work, romfs, os.path.join(out, "hookshot_shaders.bin"))
     # (hookshot) Some dumps hold textures whose first kilobytes are zeros; the game cannot decode them and never finishes loading
     # the models that need one: the fairy fountains' floor and walls were not drawn, and as an adult the model was loaded again
-    # and again for good. tools/dump_repair.py writes a small mod that stands in for the ones it knows, from the player's own
+    # and again for good; a damaged piece of an area's baked lighting leaves what it lights black. tools/dump_repair.py finds
+    # every damaged texture and writes a small mod that stands in for those that have an intact relative, from the player's own
     # files; it was a step for the player to run by hand (README), now every build does it. Not worth stopping a build for
     repair = os.path.join(ROOT, "tools", "dump_repair.py")
     if os.path.isfile(repair) and run(PY + [repair, romfs, os.path.join(out, "mods", "00-dump-repair")], check=False,

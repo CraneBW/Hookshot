@@ -309,6 +309,8 @@ The same keys close it; with every Menu shortcut, <kbd>Esc</kbd> goes back a pag
 <kbd>F1</kbd> always works. **Controls → Menu shortcut** can leave <kbd>Insert</kbd> free for another overlay (F1 only).
 With Insert or F1, or with F1 only, <kbd>Esc</kbd> does not open the menu: it only lets the mouse go. Options saved by
 an older version on Insert or F1, the default then, move to Insert, F1 or Esc; F1 only stays.
+<kbd>F12</kbd> saves a screenshot of the game's picture as a PNG in the game folder's `screenshots` folder, menu open or not
+(the menu and the FPS counter are not in it); not while a control waits for its key, and not when a control is bound to F12.
 The menu has five tabs, Graphics, Audio, Gameplay, Controls and Debug:
 <kbd>Q</kbd> and <kbd>E</kbd> (or <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd>) switch between them, LB and RB on
 a controller (or the triggers). <kbd>Up</kbd> and <kbd>Down</kbd> choose a row, <kbd>Left</kbd> and <kbd>Right</kbd>

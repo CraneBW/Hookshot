@@ -7089,6 +7089,69 @@ void teleport_capture(VkCommandBuffer cmd, VkImage src, uint32_t sw, uint32_t sh
     tp_shot.pending = want, tp_shot.value = value;
 }
 
+// (hookshot) F12's screenshot (vk_screenshot.h): the picture this present shows, whole and at its own size (the game's output
+// resolution: before the window's scaling, the Insert menu and the FPS counter), copied with the present's recording and
+// handed to the menu's writer at a later present, once the GPU is past it (never waited for). Its image and buffer live
+// only that long: a 3840x2160 picture is 33 MB of each
+struct ScreenShot {
+    VkImage image = VK_NULL_HANDLE;
+    VmaAllocation image_alloc = nullptr;
+    VkBuffer buf = VK_NULL_HANDLE;
+    VmaAllocation buf_alloc = nullptr;
+    void* map = nullptr;
+    uint32_t w = 0, h = 0;
+    bool pending = false;
+    uint64_t value = 0;
+};
+ScreenShot screen_shot;
+void screenshot_capture(VkCommandBuffer cmd, VkImage src, uint32_t sw, uint32_t sh, const int crop[4], uint64_t value) {
+    ScreenShot& s = screen_shot;
+    if (s.pending) {
+        if (completed() < s.value) return;
+        const size_t bytes = (size_t)s.w * s.h * 4;
+        invalidate_mapped(s.buf_alloc, bytes);
+        std::vector<uint8_t> px((const uint8_t*)s.map, (const uint8_t*)s.map + bytes);
+        menu_store_screenshot(std::move(px), s.w, s.h);
+        destroy_image(s.image, s.image_alloc);
+        destroy_buffer(s.buf, s.buf_alloc);
+        s = ScreenShot{};
+        return;
+    }
+    if (!src || !sw || !sh || !menu_take_screenshot_request()) return;
+    const bool cropped = crop && crop[2] > 0 && crop[3] > 0;
+    s.w = cropped ? (uint32_t)crop[2] : sw, s.h = cropped ? (uint32_t)crop[3] : sh;
+    VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ci.imageType = VK_IMAGE_TYPE_2D;
+    ci.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ci.extent = {s.w, s.h, 1};
+    ci.mipLevels = ci.arrayLayers = 1;
+    ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    if (!create_image(ci, s.image, s.image_alloc)) {
+        logf("vk: screenshot: no %ux%u image could be made", s.w, s.h);
+        s = ScreenShot{};
+        return;
+    }
+    if (!create_buffer((uint64_t)s.w * s.h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, s.buf, s.buf_alloc, &s.map)) {
+        logf("vk: screenshot: no buffer for a %ux%u picture could be made", s.w, s.h);
+        destroy_image(s.image, s.image_alloc);
+        s = ScreenShot{};
+        return;
+    }
+    image_barrier(cmd, s.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    blit_crop(cmd, src, sw, sh, cropped ? crop : nullptr, s.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, s.w, s.h);
+    image_barrier(cmd, s.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    const VkBufferImageCopy c{0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {s.w, s.h, 1}};
+    vkCmdCopyImageToBuffer(cmd, s.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s.buf, 1, &c);
+    VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};   // (the copy seen by the host's read at a later present)
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT, mb.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &di);
+    s.pending = true, s.value = value;
+}
+
 void do_present(const nvn_tex* t, const int crop[4], float cover) {
     static PendingShot pending;
     // (hookshot) NVIDIA Reflex (vk_reflex.cpp): this frame's simulation ended, its submission starts; on the way out (after the
@@ -7266,6 +7329,7 @@ void do_present(const nvn_tex* t, const int crop[4], float cover) {
         shot_ask_record(r.cmd, headless_fx ? headless_fx : src, headless_fx ? kShotW : sw, headless_fx ? kShotH : sh,
                         headless_fx ? nullptr : crop, value);   // the bridge captures the same CRT output, without Hookshot overlays
         teleport_capture(r.cmd, src, sw, sh, crop, value);   // (hookshot: the Travel page's own pictures)
+        screenshot_capture(r.cmd, src, sw, sh, crop, value);   // (hookshot: F12)
         memory_end_submission(r.cmd, r.part);
         full_barrier(r.cmd);
         submit_recording(r);   // (nothing is stopped at a present: drain)

@@ -48,6 +48,7 @@
 #include "vk_menu_keys.h"   // (which gamepad buttons confirm and go back: those A and B are bound to)         // (how it looks: Dear ImGui, vk_imgui.h)
 #include "oot_teleport_capture.h"   // (hookshot: the Travel page's pictures)
 #include "oot_tp_places.h"   // (hookshot: the Travel page's places)
+#include "vk_screenshot.h"   // (hookshot: F12)
 #include "vk_dlss.h"
 #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
 #include "vk_bug_report.h"   // (the Gameplay tab's Bug report: what it writes, and how)
@@ -6204,6 +6205,25 @@ int menu_shadow_res() {
 }
 int menu_transition_autosave() { return transition_autosave_enabled.load(std::memory_order_relaxed); }
 int menu_damage_taken() { return cheats_on() ? opts.damage_taken : 1; }   // (Normal while the tools are off; the choice is kept)
+/// (hookshot) F12 (menu_tick): the next present's picture is kept. With the menu open too: the picture is the game's, the
+/// menu is drawn over it afterwards and is not in it
+std::atomic<bool> screenshot_want{false};
+bool menu_take_screenshot_request() { return screenshot_want.exchange(false, std::memory_order_relaxed); }
+void menu_store_screenshot(std::vector<uint8_t>&& rgba, uint32_t w, uint32_t h) {
+    // (a thread of its own: compressing and writing a 3840x2160 picture takes a few hundred ms, never the replay's)
+    std::thread([px = std::move(rgba), w, h] {
+        const std::string path = screenshot_path(game_folder_file("screenshots"));
+        const auto t0 = std::chrono::steady_clock::now();
+        const bool saved = screenshot_write(path, px.data(), w, h);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        const size_t slash = path.find_last_of("\\/");
+        const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+        logf("menu: screenshot %ux%u %s%s (%.0f ms)", w, h, saved ? "written to " : "NOT written: ", path.empty() ? "no game folder" : path.c_str(), ms);
+        if (saved) snprintf(notice_text, sizeof notice_text, "Screenshot saved: screenshots\\%s", name.c_str());
+        else snprintf(notice_text, sizeof notice_text, "The screenshot could not be saved");
+        notice_until.store(prof_now() + 2500000000LL, std::memory_order_relaxed);
+    }).detach();
+}
 int menu_take_cheat_action() { return cheat_action.exchange(0, std::memory_order_relaxed); }
 
 void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t window_w, uint32_t window_h) {
@@ -6730,6 +6750,15 @@ void menu_tick() {
         held[i] = down;
         if (press[i]) pad_last = false;   // (the keys: their names in the prompts)
     }
+    // (hookshot) F12: a screenshot of the game's picture (vk_screenshot.h), menu open or not; not while a control waits for
+    // its key in the menu (the key is that control's then)
+    // (Hookshot's controls may bind F12 to a game button: then it is that button's alone, and no screenshot)
+    if (host && host->take_key_press && host->take_key_press(VK_F12) && mine && !listening) {
+        bool bound = false;
+        for (int b = 0; host->binding && b < HOS_KEY_N && !bound; b++)
+            for (int slot = 0; slot < 2 && !bound; slot++) bound = host->binding(HOS_BIND_KEY, b, slot) == VK_F12;
+        if (!bound) screenshot_want.store(true, std::memory_order_relaxed);
+    }
     // (hookshot) the gamepads, by position: Home, or Select and Start together, as Insert; the D-pad as the arrows; the
     // buttons the Switch's A and B are bound to as Enter and Esc, as in the game (vk_menu_keys.h; with the Nintendo layout A
     // is the right face button), not while a binding waits for its button
@@ -6799,6 +6828,7 @@ void menu_tick() {
         // and the gamepad's face buttons by position, PADS PADE PADW PADN (bottom, right, left, top), as a controller's press.
         // (hookshot) TYPE:<text> types the text up to the next comma, as the keyboard would; while a text field has the
         // keyboard ENTER, ESC, LEFT, RIGHT, HOME, END, BACK (Backspace) and DEL are its keys, and the pad's confirm and back too
+        // (SHOT: F12, the screenshot)
         static const char* next = getenv("RX_VK_MENU_SCRIPT");
         static const int64_t start = prof_now();
         double at;
@@ -6825,6 +6855,7 @@ void menu_tick() {
                         scripted.push_back(HOS_TEXT_KEY | (uint32_t)(p == pad_confirm ? VK_RETURN : VK_ESCAPE));
                     pad_last = true;
                 }
+            if (!strcmp(key, "SHOT")) screenshot_want.store(true, std::memory_order_relaxed);
             next = next[n] == ',' ? next + n + 1 : nullptr;
         }
     }
