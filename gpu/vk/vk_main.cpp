@@ -63,27 +63,10 @@ static PFN_vkGetInstanceProcAddr get_instance_proc;
 
 bool load_global() {
 #ifdef _WIN32   // (hookshot: the loader from System32 only, not from the current folder or PATH)
-    // (hookshot, RX_VK_NVIDIA_ICD=1, off by default) an NVIDIA Optimus laptop: with no ICD set, NVIDIA's nv-vk64.json from the
-    // DriverStore names the only Vulkan driver, so the loader binds the dGPU alone, past the Intel iGPU's loader hooks. Not by
-    // default: Windows keeps an NVIDIA driver's DriverStore folder after the card is swapped for another, and the loader would
-    // then find no GPU at all; and the GPU device row would lose every other card
-    if (env_on("RX_VK_NVIDIA_ICD") && !getenv("VK_ICD_FILENAMES")) {
-        WIN32_FIND_DATAA fd;
-        HANDLE hFind = FindFirstFileA("C:\\Windows\\System32\\DriverStore\\FileRepository\\nv*", &fd);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            do {
-                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                    char path[MAX_PATH];
-                    snprintf(path, sizeof(path), "C:\\Windows\\System32\\DriverStore\\FileRepository\\%s\\nv-vk64.json", fd.cFileName);
-                    if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
-                        SetEnvironmentVariableA("VK_ICD_FILENAMES", path);
-                        break;
-                    }
-                }
-            } while (FindNextFileA(hFind, &fd));
-            FindClose(hFind);
-        }
-    }
+    // (hookshot) The drivers are the loader's to find: it reads the ones in use from the display adapters. Nothing here
+    // sets VK_ICD_FILENAMES or VK_DRIVER_FILES, which make the loader take the named files and no other driver: DriverStore
+    // keeps the packages of drivers no longer in use, and one of those named listed no GPU at all (a black window on NVIDIA
+    // and AMD cards alike). pick_device chooses the GPU; RX_VK_DEVICE or the GPU row choose another
     HMODULE m = LoadLibraryExA("vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
 #else
     HMODULE m = LoadLibraryA("vulkan-1.dll");   // (linux: libvulkan.so.1, host/posix/win32_posix.c)

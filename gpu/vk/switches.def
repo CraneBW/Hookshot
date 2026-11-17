@@ -425,7 +425,7 @@ SW(RX_VK_NO_WARM, kill, bool, "off: the preparation warms the driver's cache (st
 SW(RX_VK_NO_WRITEBACK, attempt, bool, "off: GPU writes are copied back to guest memory", "GPU writes to mirrored pools are not copied back to guest memory (an experiment, for A/B).")
 SW(RX_VK_NULL_TEX, diag, string, "unset: none", "Comma list of texture kinds (3d, cube, shadow, 2d, array, all) that draws sample as a null texture instead of their images: a hang test, the picture is wrong.")
 SW(RX_VK_NULL_WRITE, attempt, bool, "off", "=1 points storage slots a program writes but nothing is bound to at a scratch buffer instead of the null descriptor.")
-SW(RX_VK_NVIDIA_ICD, attempt, bool, "off", "Windows, an NVIDIA Optimus laptop: with VK_ICD_FILENAMES unset, NVIDIA's nv-vk64.json from the DriverStore is made the only Vulkan driver.")
+GONE(RX_VK_NVIDIA_ICD, "2026-11-16", "nothing: the Vulkan drivers are the loader's to find, and no switch names one any more")
 SW(RX_VK_OCC_COPY, hw, bool, "on for Intel discrete cards on Intel's Windows driver, off elsewhere; always off with parallel replay", "1 copies occlusion results to a host buffer on any GPU, 0 reads them from the query pool.")
 SW(RX_VK_OCC_DRY, diag, bool, "off", "Occlusion queries are made and read but the reports are left at 4096, to time the queries alone.")
 SW(RX_VK_OCC_FIXED, attempt, int, "unset: real queries; the fallback fixed value is 4096", "Every samples-passed report reads this fixed value and real queries are off; -1 uses the per-draw count.")
