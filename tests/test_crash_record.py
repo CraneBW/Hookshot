@@ -246,7 +246,7 @@ def main():
                 if mode == "device-early-tagged":
                     assert "[warn] vk: device lost: reading the checkpoints" in result.stderr
             if mode == "signal" and os.name != "nt":
-                assert values["signal"] == str(signal.SIGSEGV)
+                assert int(values["signal"]) == int(signal.SIGSEGV), values   # (str() of the enum is "Signals.SIGSEGV" before Python 3.11)
                 assert int(values["signal_code"]) <= 0
             if mode == "crash" and os.name != "nt":
                 assert values["signal_code"] == "1"  # SEGV_MAPERR: the authored 0x40 fault, not SI_TKILL

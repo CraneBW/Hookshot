@@ -297,7 +297,7 @@ VKAPI_ATTR VkResult VKAPI_CALL fixing_create_shader_module(VkDevice d, const VkS
     return unfixed_create_shader_module(d, &with, a, m);
 }
 void fix_fallback_modules() {
-    if (!dev.mesh_fallback || getenv("RX_VK_NO_PUSH_FIX") || !vkx::vkCreateShaderModule) return;
+    if (!dev.mesh_fallback || env_on("RX_VK_NO_PUSH_FIX") || !vkx::vkCreateShaderModule) return;
     unfixed_create_shader_module = vkx::vkCreateShaderModule;   // (the guard's, or the driver's)
     vkx::vkCreateShaderModule = fixing_create_shader_module;
 }
