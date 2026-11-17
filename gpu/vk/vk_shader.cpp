@@ -623,7 +623,13 @@ Shader::Profile make_profile() {
     p.supported_spirv = 0x00010600;
     p.unified_descriptor_binding = true;
     p.support_descriptor_aliasing = true;
-    p.support_int8 = p.support_int16 = p.support_int64 = true;
+    // (8- and 16-bit integers only where the device has them: a module that declares the Int8 or Int16 capability without
+    // shaderInt8 / shaderInt16 is invalid (VUID-VkShaderModuleCreateInfo-pCode-08740), and the driver need not accept it. The
+    // validation layer named Int16 in 159 modules of the title, New Game and its first play with shaderInt16 masked. Without
+    // them the translator converts through 32 bits, as Eden does on such GPUs; translator_stamp keeps those programs apart)
+    p.support_int8 = dev.vk12.shaderInt8 != VK_FALSE;
+    p.support_int16 = dev.features.shaderInt16 != VK_FALSE;
+    p.support_int64 = true;
     p.support_uniform_and_storage_buffer_8bit = p.support_storage_buffer_8bit = true;
     p.support_uniform_and_storage_buffer_16bit = p.support_storage_buffer_16bit = true;
     p.support_vertex_instance_id = false;
@@ -1419,6 +1425,12 @@ uint64_t translator_stamp() {
                               // made on a 16-aligned GPU is no use on a 64-aligned one in the same folder, a laptop's two GPUs)
                               (uint32_t)storage_binding_align()};
     add(lanes, sizeof lanes);
+    // (and 8- or 16-bit integers missing (make_profile): those programs convert through 32 bits. Added only then, so that the
+    // stamp of every GPU that has both is what it was)
+    if (!dev.vk12.shaderInt8 || !dev.features.shaderInt16) {
+        const uint32_t narrow = 0x1600u | (dev.vk12.shaderInt8 ? 0u : 1u) | (dev.features.shaderInt16 ? 0u : 2u);
+        add(&narrow, sizeof narrow);
+    }
     // (k10) f16 lowered to f32 on a GPU without f16 shaders (host_info): only then, so other GPUs keep their caches
     if (!dev.vk12.shaderFloat16) {
         const uint32_t no_f16 = 0x6e663136u;   // ("nf16")
