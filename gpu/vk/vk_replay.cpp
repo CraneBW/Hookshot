@@ -6473,9 +6473,17 @@ uint64_t vk_retirement_value() {
 [[noreturn]] void device_lost(const char* why) {
     static std::once_flag once;
     std::call_once(once, checkpoints_report);
-    replay_fatal(why ? why
-                     : "the GPU device was lost (VK_ERROR_DEVICE_LOST): the driver stopped or reset the GPU, and nothing sent "
-                       "to it runs any more (on Linux, dmesg or journalctl -k around this time names the reset)");
+    // (the presents on a queue of their own: once an RTX 4090 on NVIDIA's 621.14 had a black screen with them: the way back
+    // named where a player reads it. A local array: device_lost can run on several threads at once, and replay_fatal uses the
+    // text before it ends the process)
+    char lost[400];
+    std::snprintf(lost, sizeof lost, "%s%s",
+                  why ? why
+                      : "the GPU device was lost (VK_ERROR_DEVICE_LOST): the driver stopped or reset the GPU, and nothing sent "
+                        "to it runs any more (on Linux, dmesg or journalctl -k around this time names the reset)",
+                  dev.present_queue_supported ? ". The presents were on a queue of their own: RX_VK_PRESENT_QUEUE=0 in "
+                                                "hookshot_env.txt turns that off; please report your GPU and driver" : "");
+    replay_fatal(lost);
 }
 
 /// (hookshot) A GPU hang the driver never reports as a lost device. RTX 4070 Ti, NVIDIA 595.99.02, Linux, Hyrule Castle: the
