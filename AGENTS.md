@@ -18,7 +18,7 @@ What CONTRIBUTING.md does not spell out, and agents trip on:
   every anchor resolves, and that the functions behind design.md's rules keep theirs.
 - **The renderer's interface is versioned.** A change to `MkwVkHost` or `MkwVkRenderer` in `gpu/vk/vk_api.h` bumps
   `MKWVK_API_VERSION`.
-- **A renderer switch has a row.** A new `RX_` name read from the environment needs its row in
+- **A switch has a row.** A new `RX_`, `HOS_` or `HOOKSHOT_` name read from the environment needs its row in
   `gpu/vk/switches.def`; a removed one becomes a `GONE(...)` row there (`tests/test_switch_table.py`).
 - **Generated files are generated.** The SPIR-V headers in `gpu/vk/shaders/` (`*_spv.h`) are compiled from the shader
   beside them; regenerate them with glslang rather than editing them (the shaders' tests show the command).
