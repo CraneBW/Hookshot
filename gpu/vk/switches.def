@@ -883,6 +883,7 @@ SW(RX_VK_SKIP_CODE, attempt, string, "unset: nothing left out", "Leaves out the 
 GONE(RX_VK_SKIP_COMPRESSED_OVER_RT, "2026-11-16", "it does nothing: compressed textures are always uploaded from memory")
 SW(RX_VK_SKIP_FILE, diag, string, "no draws left out", "Names a file of hex program keys whose draws are left out, re-read as it changes, for bisecting in one run.")
 SW(RX_VK_SKIP_HALF_PASS, attempt, bool, "off", "=1 leaves out the draws of the game's half-resolution HDR pass that sample a 3D texture (an RTX 50 hang workaround).")
+SW(RX_VK_SKIP_PARTS, kill, bool, "off: a draw whose program or pipeline is not ready is left out only where the next frame draws its targets again", "=1 leaves it out wherever its targets hold an earlier frame's picture, as before (the striped ground).")
 SW(RX_VK_SKIP_PROG, diag, string, "unset: program 53509044401d78d2's draws are left out while its targets have no view", "Leaves out the draws and dispatches of programs matching the key prefixes; - leaves out none.")
 SW(RX_VK_SLOW_DESC, diag, bool, "off: the clock is not read", "Logs descriptor builds that take over 2 ms, 40 times.")
 SW(RX_VK_SLOW_DISPATCH, diag, bool, "off: the clock is not read", "Logs compute dispatches that take over 2 ms, 60 times, with where the time went.")

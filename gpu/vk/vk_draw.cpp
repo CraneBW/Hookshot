@@ -5748,6 +5748,25 @@ Targets bare_targets(const NvnState& s, Targets at) {
 }
 
 /// Whether the targets of a draw kept a picture from an earlier frame (a draw left out of them shows for one frame)
+/// (hookshot, 17/11, issue 47 and the Discord's striped ground) Whether a draw left out of these targets is drawn again in the next
+/// frames: every target was drawn in the frame before (the scene's own, redrawn each frame) and the draw covers it, its viewport
+/// and scissor over nine tenths of it. Not a part the game draws once into a target it keeps: a tile, a decal, a shadow of a
+/// cache it updates a piece at a time. Left out, such a piece was never drawn again, and that part of the target kept what was
+/// there before until the area was loaded again: rectangular patches of the wrong texels over the ground, a few minutes into a
+/// place never seen in this session (Flix's route in the Fire Temple, every time after a fresh start; logs with draws left out
+/// in all four reports). Those wait for their pipeline instead
+bool targets_redrawn(const Targets& at, const NvnState& s) {
+    const uint64_t now = texture_frame_no();
+    const auto recent = [&](const Texture* t) { return !t || t->last_written + 1 >= now; };
+    for (int i = 0; i < at.n; i++)
+        if (!recent(at.color[i])) return false;
+    if (!recent(at.depth)) return false;
+    if (!at.width || !at.height) return false;
+    const float w = (float)at.width * 0.9f, h = (float)at.height * 0.9f;
+    if (std::fabs(s.viewport[0][2]) < w || std::fabs(s.viewport[0][3]) < h) return false;
+    if (s.scissor[2] > 0 && s.scissor[3] > 0 && ((float)s.scissor[2] < w || (float)s.scissor[3] < h)) return false;
+    return true;
+}
 bool targets_persistent(const Targets& at) {
     const uint64_t now = texture_frame_no();
     for (int i = 0; i < at.n; i++)
@@ -9015,6 +9034,13 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     // RX_VK_PIPE_SKIP=2 restores the old translation skip for persistent targets; after translation, memory-writing pipelines wait.
     static const bool always_wait = getenv("RX_VK_PIPE_SKIP") && atoi(getenv("RX_VK_PIPE_SKIP")) == 0;
     static const bool legacy_translation_skip = getenv("RX_VK_PIPE_SKIP") && atoi(getenv("RX_VK_PIPE_SKIP")) == 2;
+    // (hookshot, 11-17: and only where the next frame draws it again, targets_redrawn: every target drawn in the frame
+    // before and the draw's viewport and scissor over nine tenths of it. A piece the game draws once into a target it
+    // keeps (a tile, a decal, a cached shadow), left out, was never drawn again: the striped ground until the area was
+    // loaded again. Those wait for their program or pipeline now. RX_VK_SKIP_PARTS=1: any target holding an earlier
+    // frame's picture, as before)
+    static const bool skip_parts = env_on("RX_VK_SKIP_PARTS");
+    const bool skippable = targets_persistent(at) && (skip_parts || targets_redrawn(at, s));
     auto wait_for = [&](const std::atomic<bool>& ready) {
         PROF_EXACT();
         const auto t0 = std::chrono::steady_clock::now();
@@ -9050,8 +9076,8 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         return ms;
     }();
     if (!cp->ready.load(std::memory_order_acquire)) {
-        if (legacy_translation_skip && targets_persistent(at)) return use.skipped(), void(st_pending_skips++);
-        if (!always_wait && translate_wait_ms >= 0 && targets_persistent(at)) {
+        if (legacy_translation_skip && skippable) return use.skipped(), void(st_pending_skips++);
+        if (!always_wait && translate_wait_ms >= 0 && skippable) {
             static thread_local uint64_t budget_frame = ~0ull;
             static thread_local double budget_left = 0;
             const uint64_t frame = texture_frame_no();
@@ -9082,7 +9108,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         }
         if (!cp) SKIP_HERE();
         if (!cp->ready.load(std::memory_order_acquire)) {   // (waited for as the first pick's: Hookshot's rules above)
-            if (legacy_translation_skip && targets_persistent(at)) return use.skipped(), void(st_pending_skips++);
+            if (legacy_translation_skip && skippable) return use.skipped(), void(st_pending_skips++);
             wait_for(cp->ready);
         }
     }
@@ -9120,7 +9146,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (use.on) use.pipeline(pe->ready.load(std::memory_order_acquire), use_counters.pipes_new != pipes_new);
     }
     if (!pe->ready.load(std::memory_order_acquire)) {
-        const bool may_skip = !always_wait && targets_persistent(at) && !writes_memory(p);
+        const bool may_skip = !always_wait && skippable && !writes_memory(p);
         // (hookshot, from Mako) one to draw with until the full build is done: from the caches, or quick (quick_pipeline). Else a
         // draw that may be left out first waits briefly for its build, moved to the queue's front (RX_VK_PIPE_WAIT_MS, off unless
         // set), and one that may not waits for it, running it here if no worker has (jobs_wait). RX_VK_PIPE_SKIP=0 waits for
