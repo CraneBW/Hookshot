@@ -44,10 +44,6 @@ def main():
 #include <stdio.h>
 #include <string.h>
 static int relaunch_asked, order, exited, restarted, window_logs, clean_ends;
-/* (hos_window_closed_exit first waits for a file the game is writing: none here) */
-static int64_t hos_now_ns(void) { return 0; }
-static void hos_sleep_ns(int64_t ns) { (void)ns; }
-int hos_fs_writing(void) { return 0; }
 static void rx_close_asked(void) { assert(order == 0); order = 1; }
 static void hos_log(const char *fmt, ...) {
     if (strstr(fmt, "close work done")) { assert(order == 1); order = 2; }

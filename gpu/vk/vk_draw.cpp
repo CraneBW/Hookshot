@@ -11777,7 +11777,7 @@ void precompile_at_create(void (*progress)(size_t done, size_t total)) {
 void precompile_index_only() {
     if (!programs_load_at_create()) return;
     pcache_init();
-    const ComputePlan plan = computes_plan(getenv("RX_VK_PRECOMPILE_COMPUTES"), !env_on("RX_VK_NO_STATE_LIST"));
+    const ComputePlan plan = computes_plan(precompile_computes_which(), !env_on("RX_VK_NO_STATE_LIST"));
     programs_index(pipe_notes_refs(), plan.none ? std::unordered_set<uint64_t>{} : plan.keys);
     logf("vk: startup compilation skipped; cached load-at-create index initialized");
 }

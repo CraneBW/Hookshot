@@ -152,10 +152,6 @@ void hos_fs_wait_writes(void) {}
 /* CONTROL_QUIT */
 static int relaunch_asked = 1;
 static void relaunch(void) { assert(marker == NO_FILE && !ready); }
-/* (hos_window_closed_exit first waits for a file the game is writing: none here) */
-static int64_t hos_now_ns(void) { return 0; }
-static void hos_sleep_ns(int64_t ns) { (void)ns; }
-int hos_fs_writing(void) { return 0; }
 /* WINDOW_EXIT */
 static int game_argc;
 static char **game_argv;

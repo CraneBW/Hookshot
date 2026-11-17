@@ -3581,6 +3581,7 @@ const uint8_t* replay_handle_early(VkCommandBuffer& cmd, const uint8_t* h, bool 
         j->inits = texture_segment_end(j->index);
         texture_segment_worker(-1);
         gpu_time_end(*j->r, j->uploads);   // (as replay_handle's)
+        host_read_barrier(c);   // (as the other segments': what the GPU wrote, seen by the host's reads)
         vkEndCommandBuffer(j->r->upload);
         vkEndCommandBuffer(j->r->cmd);
         work_seg_end();   //
