@@ -65,7 +65,9 @@ CACHES = ("hookshot_programs.bin", "hookshot_programs.idx", "hookshot_programs.z
           "hookshot_module_ids.bin", "hookshot_pipelines.bin", "hookshot_pipelines.bin.predicted", "hookshot_pipelines.bin.predicted_keys",
           "hookshot_pipelines.bin.built",
           "hookshot_computes.bin", "hookshot_compute_variants.bin", "hookshot_pipeline_states.bin",
-          "hookshot_pipeline_states_v1.bin", "hookshot_prepared.bin", "hookshot_vk_pipelines.bin", "hookshot_vk_pipelines.stamp")
+          "hookshot_pipeline_states_v1.bin", "hookshot_prepared.bin", "hookshot_vk_pipelines.bin", "hookshot_vk_pipelines.stamp",
+          # (the textures a draw has sampled, for RX_VK_TEX_AHEAD: gpu/vk/texture_ahead.h)
+          "hookshot_textures_drawn.bin")
 PLAY_FILES = re.compile(r"hookshot_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
 # (what the game writes into its folder at run time, never a build's output: the caches (and the button prompts it makes) in
 # cache/, the logs in logs/ (host/game_layout.c)
