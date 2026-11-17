@@ -64,6 +64,9 @@ static uint64_t hos_jt_lr(void) { return 0; }
 static void Sleep(unsigned ms) { (void)ms; }   /* (HOS_BG_THROTTLE's sleep: off here) */
 static int escapes_logged;
 static void hos_log(const char *fmt, ...) { if (strstr(fmt, "ran without a core")) escapes_logged++; }
+/* (host/profiling.c: the profiling mode off, so a long wait is no event) */
+static const char *hos_profiling_dir(void) { return 0; }
+static void hos_profiling_event(const char *fmt, ...) { (void)fmt; }
 static int hos_cores(void) { return 2; }
 /* (the processors' topology, for the background threads' cap (HOS_BG_CAP=auto, off here): none known) */
 typedef enum { RelationProcessorCore } LOGICAL_PROCESSOR_RELATIONSHIP;

@@ -265,8 +265,8 @@ If the problem continues, [report it](https://git.notrexed.dev/Hookshot/Hookshot
 you were in the game, your graphics card, `hookshot_log.txt` and a screenshot or video. Never send game files. The
 in-game menu's **Gameplay → Bug report** gathers all of it in one press ([In-game menu](#in-game-menu)).
 If the game runs slowly or stutters, [report slow performance](docs/performance-report.md) shows how to have it measure
-itself first. For short freezes or hitches, add `HOS_RECORD_STUTTERS=1` to `hookshot_env.txt`: it writes what the game did
-during each frame of 50 ms or more to the `logs` folder ([if it stutters](docs/performance-report.md#if-it-stutters)).
+itself first. To find out why, add `HOS_PROFILE=1` to `hookshot_env.txt`: the game records where its time goes and what
+each stutter was into a folder in `logs` ([turn on the profiling mode](docs/performance-report.md#1-turn-on-the-profiling-mode)).
 
 #### Low FPS or stutter
 
