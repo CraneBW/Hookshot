@@ -551,6 +551,7 @@ SW(RX_VK_IMPORT_HIGH, hw, int, "85% on Linux and Windows NVIDIA and AMD; 0 (idle
 SW(RX_VK_IMPORT_LOW, tune, int, "70% for the idle-import valve, 75% for the retired valve", "Percent of the system heap budget the import give-back valves bring usage down to.")
 SW(RX_VK_IMPORT_SPAN_MB, tune, int, "64 MB", "Up to this size an import also takes the chunks of game pools that run across its ends; 0 does not.")
 GONE(RX_VK_INHERIT_ALL, "2026-11-16", "it does nothing: a new mirror inherits only the pages not stamped since the old sync")
+SW(RX_VK_INVALIDATE_QUICK, kill, bool, "on: an invalidate with nothing to wait for keeps the game thread's virtual core", "=0 gives the core up for every invalidate, as before.")
 GONE(RX_VK_INVALIDATE_WAIT, "2026-11-16", "it does nothing: the catch-up is only for ranges that may hold a GPU-written texture")
 SW(RX_VK_IR, diag, string, "unset: nothing written", "Program key prefixes whose stages' Eden IR and SPIR-V are written to the working folder, plus compute info lines.")
 GONE(RX_VK_JOB_STEAL, "2026-11-16", "it does nothing: a waiting draw always runs its still-queued job itself")
