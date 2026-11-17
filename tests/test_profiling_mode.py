@@ -3,7 +3,7 @@ hos_sample_write (cut out of profiling.c and compiled with a stub) reads back th
 format's lines, and scripts/profile_report.py reads a made-up profile folder (presents, frame trace, packed samples, events,
 cpu.csv, a log) into a report that names the stutter, the main thread's hot function and the long wait for a virtual core.
 Then the source checks: the switch is read after hookshot_env.txt in both mains, the old HOS_RECORD_STUTTERS says what took
-its place, both samplers write through hos_sample_write and start the mode, the renderer's frame trace goes into the folder
+its place (its GONE row in gpu/vk/switches.def), both samplers write through hos_sample_write and start the mode, the renderer's frame trace goes into the folder
 with the host's clock, and a long wait for a virtual core is an event.
 
 python -I -B tests/test_profiling_mode.py
@@ -168,7 +168,9 @@ def sources():
     main = (ROOT / "host/hos_main.c").read_text(encoding="utf-8")
     need(main.count("    load_hookshot_env();\n    hos_profiling_env();") == 2, "HOS_PROFILE=1 is not read after hookshot_env.txt "
          "in both mains")
-    need('{"HOS_RECORD_STUTTERS", "HOS_PROFILE=1' in main, "HOS_RECORD_STUTTERS does not name what took its place")
+    table = (ROOT / "gpu/vk/switches.def").read_text(encoding="utf-8")   # (a removed HOS_ switch is a GONE row there)
+    need(any(l.startswith("GONE(HOS_RECORD_STUTTERS,") and "HOS_PROFILE=1" in l for l in table.splitlines()),
+         "HOS_RECORD_STUTTERS does not name what took its place")
     need("record_stutters_env" not in main, "HOS_RECORD_STUTTERS is still read")
     prof = (ROOT / "host/profiling.c").read_text(encoding="utf-8")
     env = block(prof, "void hos_profiling_env(void)")
