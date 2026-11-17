@@ -350,7 +350,7 @@ SW(RX_VK_CAPWAIT_TRACE, diag, bool, "off", "Logs each wait of a capture for a wr
 SW(RX_VK_CAP_BLOCKS, attempt, bool, "off: capture buffers of 16 MB and up each get dedicated memory", "1 allocates large capture buffers from shared memory blocks instead of dedicated memory.")
 SW(RX_VK_CAP_FIT, attempt, bool, "off: a capture takes the best-fitting spare buffer", "=1 takes a spare at most twice its need's size class, else makes one of its size, and a returned spare replaces the largest kept one if smaller.")
 SW(RX_VK_CAP_MIN_MB, tune, int, "2 MB", "The smallest capture buffer size class in MB; 16 is the old behaviour.")
-SW(RX_VK_CAP_ONLY_GPU, diag, enum, "0: the import ranges are captured whole", "1 clips the capture's import ranges to the game's memory pools; 2 captures as before and counts the pages 1 would leave out.")
+SW(RX_VK_CAP_ONLY_GPU, kill, enum, "1: the capture's import ranges clipped to the game's memory pools", "0 captures the import ranges whole, as before; 2 captures them whole and counts the pages 1 leaves out.")
 GONE(RX_VK_CAP_PREWARM, "2026-11-16", "it does nothing: big spare capture buffers are always made ahead on a worker")
 SW(RX_VK_CAP_SPARE_AGE, tune, int, "0: spare capture buffers are kept", "Frees a spare capture buffer no capture took for that many captures.")
 SW(RX_VK_CAP_SPARE_MB, hw, int, "32 MB of spare capture buffers on cards allowing 6.5 GB or less; no byte limit elsewhere", "Sets how many MB of spare capture buffers are kept for reuse; 0 means no limit, as before.")

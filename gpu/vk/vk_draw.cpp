@@ -4003,7 +4003,9 @@ int ubo_memo_mode() {
     static const int mode = [] {
         const int v = env_on("HL_UBO_MEMO_CHECK") ? 2 : env_on("HL_UBO_MEMO") ? 1 : 0;
         if (!v) return 0;
-        if (ledger_on() || env_on("RX_VK_CAP_ONLY_GPU") || ub_snapshot_wanted() || env_on("RX_VK_UB_CUR_ONLY")) {
+        // (RX_VK_CAP_ONLY_GPU is on by default, vk_memory.cpp cap_only_gpu: the memo runs only where it is set to 0)
+        const char* cap = getenv("RX_VK_CAP_ONLY_GPU");
+        if (ledger_on() || !cap || !env_value_off(cap) || ub_snapshot_wanted() || env_on("RX_VK_UB_CUR_ONLY")) {
             logf("hl ubo memo: left off (RX_VK_LEDGER, RX_VK_CAP_ONLY_GPU, RX_VK_UB_SNAPSHOT or RX_VK_UB_CUR_ONLY is on)");
             return 0;
         }
