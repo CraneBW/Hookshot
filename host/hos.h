@@ -76,6 +76,9 @@ void *hos_xmalloc(size_t size, const char *what);
 void *hos_xcalloc(size_t count, size_t size, const char *what);
 void *hos_xrealloc(void *old, size_t size, const char *what);
 void hos_out_of_memory(int wait);
+/* (mkw_glue.c) the end of hos_alloc_failed's wait: the line, the notice and the stop (n 0: the size not known, as for
+   the renderer's C++ allocations, MkwVkHost out_of_memory). Does not return */
+void hos_alloc_gave_up(size_t n, const char *what);
 int hos_mem_region(uint64_t addr, uint64_t size);      /* (hos_mem.c) the control bridge: 0 if not wholly in mapped guest memory */
 /* (Hookshot) 1: the heap and the address regions are reserved when the game asks for them and committed where they are
    first touched (mkw_glue.c commit_on_touch), instead of whole. A system call given a guest buffer needs hos_commit on

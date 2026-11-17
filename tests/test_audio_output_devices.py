@@ -58,13 +58,15 @@ def check_host_callbacks(api, backend):
     expected = {'take_text': 'host_take_text', 'options_path': 'hos_options_file',
                 'audio_output_count': 'hos_audio_output_count', 'audio_output_info': 'hos_audio_output_info',
                 'audio_output_select': 'hos_audio_output_select', 'audio_output_state': 'hos_audio_output_state',
-                'mic_test': 'hos_mic_test', 'main_thread_times': 'host_main_thread_times'}
+                'mic_test': 'hos_mic_test', 'main_thread_times': 'host_main_thread_times',
+                'out_of_memory': 'host_out_of_memory'}
     assert len(fields) == len(table), 'Host interface/initializer lengths differ'
-    # (the end of the table: playback, the microphone test (28), the frame trace's main_thread_times (29); take_text and
+    # (the end of the table: playback, the microphone test (28), the frame trace's main_thread_times (29), the renderer's
+    # out_of_memory (30); take_text and
     # options_path come earlier, the mods' and cheats' callbacks between them and playback)
     tail = ['audio_output_count', 'audio_output_info', 'audio_output_select', 'audio_output_state', 'mic_test',
-            'main_thread_times']
-    assert fields[-len(tail):] == tail, 'Mic test must follow playback (version 29 appends main_thread_times)'
+            'main_thread_times', 'out_of_memory']
+    assert fields[-len(tail):] == tail, 'Mic test must follow playback (version 29 appends main_thread_times, 30 out_of_memory)'
     assert fields.index('take_text') < fields.index('options_path') < fields.index('audio_output_count'),         'take_text and options_path must come before playback'
     for field, value in expected.items():
         assert table[fields.index(field)] == value, 'Wrong host callback slot: ' + field
@@ -84,6 +86,8 @@ _Static_assert(offsetof(MkwVkHost, mic_test) == offsetof(MkwVkHost, audio_output
                "append microphone test after playback without shifting earlier callbacks");
 _Static_assert(offsetof(MkwVkHost, main_thread_times) == offsetof(MkwVkHost, mic_test) + sizeof(((MkwVkHost *)0)->mic_test),
                "append the main thread's times after the microphone test without shifting earlier callbacks");
+_Static_assert(offsetof(MkwVkHost, out_of_memory) == offsetof(MkwVkHost, main_thread_times) + sizeof(((MkwVkHost *)0)->main_thread_times),
+               "append the renderer's out-of-memory stop after the main thread's times without shifting earlier callbacks");
 int main(void) {
     char id[HOS_OUTPUT_ID_CAP] = "old";
     assert(audio_output_copy_id(id, sizeof id, "opaque=id") && !strcmp(id, "opaque=id"));
