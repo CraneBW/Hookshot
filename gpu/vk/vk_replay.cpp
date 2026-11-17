@@ -3166,13 +3166,13 @@ bool occ_sync(VkCommandBuffer& cmd) {
 // that, Castle Town's market and eight other places showed no black frame on 3 to 8 threads; the Kakariko walk was not run
 // again, so it stays off. On a 9950X3D the replay's wall time in the market goes from 10.9 ms a frame to 7.75 on 3 threads.
 int par_threads() {
-    // (Hookshot) on by default since the fix: 4 threads with 8+ hardware threads (Kokiri 54->65 fps, Hyrule Field 49->62,
-    // p99 26->20 and 66->19 ms, same picture). RX_VK_PARALLEL=0 turns it off
-    // 5 with 16+ hardware threads: with the Presentation Thread recording too (RX_VK_PARALLEL_SELF), six segments a
-    // command buffer (kMaxBatch) instead of five; 4 below 16 (a 6-core PC's cores are the game's job threads')
-    static const unsigned hc = std::thread::hardware_concurrency();
-    static const int dflt = hc >= 16 ? 5 : hc >= 8 ? 4 : 0;
-    static const int n = std::clamp(getenv("RX_VK_PARALLEL") ? atoi(getenv("RX_VK_PARALLEL")) : dflt, 0, 8);
+    // Off by default, as before the renderer merge: RX_VK_PARALLEL=<n> (2 to 8) records a big command buffer's segments on n
+    // threads. The merge had brought another tree's default, on with 8 or more hardware threads (4 threads; 5 from 16), measured
+    // there as a gain (Kokiri 54 -> 65 fps on its PC). Here it cost a quarter of the frame rate: Kokiri 30.5 fps against 38.9 with
+    // it off (RTX 4060 Ti, Ryzen 5 7600X, 12 threads). The exposure meter the game reads back every frame (0x3980 bytes, two
+    // buffers in turn) is written back only in a parallel submission's last part, so the job thread reading it waited for the
+    // whole submission, 16 ms median (RX_VK_LOG_READBACK_WAITS), where the serial replay's earlier part was done (0.01 ms)
+    static const int n = std::clamp(getenv("RX_VK_PARALLEL") ? atoi(getenv("RX_VK_PARALLEL")) : 0, 0, 8);
     return n;
 }
 struct ParPool {
