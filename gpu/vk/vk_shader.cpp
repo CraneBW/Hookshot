@@ -58,6 +58,7 @@
 #include "vk_draw.h"
 #include "vk_progcache.h"
 #include "vk_menu.h"
+#include "switches.h"   // (find_gone: a removed switch is none of the stamp's)
 
 // (EvilOOT, RX_VK_PTR_DIAG) the pointer pass's counts for this thread's translations
 // (global_memory_to_storage_buffer_pass.cpp, declared by hand so no Eden header changes)
@@ -256,25 +257,9 @@ Code parse_code(const uint8_t* ctl, const std::vector<uint8_t>& area) {
         if (reject) return c.why = "left out by RX_VK_REJECT_STAGES or RX_VK_REJECT_KEYS", c;
     }
     // (compute only: the host's cooperative matrices are, vk_coopmat.cpp)
-    // (hookshot) and only for the programs in RX_VK_NATIVE_MMA_KEYS (key prefixes, default the gameplay TAAU network,
-    // whose output vk_draw.cpp's stand-in replaces; "all": every one). The others take the exact expansion: with the
-    // cooperative matrices the movie upscaler lost its blue (the title's clip yellow) though the device's fragment
-    // layout passes vk_coopmat.cpp's multiply; exact, its colours are right at the same frame rate
-    // (default "all": a program left off it is expanded only with EDEN_NX2_TENSOR set, and is otherwise not lowered
-    // at all; the per-key default dropped OoT's other gameplay networks, e409733c and others)
-    static const std::string native_keys = getenv("RX_VK_NATIVE_MMA_KEYS") ? getenv("RX_VK_NATIVE_MMA_KEYS") : "all";
-    bool native_key = native_keys == "all";
-    {
-        char hex[24];
-        snprintf(hex, sizeof hex, "%016llx", (unsigned long long)c.key);
-        for (size_t at = 0; !native_key && at < native_keys.size();) {
-            const size_t e = native_keys.find(',', at);
-            const std::string t = native_keys.substr(at, e == std::string::npos ? std::string::npos : e - at);
-            native_key = !t.empty() && !strncmp(hex, t.c_str(), t.size());
-            at = e == std::string::npos ? native_keys.size() : e + 1;
-        }
-    }
-    Shader::Ampere::native_matrix_multiply = dev.native_mma && !graphics && native_key;
+    // (hookshot) and for every compute program: one left without them is expanded only with EDEN_NX2_TENSOR set, and is
+    // otherwise not lowered at all (a list of programs by key dropped OoT's other gameplay networks, e409733c and others)
+    Shader::Ampere::native_matrix_multiply = dev.native_mma && !graphics;
     {   // RX_VK_LOWER_SKIP=<key prefix,...>: those programs left unlowered, as if they did not lower (a bisection). It is in
         // translator_stamp, so a cache made with it set is kept apart from one made without
         static const std::string skip = getenv("RX_VK_LOWER_SKIP") ? getenv("RX_VK_LOWER_SKIP") : "";
@@ -523,9 +508,8 @@ public:
     }
     u32 SharedMemorySize() const override {
         // (what the program declares, from the control section: 48 KB for every one was past an RX 9070 XT's 32 KB, and its
-        // pipelines were invalid. klimovich008, Hookshot PR 91. RX_VK_SHARED_48K=1: as before)
-        static const bool old = env_on("RX_VK_SHARED_48K");
-        return old ? 48u << 10 : nvn.shared_memory;
+        // pipelines were invalid. klimovich008, Hookshot PR 91)
+        return nvn.shared_memory;
     }
     std::array<u32, 3> WorkgroupSize() const override {
         return {std::max(1u, nvn.local[0]), std::max(1u, nvn.local[1]), std::max(1u, nvn.local[2])};
@@ -536,10 +520,8 @@ public:
     // DrawIndex, right for indirect draws too. The bank had zeros there: MKW's terrain patches, which pass log2 of
     // their template grid as the base instance (4: 16 x 16, 3: 8 x 8), took a 1 x 1 grid, every vertex on a corner:
     // each patch two triangles, one of them often degenerate (the triangular holes in the far terrain).
-    // (RX_VK_NO_DRAW_PARAMS=1: as before)
     bool HasHLEMacroState() const override {
-        static const bool off = env_on("RX_VK_NO_DRAW_PARAMS");
-        return !off && (stage == Shader::Stage::VertexA || stage == Shader::Stage::VertexB);
+        return stage == Shader::Stage::VertexA || stage == Shader::Stage::VertexB;
     }
     bool HasNativeInstructions() const override { return true; }   // (lowered NVN2 programs: Lichii's passes ask)
     bool IsNativeProgram() const override { return true; }   // (Fritchii's storage buffer pass asks: EDEN_NX2_GM_NATIVE=0 off)
@@ -661,24 +643,23 @@ Shader::Profile make_profile() {
     p.support_storage_texel_buffer_array_nonuniform_indexing = dev.vk12.shaderStorageTexelBufferArrayNonUniformIndexing;
     // Unpinned SPIR-V 1.6 stages can use any supported subgroup size, even when the default is 32.
     // The stage-specific profiles below keep the short path only where pin_subgroup actually pins 32 lanes.
-    p.warp_size_potentially_larger_than_guest = dev.subgroup_max > 32;
+    // (device_policy.h warp64: a subgroup can have more than 32 lanes)
+    p.warp_size_potentially_larger_than_guest = dev.policy.warp64;
     // (RX_VK_WARP64=0 or 1, a test: the graphics stages' long warp path off or on, whatever the GPU; in the cache's stamp)
     if (const char* e = getenv("RX_VK_WARP64")) p.warp_size_potentially_larger_than_guest = e[0] == '1';
     p.lower_left_origin_mode = false;
     p.need_declared_frag_colors = false;
     // (the lanes the broadcast fallbacks walk: all of the host's when a warp may be larger than the guest's)
     p.max_subgroup_size = p.warp_size_potentially_larger_than_guest ? dev.subgroup_max : 32;
-    // (Lichii #273) AMD's Windows compiler gets fragment-stage subgroup shuffles wrong (a basket in Link's house drew as a white
-    // blob): broadcasts and selects there instead. RADV too (seen so far on RDNA1, other RADV GPUs untested): objects flickered
-    // between right, speckled and glowing white while moving (the ladder of Link's house) until the fallback was on
-    p.has_broken_spirv_fragment_shuffle =
-        dev.driver_id == VK_DRIVER_ID_AMD_PROPRIETARY || dev.driver_id == VK_DRIVER_ID_MESA_RADV;
+    // (Lichii #273; device_policy.h frag_shuffle_fallback: AMD's Windows driver and RADV) fragment-stage subgroup shuffles
+    // through broadcasts and selects
+    p.has_broken_spirv_fragment_shuffle = dev.policy.frag_shuffle_fallback;
     // (RX_VK_FRAG_SHUFFLE_FALLBACK=0 or 1, a test: the fragment stages' shuffles native or through broadcasts, whatever the
     // driver; in the cache's stamp)
     if (const char* e = getenv("RX_VK_FRAG_SHUFFLE_FALLBACK")) p.has_broken_spirv_fragment_shuffle = e[0] == '1';
-    // (hookshot) gathers nudged by 1/512 of a texel on AMD's and Intel's drivers, as Eden and Lichii have it (vk_vendor.h; in the
-    // cache's stamp)
-    p.need_gather_subpixel_offset = dev.fixes.gather_offset;
+    // (hookshot) gathers nudged by 1/512 of a texel on AMD's and Intel's drivers, as Eden and Lichii have it (device_policy.h
+    // gather_offset, RX_VK_GATHER_OFFSET read there; in the cache's stamp)
+    p.need_gather_subpixel_offset = dev.policy.gather_offset;
     p.min_ssbo_alignment = storage_binding_align();   // (at least 16: vk_internal.h)
     return p;
 }
@@ -793,23 +774,6 @@ std::vector<uint32_t> strip_float_controls(const std::vector<uint32_t>& spirv, u
     return out;
 }
 
-bool spirv_uses_subgroups(const std::vector<uint32_t>& spirv) {
-    if (spirv.size() < 5 || spirv[0] != 0x07230203u) return true;   // (not SPIR-V we can read: as if it did)
-    for (size_t i = 5; i < spirv.size();) {
-        const uint32_t op = spirv[i] & 0xffffu, n = spirv[i] >> 16;
-        if (!n || i + n > spirv.size()) return true;
-        if (op != 17 && op != 10 && op != 11) return false;   // (past OpCapability, OpExtension, OpExtInstImport: none of them)
-        if (op == 17 && n >= 2) {
-            const uint32_t c = spirv[i + 1];
-            // (Groups 18, GroupNonUniform to GroupNonUniformQuad 61-68, SubgroupBallotKHR 4423, SubgroupVoteKHR 4431,
-            // GroupNonUniformPartitionedNV 5297, CooperativeMatrixNV 5357, CooperativeMatrixKHR 6022)
-            if (c == 18 || (c >= 61 && c <= 68) || c == 4423 || c == 4431 || c == 5297 || c == 5357 || c == 6022) return true;
-        }
-        i += n;
-    }
-    return false;
-}
-
 thread_local uint64_t module_program = 0;   // (translate_into's program, for make_module's callers that do not name it)
 VkShaderModule make_module(const std::vector<uint32_t>& spirv_in, uint64_t program, bool* busy) {
     // (RX_VK_KEEP_DENORM=1: the modules as translated, to compare a picture or a number with and without the strip)
@@ -848,14 +812,9 @@ uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uin
         const nvn_p_bind_buf& u = s.ubo[st.nvn_stage][index - 3];
         uint32_t v = 0;
         // (as the stream's place sees it, not the game's memory now: that may be its next frames' already, and a
-        // handle read from it sampled their textures, for one frame: MKW's shadows in bands. RX_VK_HANDLES_LIVE=1:
-        // as before)
-        static const bool live = env_on("RX_VK_HANDLES_LIVE");
+        // handle read from it sampled their textures, for one frame: MKW's shadows in bands)
         // (EvilOOT: and a binding of no recorded size read as far as asked, as the storage buffer descriptors had it before)
-        if (u.addr && (!u.size || (uint64_t)offset + 4 <= (uint64_t)u.size)) {
-            if (live) host->gpu_read(u.addr + offset, &v, 4);
-            else ub_read(u.addr + offset, &v, 4);
-        }
+        if (u.addr && (!u.size || (uint64_t)offset + 4 <= (uint64_t)u.size)) ub_read(u.addr + offset, &v, 4);
         return v;
     }
     return 0;
@@ -871,11 +830,7 @@ uint64_t stage_storage_base(const NvnState& s, const Stage& st, uint32_t binding
 }
 uint32_t stage_storage_word(uint64_t base, uint32_t offset) {
     uint32_t v = 0;
-    static const bool live = env_on("RX_VK_HANDLES_LIVE");
-    if (base) {
-        if (live) host->gpu_read(base + offset, &v, 4);
-        else ub_read(base + offset, &v, 4);
-    }
+    if (base) ub_read(base + offset, &v, 4);   // (as the stream's place sees it: stage_cbuf_word)
     return v;
 }
 } // namespace
@@ -1007,8 +962,7 @@ uint8_t answer_of(uint32_t handle, bool image) {
 uint8_t canonical_answer(const Program& p, const Program::Answer& a, uint8_t type) {
     static const bool strict = [] {
         const char* capture = getenv("RX_VK_CAPTURE");
-        return env_on("RX_VK_HANDLES_LIVE") || env_on("RX_VK_REGISTER_AT_ONCE") ||
-               (capture && atoi(capture) == 0);
+        return capture && atoi(capture) == 0;
     }();
     if (strict) return type;
     const auto& info = p.stages[a.stage].info;
@@ -1417,7 +1371,8 @@ uint64_t translator_stamp() {
     add(&mesh, sizeof mesh);
     // (and what of the GPU the translator is told (make_profile): its warps' lanes and the driver's shuffle workaround, and
     // which stages it pins to 32 lanes, which keep the short path: profile_graphics. An explicit warp override bypasses
-    // the pinned graphics profile even if the base profile already has the requested width)
+    // the pinned graphics profile even if the base profile already has the requested width. The first three are the device
+    // policy's (device_policy.h warp64, frag_shuffle_fallback) with their switches over them, as the profile has them)
     const uint32_t lanes[] = {profile().warp_size_potentially_larger_than_guest ? 1u : 0u, profile().max_subgroup_size,
                               profile().has_broken_spirv_fragment_shuffle ? 1u : 0u, (uint32_t)dev.sg32_stages,
                               getenv("RX_VK_WARP64") ? 1u : 0u,
@@ -1457,7 +1412,7 @@ uint64_t translator_stamp() {
         // NaN guard, the matrix layout measured on this device. Without them a cache made on one GPU was used on another (a laptop's
         // integrated and dedicated GPUs), and RX_VK_NO_INVARIANT / RX_VK_NAN_GUARD did nothing for programs already cached)
         using namespace Shader::Backend::SPIRV;
-        // (and the vendor fixes of the translation, vk_vendor.h: out-of-bounds fetches, NaN tests, the gather offset)
+        // (and the vendor fixes of the translation, device_policy.h: out-of-bounds fetches, NaN tests, the gather offset)
         const uint32_t flags = (position_invariant ? 1u : 0u) | (frag_nan_guard ? 2u : 0u) | (mma_software ? 4u : 0u) |
                                (global_table_loop ? 8u : 0u) | (fetch_bounds ? 16u : 0u) | (nan_bits ? 32u : 0u) |
                                (profile().need_gather_subpixel_offset ? 64u : 0u) | (fetch_bounds_buffers ? 128u : 0u) |
@@ -1474,6 +1429,12 @@ uint64_t translator_stamp() {
         const uint32_t float_add = 1;
         add(&float_add, sizeof float_add);
     }
+    {   // (and the two rules translate_into reads from the device policy by themselves: the Deku Tree web's inlined loads and
+        // the networks left out. Their rule was this file's text, so HOOKSHOT_SHADER_STAMP held it; device_policy.h is no
+        // file of that stamp, so the values are held here, or a rule changed there would leave the programs made by the old one)
+        const uint32_t policy[] = {dev.policy.inline_deku_web_loads ? 1u : 0u, dev.policy.networks_left_out ? 1u : 0u};
+        add(policy, sizeof policy);
+    }
     // (and whether a float add is the GPU's own atomic (make_profile): a program made with OpAtomicFAddEXT is no use to a GPU
     // without it, nor one made with RX_VK_NATIVE_FADD=0's loop wanted back once it is native again)
     const uint32_t float_add = profile().support_float32_atomic_add ? 1u : 0u;
@@ -1489,14 +1450,18 @@ uint64_t translator_stamp() {
     }
     // (RX_VK_GP_, not RX_VK_GP: that took RX_VK_GPL with it, which changes no translation, and switching the stage libraries on
     // threw the whole program cache away. What the libraries are good for is the prepare's second stamp, vk_draw.cpp warmed_stamp)
-    // (and every other switch the translation reads: the storage buffer pass's (RX_VK_NO_CBUF_LOAD_RULE, RX_VK_PTR_SPLIT_FALLBACK,
-    // RX_VK_ALL_GLOBAL_PROGS), the lowering's extended registers (RX_VK_NO_EXTREGS), the draw parameters (RX_VK_NO_DRAW_PARAMS)
-    // and the miss log's buffer and block counters (RX_VK_MISS_LOG, RX_VK_BLOCK_PROBE): without them a switch did nothing for
-    // the programs already cached. tests/test_program_stamp_knobs.py checks the translator's switches against this list)
-    for (char** e = _environ; e && *e; e++)
-        for (const char* pre : {"RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK", "RX_VK_GP_", "RX_VK_FOLLOW", "RX_VK_NO_FOLLOW", "RX_VK_NO_F16", "RX_VK_SHARED", "RX_VK_MESH", "RX_VK_FOLD", "RX_VK_NO_INVARIANT", "RX_VK_MARKERS",
-                                "RX_VK_NO_CBUF_LOAD_RULE", "RX_VK_PTR_SPLIT_FALLBACK", "RX_VK_ALL_GLOBAL_PROGS", "RX_VK_NO_EXTREGS", "RX_VK_NO_DRAW_PARAMS", "RX_VK_MISS_LOG", "RX_VK_BLOCK_PROBE", "RX_VK_LOWER_SKIP", "EDEN_"})
+    // (and every other switch the translation reads: the storage buffer pass's (RX_VK_ALL_GLOBAL_PROGS) and the miss log's
+    // buffer and block counters (RX_VK_MISS_LOG, RX_VK_BLOCK_PROBE): without them a switch did nothing for the programs
+    // already cached. tests/test_program_stamp_knobs.py checks the translator's switches against this list)
+    // (not a name that is no longer a switch (switches.def's GONE rows: nothing reads it), though it begins as a family
+    // here does: a run that still sets one keeps the cache of a run that does not)
+    for (char** e = _environ; e && *e; e++) {
+        const char* const eq = strchr(*e, '=');
+        if (eq && switches::find_gone(std::string(*e, (size_t)(eq - *e)).c_str())) continue;
+        for (const char* pre : {"RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK", "RX_VK_GP_", "RX_VK_FOLLOW", "RX_VK_NO_F16", "RX_VK_MESH", "RX_VK_FOLD", "RX_VK_NO_INVARIANT", "RX_VK_MARKERS",
+                                "RX_VK_ALL_GLOBAL_PROGS", "RX_VK_MISS_LOG", "RX_VK_BLOCK_PROBE", "RX_VK_LOWER_SKIP", "EDEN_"})
             if (!strncmp(*e, pre, strlen(pre))) add(*e, strlen(*e));
+    }
     return h;
 }
 namespace {
@@ -1655,7 +1620,8 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
                     kept_one = !k.empty() && !strncmp(hex, k.c_str(), k.size());
                     at = e == std::string::npos ? keep.size() : e + 1;
                 }
-                if ((!kept_one && (Shader::Backend::SPIRV::mma_software || dev.props.vendorID != 0x10DE)) || env_on("RX_VK_NO_F16") || !dev.vk12.shaderFloat16)
+                // (device_policy.h networks_left_out: every vendor but NVIDIA; and where the multiplies run in software, whoever made the GPU)
+                if ((!kept_one && (Shader::Backend::SPIRV::mma_software || dev.policy.networks_left_out)) || env_on("RX_VK_NO_F16") || !dev.vk12.shaderFloat16)
                     throw LeftOut("a network left out on this card");
             }
             const std::vector<uint32_t> spirv = Shader::Backend::SPIRV::EmitSPIRV(profile_pinned(), rt, t->program, bindings);
@@ -1676,7 +1642,6 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
             st.nvn_stage = 5;
             st.info = t->program.info;
             st.module = make_module(spirv);
-            st.subgroups = spirv_uses_subgroups(spirv);
             kept.push_back(spirv);
             st.vk_stage = VK_SHADER_STAGE_COMPUTE_BIT;
             st.c1 = csc->c1;
@@ -1701,10 +1666,11 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
             for (int i = 0; i < 16; i++) vrt.generic_input_types[i] = attribute_type_of(s.vattr[i]);
             vrt.previous_stage_stores.mask.set();
             vrt.convert_depth_mode = host->depth_minus_w() != 0;
-            // Deku Tree web (#455): with DontInline, NVIDIA's compiled vertex shader substitutes the grid-origin
+            // Deku Tree web: with DontInline, NVIDIA's compiled vertex shader substitutes the grid-origin
             // load result for the grid dimensions in the coordinate clamps. The SPIR-V names the right result.
+            // (device_policy.h inline_deku_web_loads: NVIDIA)
             constexpr uint64_t kDekuWebVertexCode = 0xb449bcdb69b36a8aull;
-            vrt.inline_global_128_loads = dev.props.vendorID == 0x10DE && vsc->key == kDekuWebVertexCode;
+            vrt.inline_global_128_loads = dev.policy.inline_deku_web_loads && vsc->key == kDekuWebVertexCode;
             // (OoT's Royal Family Tomb water writes clip.xy/clip.w as a noperspective varying. Clipping a
             // vertex with w close to zero then makes AMD interpolate the wrong depth, whose exp2 overflows
             // into the red dotted line. Write it times Position.w and interpolate perspective-correct in
@@ -2263,13 +2229,12 @@ const Program* program_for(const NvnState& s, ProgramKind kind, const uint8_t co
     const uint64_t bind = s.bind_gen, reg = registrations_generation(), ub = ub_generation();
     // (hookshot) the pair of the last picks stood only while nothing at all was bound anew, and OoT binds a uniform buffer for nearly every
     // draw: a draw of the same program with the same textures found its program through the full pick (the key, the answers' handles, a
-    // compare). It stands now while the textures its answers are read from do (answer_stage_mask). RX_VK_PICK_BIND_GEN=1: as before
-    static const bool by_bind = env_on("RX_VK_PICK_BIND_GEN");
+    // compare). It stands now while the textures its answers are read from do (answer_stage_mask)
     for (const ProgFast& f : prog_fast) {   // (the draw before this one, and the one that took turns with it)
         if (!(f.on && f.p && f.p->ready.load(std::memory_order_acquire) && !f.p->failed)) continue;
         uint64_t fbind = f.bind;
         bool by_tex = false;
-        if (fbind != bind && !by_bind && !compute && f.amask != ~0u) {
+        if (fbind != bind && !compute && f.amask != ~0u) {
             by_tex = true;
             for (int k = 0; k < kNvnStages; k++)
                 if ((f.amask >> k & 1) && f.tex_gen[k] != s.tex_gen[k]) by_tex = false;

@@ -1886,14 +1886,16 @@ void ub_thread_off() {
     ub_limit = 0;
 }
 /// The open gap around [addr, addr+bytes) that no update covers. False when one does. [lo, hi) is that gap.
-bool ub_gap(const uint64_t* dst, const uint64_t* end, int n, uint64_t addr, uint64_t bytes, uint64_t* lo, uint64_t* hi) {
+bool ub_gap(std::deque<UbUpdate>::const_iterator first, std::deque<UbUpdate>::const_iterator last,
+            uint64_t addr, uint64_t bytes, uint64_t* lo, uint64_t* hi) {
     if (!bytes || addr + bytes < addr) return false;
     uint64_t left = 0, right = ~uint64_t{0};
     const uint64_t stop = addr + bytes;
-    for (int i = 0; i < n; i++) {
-        if (dst[i] < stop && addr < end[i]) return false;
-        if (end[i] <= addr && end[i] > left) left = end[i];
-        if (dst[i] >= stop && dst[i] < right) right = dst[i];
+    for (auto it = first; it != last; ++it) {
+        const uint64_t start = it->dst, end = start + it->bytes.size();
+        if (start < stop && addr < end) return false;
+        if (end <= addr && end > left) left = end;
+        if (start >= stop && start < right) right = start;
     }
     *lo = left;
     *hi = right;
@@ -1913,17 +1915,12 @@ bool ub_gap_holds(uint64_t addr, uint64_t n, size_t first, size_t lim) {
 bool ub_try_gap(size_t first, size_t lim, uint64_t addr, uint64_t n) {
     if (first > lim) return false;
     const uint64_t epoch = ub_list_epoch.load(std::memory_order_relaxed);
-    static thread_local std::vector<uint64_t> dst, end;
-    dst.clear();
-    end.clear();
-    dst.reserve(lim - first);
-    end.reserve(lim - first);
-    for (size_t i = first; i < lim; i++) {
-        dst.push_back(ub_updates[i].dst);
-        end.push_back(ub_updates[i].dst + ub_updates[i].bytes.size());
-    }
+    // (a background thread's range is empty: it reads nothing of the deque, not even its start, while the replay
+    // thread changes it)
+    using It = std::deque<UbUpdate>::const_iterator;
+    const It from = first == lim ? It{} : ub_updates.cbegin() + first, to = first == lim ? It{} : from + (lim - first);
     uint64_t lo = 0, hi = 0;
-    if (!ub_gap(dst.data(), end.data(), (int)dst.size(), addr, n, &lo, &hi)) return false;
+    if (!ub_gap(from, to, addr, n, &lo, &hi)) return false;
     if (ub_list_epoch.load(std::memory_order_relaxed) != epoch) return false;   // (the list changed: do not keep the gap)
     ub_gap_cache = {epoch, lo, hi, first, lim, true};
     return true;
@@ -1977,7 +1974,7 @@ void ub_copy_keep(uint64_t addr, uint64_t n, const uint8_t* base, size_t first, 
     c.on = true, c.base = base, c.addr = addr, c.n = n, c.at = at, c.first = first, c.lim = lim;
     c.rec = rec_value_now, c.view = view, c.epoch = epoch;
 }
-uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::function<uint64_t(uint64_t)>& alloc) {
+uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, uint64_t (*alloc)(uint64_t n, uint64_t align), uint64_t align) {
     UbReadGuard ug;   // (the list may grow meanwhile, RX_VK_SEG_EARLY)
     // (a worker: those before its place in the stream; a background thread: none, not even the list's size)
     const size_t lim = ub_limit ? std::min(ub_limit, ub_updates.size()) : 0;
@@ -1998,7 +1995,7 @@ uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::functio
         }
     }
     if (!any) return UINT64_MAX;
-    const uint64_t at = alloc(n);
+    const uint64_t at = alloc(n, align);
     if (at == UINT64_MAX) return UINT64_MAX;
     uint8_t* p = base + at;
     if (!memory_read_as_submitted(addr, p, n)) std::memset(p, 0, n);
@@ -4503,6 +4500,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         rec_cur = &first, rec_cur_value = tag, rec_parts = 0, part_work = 0, part_end_wanted = false;
         rec_open(tag);
         if (rb_writers_on()) rb_span_begin(tag, first.part);
+        texture_ahead_run();   // (hookshot, RX_VK_TEX_AHEAD: into this recording's uploads, while the frames are light)
     }
     VkCommandBuffer cmd = rec_cur->cmd;
     const uint8_t* stop = nullptr;
@@ -5235,7 +5233,10 @@ bool tex_pages_any(uint64_t gpu, uint64_t size) {
     }
     return false;
 }
-void texture_created_of(const nvn_tex* t) { tex_pages_add(t, +1); }
+void texture_created_of(const nvn_tex* t) {
+    tex_pages_add(t, +1);
+    texture_ahead_made(t);   // (hookshot, RX_VK_TEX_AHEAD: it may be made and uploaded before its first draw)
+}
 uint64_t fence();
 struct RbScope {
     bool on;
@@ -5894,6 +5895,17 @@ void early_check_read(uint64_t gpu, uint64_t size, uint64_t v, uint64_t whole, u
     e->gen_m = ec_full_begun.load();   // (after the copy)
     ec_cv.notify_one();
 }
+// (hookshot) the invalidates that kept their virtual core (invalidate_quick) and the ones that gave it up, counted on each
+// thread and added here every 256 calls (the kept ones come per shape per view: no shared line written at each), on the
+// readbacks line's cadence below
+std::atomic<int64_t> inv_kept{0}, inv_gave{0};
+void inv_count(bool kept) {
+    thread_local uint32_t k = 0, g = 0;
+    (kept ? k : g)++;
+    if (k + g < 256) return;
+    inv_kept.fetch_add(k, std::memory_order_relaxed), inv_gave.fetch_add(g, std::memory_order_relaxed);
+    k = g = 0;
+}
 void invalidate(uint64_t gpu, uint64_t size) {
     static const bool log_inv = env_on("RX_VK_LOG_INVALIDATE");
     static std::atomic<int> logged{0};
@@ -6103,6 +6115,9 @@ void invalidate(uint64_t gpu, uint64_t size) {
                          (long long)st_early_splits.exchange(0), (long long)r, r ? st_early_rec_ns.exchange(0) / (double)r / 1e6 : 0.0,
                          (long long)st_early_rec_late.exchange(0));
                 }
+                logf("vk: invalidates since the last readbacks line: %lld kept their virtual core (nothing there to wait for), %lld "
+                     "gave it up (counted by 256 a thread; RX_VK_INVALIDATE_QUICK=0: none kept)",
+                     (long long)inv_kept.exchange(0), (long long)inv_gave.exchange(0));
             }
         }
     }
@@ -6148,6 +6163,38 @@ void invalidate(uint64_t gpu, uint64_t size) {
     }
     std::lock_guard lk(replay_mu);
     texture_flush_to_guest(gpu, size);
+}
+/// (hookshot) invalidate with the game's virtual core kept (host/rx_backend.c rx_nvn_invalidate, nvn_invalidate_quick): 1 when
+/// invalidate would find nothing in [gpu, gpu + size) to wait for or to write back, done here as it would be (the CPU's read
+/// noted for the write-backs left out, memory_note_cpu_read: the one thing it does then); 0 when it may find something, and
+/// the host calls it with the core given up, as before. Read without a lock, from marks set and never taken off
+/// (page_marks.h): no page there ever written back (memory_writeback_ever: invalidate's `ever`, none of its waits), no texture
+/// the GPU wrote ever listed there (texture_gpu_written_ever: texture_gpu_written_in false, no texels to write back) and no
+/// live texture's storage (tex_pages_any, as invalidate reads it: no catch-up, behind or not). OoT's model calc invalidates
+/// each shape's 64-byte occlusion-query slot, per view, from the stage slot jobs: the counts are written there on the CPU
+/// (REPORT_COUNTER and occ_collect, guest_cpu_write), never written back, and each call gave up the core, let another thread
+/// on it and queued to get one back, for nothing to wait for. On the console the call is a cache operation and the thread
+/// runs on. It takes no lock but memory_note_cpu_read's (wb_learn_mu, a leaf, only with RX_VK_WB_MAX_KB) and never waits,
+/// so holding the core here cannot keep another guest thread from what it waits for. Not with invalidate's diagnostics on
+/// (RX_VK_LOG_INVALIDATE, RX_VK_LOG_READBACK), nor with RX_VK_INVALIDATE_WAIT=1 (every range caught up, as before); ranges
+/// past 512 GB (virtual pools, not followed) always go the slow way. RX_VK_INVALIDATE_QUICK=0: never, as before
+int invalidate_quick(uint64_t gpu, uint64_t size) {
+    static const bool on = [] {
+        const char* q = getenv("RX_VK_INVALIDATE_QUICK");
+        const char* rb = getenv("RX_VK_LOG_READBACK");
+        const bool v = (!q || atoi(q) != 0) && !env_on("RX_VK_LOG_INVALIDATE") && !env_on("RX_VK_INVALIDATE_WAIT") &&
+                       !(rb && atoll(rb) >= 0);
+        logf("vk: invalidates with nothing to wait for keep their virtual core: %s", v ? "on" : "off (RX_VK_INVALIDATE_QUICK=0, "
+             "RX_VK_INVALIDATE_WAIT or invalidate's logs)");
+        return v;
+    }();
+    constexpr uint64_t kFollowed = 1ull << 39;   // (tex_pages' and the marks' window: GPU addresses below 512 GB)
+    const bool kept = on && (!size || (gpu < kFollowed && size <= kFollowed - gpu && !tex_pages_any(gpu, size) &&
+                                       !texture_gpu_written_ever(gpu, size) &&
+                                       !memory_writeback_ever(host->gpu_guest(gpu), size)));
+    if (kept) memory_note_cpu_read(host->gpu_guest(gpu), size);
+    inv_count(kept);
+    return kept;
 }
 void do_texture_released(const nvn_tex* t) {
     std::lock_guard lk(replay_mu);
@@ -6743,6 +6790,13 @@ void log_frame_stats() {
 /// a look at the driver's allowance, warned of once when the use passes it (again only after it was back under)
 void status_tick() {
     namespace sl = status_line;
+    {   // (hookshot, RX_VK_TEX_AHEAD: a light frame, one of few draws, lets the next one prepare textures)
+        static int64_t l_draws = 0;
+        int64_t draws = 0, sk = 0, di = 0, pl = 0;
+        draw_stats(&draws, &sk, &di, &pl);
+        texture_ahead_frame(draws - l_draws);
+        l_draws = draws;
+    }
     static uint64_t frames = 0;
     // (the slowest frame since the last line, present to present: a stall shows here, to be matched with what the log says
     // around it, such as DLSS's feature made again)
@@ -7723,16 +7777,16 @@ void present_hand_off(uint32_t index, VkFence done);
 void present_finish(VkResult res, bool on_presenter);
 std::atomic<bool> presenter_surface_lost{false};   // (the presenter thread's present: VK_ERROR_SURFACE_LOST_KHR, for present_image)
 }  // namespace
-// doc: docs/design.md#13-frame-generations-presents-at-v-sync-off-as-rules (rule 4: a frame slot per frame of both sets)
+// doc: docs/design.md#13-frame-generations-presents-as-rules (rule 4: a frame slot per frame of both sets)
 /// (hookshot) The frame slots present_image uses while frame generation runs, for the sets a swapchain is made for
-/// (vk_main.cpp create_swapchain: framegen is swapchain_framegen's multiplier, 0 none; two_sets where the swapchain does not
-/// wait for a refresh and RX_VK_FG_TIMELINE is on). Each present waits for the copy last made in its slot, so the slots are
+/// (vk_main.cpp create_swapchain: framegen is swapchain_framegen's multiplier, 0 none; two_sets while RX_VK_FG_TIMELINE is
+/// on, in every present mode, but for a set too big for the chain under FIFO). Each present waits for the copy last made in its slot, so the slots are
 /// also how many presents can be on the GPU at once: 3, and a slot per frame of two sets where the next set is taken while
 /// one is shown (2 x the multiplier, at most kPresentSlotsMax). A set presented ahead (vk_framegen.cpp display_main) submits
 /// its copies at once: with fewer slots than its frames its 4th copy waited in its own first copy's slot, and with a slot per
 /// frame of one set the next set's copy k waited in the slot of the shown set's copy k (the review, 2026-11-17), each until
 /// the GPU had done that copy and so the game's work queued before it, which held the frames of the set still being shown.
-/// FIFO and RX_VK_FG_TIMELINE=0 keep 3, as before
+/// One set's (RX_VK_FG_TIMELINE=0; under FIFO a set too big for the chain) keeps 3, as before
 int present_slots_for(int framegen, bool two_sets) {
     return two_sets && framegen >= 2 ? std::min(2 * framegen, kPresentSlotsMax) : 3;
 }
@@ -7794,8 +7848,10 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     static int vsync_was = -1;   // (the V-Sync row as the swapchain was made for it: its present mode)
     // (and frame generation's multiplier, swapchain_framegen: a spare image a frame; and swapchain_dlssg: FIFO under V-Sync
     // Auto with DLSS Frame Generation making the frames. It turns to no once, when NGX's answer at the first present is a no
-    // or fewer frames than the multiplier asks)
-    const int vsync_now = menu_vsync() * 16 + swapchain_framegen() * 2 + (swapchain_dlssg() ? 1 : 0);
+    // or fewer frames than the multiplier asks; and past 4x the multiplier itself: under FIFO a set too big for the chain's
+    // spare images takes one set's images, create_swapchain)
+    const int vsync_now = menu_vsync() * 16 + swapchain_framegen() * 2 + (swapchain_dlssg() ? 1 : 0) +
+                          (opts.framegen > 4 ? opts.framegen * 256 : 0);
     const bool vsync_changed = vsync_was >= 0 && vsync_was != vsync_now;
     if (vsync_was < 0) vsync_was = vsync_now;
     if (presenter_surface_lost.exchange(false, std::memory_order_acquire)) {   // (the presenter's present found the surface lost)
@@ -9008,6 +9064,7 @@ void present(const nvn_tex* t, const int crop[4]) {
 void texture_released_of(const nvn_tex* t) {
     if (!t) return;
     tex_pages_add(t, -1);
+    texture_ahead_gone(t);
     if (!async_on()) {
         // (PR 430: after the stopped work that may use it, when it goes on. The lock is held_mu, only while queues are
         // stopped: sync_order_mu, taken on every release, made the thread finalizing textures (OptimizeChangeBank) wait for whole
@@ -9053,14 +9110,10 @@ void program_released_locked(const nvn_prog* p) {
 // dynamic-resolution step), had the frame being recorded sample the next ones' textures, of another size: its
 // picture went to pieces below or above a line (edges clamped into stripes, the sky's or fog's colour, the shadows
 // dark) for a frame, with the size changes (every few frames when the resolution swung). Now they are jobs, applied
-// where the game made them among its submits, as finalized textures already were. RX_VK_REGISTER_AT_ONCE=1: as before.
-bool register_at_once() {
-    static const bool v = env_on("RX_VK_REGISTER_AT_ONCE");
-    return v;
-}
+// where the game made them among its submits, as finalized textures already were.
 // doc: docs/design.md#4-the-lessons-from-mkw-as-rules-here (rule 3: registrations are queued in order with the submits)
 void register_texture_queued(int id, const nvn_tex* t, const nvn_view* v) {
-    if (!async_on() || register_at_once()) return register_texture_locked(id, t, v);
+    if (!async_on()) return register_texture_locked(id, t, v);
     if (id < 0 || id >= (1 << 20) || !t) return;
     t = (const nvn_tex*)descriptor_ok(t, sizeof(nvn_tex));
     if (!t) return;
@@ -9091,7 +9144,7 @@ void event_signal_queued(uint64_t gpu, uint32_t value) {
     bh_signal_cv.notify_all();
 }
 void register_sampler_queued(int id, const nvn_samp_par* p) {
-    if (!async_on() || register_at_once()) return register_sampler(id, p);
+    if (!async_on()) return register_sampler(id, p);
     if (id < 0 || id >= (1 << 12) || !p) return;
     p = (const nvn_samp_par*)descriptor_ok(p, sizeof(nvn_samp_par));
     if (!p) return;
@@ -9345,6 +9398,7 @@ void fill_replay_table(MkwVkRenderer& t) {
     t.nvn_read_texels = read_texels;
     t.nvn_write_texels = write_texels;
     t.nvn_invalidate = invalidate;
+    t.nvn_invalidate_quick = invalidate_quick;
     t.nvn_pool_created = memory_pool_created;
     t.guest_imported = memory_guest_imported;
     t.nvn_vmap_changing = vmap_changing;
