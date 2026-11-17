@@ -30,6 +30,7 @@ enum VkShaderStageFlagBits : uint32_t {
 };
 using VkShaderStageFlags = uint32_t;
 constexpr uint32_t VK_DRIVER_ID_AMD_PROPRIETARY = 1;
+constexpr bool VK_FALSE = false;
 constexpr uint32_t VK_DRIVER_ID_MESA_RADV = 3;   // (the RADV branch of the fragment shuffle fallback)
 struct {
     uint32_t sg32_stages = 0, subgroup_size = 32, subgroup_max = 32, driver_id = 0;
@@ -38,7 +39,9 @@ struct {
         // (make_profile: storage image and texel buffer arrays indexed nonuniformly where the GPU can)
         bool shaderStorageImageArrayNonUniformIndexing = true, shaderUniformTexelBufferArrayNonUniformIndexing = true,
              shaderStorageTexelBufferArrayNonUniformIndexing = true;
+        bool shaderInt8 = true;   // (make_profile: 8-bit integers where the GPU has them)
     } vk12;
+    struct { bool shaderInt16 = true; } features;   // (and 16-bit)
     bool float_atomic_add = false;
     struct { struct { uint64_t minStorageBufferOffsetAlignment = 16; } limits; } props;
     struct { bool gather_offset = false; } fixes;   // (vk_vendor.h: make_profile reads the gather offset from it)
