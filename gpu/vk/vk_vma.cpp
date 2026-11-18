@@ -545,6 +545,13 @@ bool create_buffer_cached(uint64_t size, VkBufferUsageFlags usage, VkBuffer& buf
     if (vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, &info) != VK_SUCCESS) return false;
     tag_mapped(info, mem_kind_tag);
     note_alloc(allocation, mem_kind_tag);
+    if (mapped && !info.pMappedData) {
+        vmaDestroyBuffer(vma, buffer, allocation);
+        buffer = VK_NULL_HANDLE;
+        allocation = nullptr;
+        *mapped = nullptr;
+        return false;
+    }
     if (mapped) *mapped = info.pMappedData;
     return true;
 }

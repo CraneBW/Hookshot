@@ -2073,22 +2073,29 @@ void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot);   // (poo
 bool late_defer_any();   // (pools_mu held: RX_VK_LATE_DEFER, below)
 void late_defer_cpu_read(uint32_t page, uint32_t gen, uint32_t slot, VmaAllocation alloc, uint8_t* map);
 namespace {
-/// What a replay read settles without pools_mu: 0 no memory there, 1 read from guest memory and that stands (no capture, or
-/// its one page in none as of the thread's kept answer), 2 its pages are to be looked up in the captures (guest: its address)
-int submitted_read_unlocked(uint64_t gpu, void* dst, uint64_t n, uint64_t& guest) {
-    // (once a capture exists, every uniform word took pools_mu to ask whether its page was in one. A page in none keeps
-    // that answer until a stamp or a new capture)
-    if (!host->gpu_read(gpu, dst, n)) return 0;
-    if (!n || !capture_on() || !captures_seen.load(std::memory_order_relaxed)) return 1;
+/// 0: unreadable, 1: already read, 2: look in the capture under pools_mu. For a validated
+/// single physical page, live points to the fallback and the destination has not been touched.
+int submitted_read_unlocked(uint64_t gpu, void* dst, uint64_t n, uint64_t& guest, const uint8_t*& live) {
+    live = nullptr;
+    if (!n || !capture_on() || !captures_seen.load(std::memory_order_relaxed)) return host->gpu_read(gpu, dst, n);
     guest = gpu < (1ull << 40) ? gpu : host->gpu_guest(gpu);
-    if (!guest) return 1;
-    const uint64_t page0 = guest >> kPageShift, page1 = (guest + n - 1) >> kPageShift;
+    const uint64_t limit = std::min<uint64_t>(host->guest_size(), kPages << kPageShift);
+    if (!guest || guest >= limit || (gpu < (1ull << 40) && n > limit - guest))
+        return host->gpu_read(gpu, dst, n);
+    const uint64_t page0 = guest >> kPageShift;
+    const bool one_page = n <= 4096 - (guest & 4095);
     const uint64_t view = cap_view_gen.load(std::memory_order_acquire);
     const SubmittedPage& submitted_page = submitted_page_for(page0);
-    if (page0 == page1 && submitted_page_reuse(page0, page_gen(page0), view, submitted_page.page, submitted_page.pgen,
+    if (one_page && submitted_page_reuse(page0, page_gen(page0), view, submitted_page.page, submitted_page.pgen,
                                                submitted_page.view))
-        return 1;
-    return 2;
+        return host->gpu_read(gpu, dst, n);
+    // The host maps these GPU addresses directly into its fixed guest window. Validate the
+    // address as gpu_read does. Sparse virtual mappings and partial reads keep its normal path.
+    if (one_page && gpu < (1ull << 40) && host->gpu_guest(gpu) == guest) {
+        live = host->guest_base() + guest;
+        return 2;
+    }
+    return host->gpu_read(gpu, dst, n) ? 2 : 0;
 }
 /// (pools_mu held) the pages of that read a capture holds, copied over what guest memory gave: how many
 int64_t submitted_read_locked(uint64_t guest, void* dst, uint64_t n) {
@@ -2113,6 +2120,22 @@ int64_t submitted_read_locked(uint64_t guest, void* dst, uint64_t n) {
     }
     return from;
 }
+// Virtual neighbours can map to unrelated physical pages. The full live read has
+// already succeeded. Only overlay segments whose physical page has a current capture.
+int64_t mapped_submitted_read_locked(uint64_t gpu, uint64_t guest, void* dst, uint64_t n) {
+    if (gpu < (1ull << 40) || n <= 4096 - (gpu & 4095))
+        return submitted_read_locked(guest, dst, n);
+    const uint64_t limit = std::min<uint64_t>(host->guest_size(), kPages << kPageShift);
+    int64_t from = 0;
+    for (uint64_t at = 0; at < n;) {
+        const uint64_t bytes = std::min<uint64_t>(n - at, 4096 - ((gpu + at) & 4095));
+        const uint64_t physical = at ? host->gpu_guest(gpu + at) : guest;
+        if (physical && physical < limit && bytes <= limit - physical)
+            from += submitted_read_locked(physical, static_cast<uint8_t*>(dst) + at, bytes);
+        at += bytes;
+    }
+    return from;
+}
 void submitted_read_counted(int64_t looked_up, int64_t from) {
     static std::atomic<int64_t> reads{0}, pages_from{0};
     pages_from += from;
@@ -2124,13 +2147,15 @@ void submitted_read_counted(int64_t looked_up, int64_t from) {
 }  // namespace
 bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
     uint64_t guest = 0;
-    const int r = submitted_read_unlocked(gpu, dst, n, guest);
+    const uint8_t* live;
+    const int r = submitted_read_unlocked(gpu, dst, n, guest, live);
     if (r != 2) return r != 0;
     int64_t from = 0;
     {
         std::lock_guard lk(pools_mu);
-        from = submitted_read_locked(guest, dst, n);
+        from = mapped_submitted_read_locked(gpu, guest, dst, n);
     }
+    if (!from && live) std::memcpy(dst, live, n);
     submitted_read_counted(1, from);
     return true;
 }
@@ -2140,19 +2165,31 @@ bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n) {
 void memory_read_as_submitted_many(const SubmittedRead* reads, size_t count) {
     constexpr size_t kMost = 64;
     uint64_t guests[kMost];
+    const uint8_t* live[kMost];
     size_t late[kMost], nlate = 0;
     for (size_t i = 0; i < count; i++) {
         if (i >= kMost) {
             memory_read_as_submitted(reads[i].gpu, reads[i].dst, reads[i].n);
             continue;
         }
-        if (submitted_read_unlocked(reads[i].gpu, reads[i].dst, reads[i].n, guests[i]) == 2) late[nlate++] = i;
+        if (submitted_read_unlocked(reads[i].gpu, reads[i].dst, reads[i].n, guests[i], live[i]) == 2) late[nlate++] = i;
     }
     if (!nlate) return;
+    size_t missing = 0;
     int64_t from = 0;
     {
         std::lock_guard lk(pools_mu);
-        for (size_t k = 0; k < nlate; k++) from += submitted_read_locked(guests[late[k]], reads[late[k]].dst, reads[late[k]].n);
+        for (size_t k = 0; k < nlate; k++) {
+            const size_t i = late[k];
+            const auto& read = reads[i];
+            const int64_t captured = mapped_submitted_read_locked(read.gpu, guests[i], read.dst, read.n);
+            if (!captured && live[i]) late[missing++] = i;
+            from += captured;
+        }
+    }
+    for (size_t k = 0; k < missing; k++) {
+        const size_t i = late[k];
+        std::memcpy(reads[i].dst, live[i], reads[i].n);
     }
     submitted_read_counted((int64_t)nlate, from);
 }
@@ -2160,8 +2197,9 @@ void memory_read_as_submitted_many(const SubmittedRead* reads, size_t count) {
 uint64_t memory_capture_view() { return cap_view_gen.load(std::memory_order_acquire); }
 uint32_t memory_page_stamp(uint64_t gpu) {
     const uint64_t guest = gpu < (1ull << 40) ? gpu : host->gpu_guest(gpu);
-    if (!guest) return 0;
-    return page_gen(guest >> kPageShift);
+    const uint64_t page = guest >> kPageShift;
+    if (!guest || page >= kPages || guest >= host->guest_size()) return 0;
+    return page_gen(page);
 }
 
 bool memory_has_shadow(uint64_t guest, uint64_t n) {
@@ -4593,6 +4631,7 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
         uint64_t lo = 0, hi = 0;
         std::vector<uint64_t> overlapped;
         auto plan = [&](bool spanned) {   // (the range, the imported pools it takes in; spanned: span_game_pools's chunks too)
+            bool touches_neighbour = false;
             lo = want_lo, hi = std::max(want_hi, imp != imported.end() ? imp->second.hi : 0);
             if (spanned && chunk) span_game_pools(lo, hi, chunk);
             for (bool grew = true; grew;) {
@@ -4605,6 +4644,10 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
                         if (import_reach::beyond(live_reach, it->second.lo, lo)) break;   // (none further down reaches lo)
                         continue;
                     }
+                    // A larger span anticipates future bindings. If only that padding reaches a live
+                    // import, keep the neighbour and plan just the chunks this binding needs. A real
+                    // crossing still merges the imports and inherits their GPU-written contents.
+                    if (spanned && (it->second.hi <= want_lo || it->second.lo >= want_hi)) touches_neighbour = true;
                     overlapped.push_back(it->first);
                     if (it->second.lo < lo) lo = it->second.lo, grew = true;
                     if (it->second.hi > hi) hi = it->second.hi, grew = true;
@@ -4619,15 +4662,17 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
                 overlapped.clear();
                 if (imp != imported.end()) overlapped.push_back(imp->first);
             }
+            return touches_neighbour;
         };
-        plan(true);
-        const uint64_t spanned_lo = lo, spanned_hi = hi;
+        const bool prefer_narrow = plan(true);
+        if (prefer_narrow) plan(false);
+        const uint64_t first_lo = lo, first_hi = hi;
         Pool p;
         bool ok = false;
         for (int pass = 0; pass < 2 && !ok; pass++) {
-            if (pass) {   // (a spanned import that failed: the range without the span, as imported before)
-                plan(false);
-                if (lo == spanned_lo && hi == spanned_hi) break;
+            if (pass) {   // Retry the alternate range once if its address or size differs.
+                plan(prefer_narrow);
+                if (lo == first_lo && hi == first_hi) break;
             }
             const auto t0 = std::chrono::steady_clock::now();
             ok = import_pool(lo, hi, p);
