@@ -627,7 +627,8 @@ void present_thread_drain();   // (vk_replay.cpp: the presenter thread's present
 /// swapchain's images drawable, as ReShade's effects and RenoDX's HDR pass need. RX_VK_RESHADE=0: never
 bool reshade_compat();
 int swapchain_framegen();   // (vk_main.cpp: frame generation's fixed multiplier as the swapchain is made for it, 0 none)
-/// (hookshot) present_image's frame slots (vk_replay.cpp frames[]), at most; ImGui keeps one more vertex buffer (vk_imgui.cpp)
+/// (hookshot) present_image's frame slots (vk_replay.cpp frames[]), at most; ImGui keeps one more vertex buffer, and the
+/// overlays keep what they let go one more present (vk_imgui.cpp ImageCount, kFramesLater)
 constexpr int kPresentSlotsMax = 8;
 int present_slots_for(int framegen, bool two_sets);   // (vk_replay.cpp: the slots present_image uses; create_swapchain's)
 bool swapchain_dlssg();     // (vk_main.cpp: and DLSS-G makes its sets: V-Sync Auto's FIFO)
