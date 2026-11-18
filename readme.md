@@ -436,6 +436,7 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Developer: Sampler cache | Off, On (after a restart) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
 | | Developer: Uncap detail sliders | Off, On: the four detail rows above past their safe max | Off |
+| | Developer: Present queue | Off, On (after a restart) | Off |
 | | Developer: ASTC as RGBA8 | Off, On (after a restart) | Off |
 
 - **Quality preset** sets Render resolution, Window scaling filter, Sharpness, Frame pacing, Game speed, Profile
@@ -589,6 +590,12 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 - **Robust buffers** (Debug tab, Developer): a read past a buffer's end is dropped instead of stopping the GPU. Auto is
   on, on every card; Off can be faster on some NVIDIA cards.
 - **ASTC as RGBA8** (Debug tab, Developer): the AMD texture workaround below.
+- **Present queue** (Debug tab, Developer): the presents on a GPU queue of their own. Off by default; On makes frame
+  generation's frames more even with V-Sync Off on some cards (an RTX 5090), but lost the GPU on others with frame
+  generation on (an RTX 5080). It applies after a restart; `RX_VK_PRESENT_QUEUE` in `hookshot_env.txt` or the environment
+  chooses over it at every start while it is set (the row then shows it and cannot be changed). If the game crashes or
+  the screen goes black with it on and you cannot reach the menu, put `RX_VK_PRESENT_QUEUE=0` in `hookshot_env.txt`, then
+  turn the row off and take the line out.
 - **Game speed:** with Per frame, the game runs slower whenever it is below 60 fps. Real time keeps it at normal speed
   down to 15 fps.
 - **FPS counter** shows in a corner (**FPS counter position**; at the top right while the menu is open), at one of
@@ -1060,8 +1067,8 @@ switch that stands in for a menu row (`RX_VK_PACE`, `RX_VK_UPSCALE`, `RX_VK_FRAM
 
 To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or add `HOS_OOT_CHEATS=1` to
 `hookshot_env.txt` in the game folder). The tools then show below it on the same tab. The tab's Developer section,
-always shown, has the Frame pacing, Threaded rendering, Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8
-rows.
+always shown, has the Frame pacing, Threaded rendering, Descriptor reuse, Sampler cache, Robust buffers, Present queue and ASTC as
+RGBA8 rows.
 
 **Travel** (a debug tool, beside Teleport) opens a page of 190 places to go to: villages, dungeons' entrances, shops,
 warp points and story spots, grouped by area, for Link's age (Tab, X on a pad, or the Child and Adult buttons show the other
