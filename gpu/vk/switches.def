@@ -6,6 +6,7 @@
 // The rows were first written on 2026-11-16 from a reading of each switch's code: where a row and the code disagree, the
 // code is right and the row wants correcting.
 SW(HOOKSHOT_BUILDER_HOME, player, string, "not read by the game", "The Builder's own folder; the game only refuses it from hookshot_env.txt.")
+SW(HOOKSHOT_BUILD_NAME, diag, string, "not set: the Insert menu shows the version alone", "A name for what a development run tests, shown under the version at the Insert menu's top right.")
 SW(HOOKSHOT_DRIVER_ENV_SET, diag, string, "not set", "Set by the game itself before it restarts, naming the driver variable it took out; not for a run to set.")
 SW(HOOKSHOT_NFC_DIR, player, string, "the user's own NFC folder (docs/nfc.md)", "The folder of NFC tag files the Insert menu's NFC tab lists (host/nn_nfp.c).")
 SW(HOOKSHOT_NO_AV1_NOTICE, kill, bool, "the notice window is shown once (Windows, no AV1 decoder)", "No pop-up asking to install the AV1 Video Extension; the log line is still written.")
@@ -138,7 +139,7 @@ SW(HOS_MUTEX_TRACE, diag, int, "0: off", "Logs mutex waits longer than <ms>, wit
 SW(HOS_MUTEX_WATCH, diag, string, "off", "Logs every operation on the mutex at that guest address (hex) and its condition variables' signals.")
 SW(HOS_MW_WAKE, kill, enum, "only changes to objects linked into a multi-wait wake WaitAny", "=all: every event, semaphore or queue change wakes every WaitAny, as before.")
 SW(HOS_NAMES_NATIVE, kill, enum, "1: the name searches of f_805aeea0 run natively", "0 runs them lifted; 2 runs both and compares.")
-SW(HOS_NATIVE_ZSTD, kill, enum, "on: the game's zstd streams are decoded on the host's libzstd, the virtual core given up meanwhile", "0 runs the game's own zstd (lifted code); 2 decodes on the host and keeps the core.")
+SW(HOS_NATIVE_ZSTD, kill, enum, "on: the game's zstd streams are decoded on the host's libzstd, the virtual core kept meanwhile (2)", "0 runs the game's own zstd (lifted code); 1 decodes on the host and gives the core up meanwhile (it froze loads on an Arc iGPU).")
 SW(HOS_NATIVE_ZSTD_FRAMES, kill, bool, "on: the resource loaders' whole-buffer zstd is decoded on the host's libzstd", "=0 runs the game's own zstd for them (lifted code).")
 SW(HOS_NFP_SEARCH, diag, bool, "off", "=1 has the game's reader look for a tag from the start, without the game's own NFC screen (a test of the Switch 2 Pro Controller's reader).")
 SW(HOS_NFP_TRACE, diag, bool, "off", "=1 logs nn::nfp's application area calls.")
@@ -822,7 +823,7 @@ SW(RX_VK_PUSH_ALL, kill, bool, "off: only changed bindings are pushed", "Pushes 
 GONE(RX_VK_PUSH_STATE_OLD, "2026-11-16", "it does nothing: pushed state is always the one vector of words (write_words is gone)")
 SW(RX_VK_QUEUE_PRIO, diag, float, "1.0", "The replay queue's priority (0 to 1).")
 GONE(RX_VK_QUEUE_STATE, "2026-11-16", "it does nothing: each queue always keeps its own replay state")
-SW(RX_VK_QUICK_MS, attempt, float, "off (0: no quick pipelines)", "Milliseconds a frame each recording thread may spend on quick pipeline builds for draws still waiting.")
+SW(RX_VK_QUICK_MS, attempt, string, "required (0: off)", "Milliseconds per frame for quick pipeline builds on each recording thread, or required to enable them only for draws that must wait.")
 SW(RX_VK_RADV_SUBMIT_THREAD, hw, bool, "Linux with an amdgpu card: Mesa's submit thread by the CPU count (host/hos_submit_thread.h)", "0 or 1 sets Mesa's MESA_VK_ENABLE_SUBMIT_THREAD for the process, decided once at the start.")
 SW(RX_VK_RB_PROF, diag, bool, "off", "Logs the readbacks' times aggregated every 300 presents.")
 SW(RX_VK_RB_RANGES, attempt, bool, "off: a readback refresh copies whole pages", "=1 copies only the 16-byte aligned spans read back in each page.")

@@ -524,6 +524,82 @@ def patch_movie_frames(s):
     return s if MOVIE_DECL in s else s.replace('#include "a64.h"\n', '#include "a64.h"\n' + MOVIE_DECL, 1)
 
 
+# A looping animation one frame long (the frozen Zoras under the ice in adult Zora's Domain: start 0, end 1) is one pose. At the
+# console's 60 fps the clock's step is 1 and each update lands on the same phase. Under a Frame rate cap above 60 the step is the
+# frame's own time (0.36 at 165 fps), the phase moved by it each frame, and each frame drew another phase: the pose twitched (issue
+# 988). The time a skeleton is drawn at comes from two places, and both are patched to hos_loop_step / hos_loop_pose (host/loop_step.h):
+# - f_802cfca0 advances the clock of each animation entry ([x20]: flags +0, time +4, speed +12, start +16, end +20) and copies it
+#   to the skeleton's time. Its two advances multiply the step (vreg 8) by the definition's speed first: a loop of one frame or less
+#   takes the step as whole frames, carried per entry; longer loops keep the fractional step.
+# - f_80944aa0 writes the time the skeletons are drawn at (x22: the value +0, the range it is kept in +4, +8) from a clock of its
+#   own that also moved by the fractional step: a range of one frame or less is drawn at its start, the phase of a clock that
+#   moves in whole frames.
+# A cap of 60 (hos_frame_seconds_bits 0) leaves both as the game has them.
+LOOP_HEAD = "void f_802cfca0(Ctx *__restrict A64_NOESC c) {\n"
+LOOP_MUL = ("    {uint64_t _a=0,_b=0,_z,_v;memcpy(&_a,c->vreg[8],4);memcpy(&_b,c->vreg[%d],4);_z=(_a^_b)&0x80000000ULL;\n")
+LOOP_SITES = (
+    ("if (((c->x[9] >> 3) & 1)) { goto L_802d077c; }\n", 1),
+    ("if (((c->x[9] >> 3) & 1)) { goto L_802d07f4; }\n", 0),
+)
+LOOP_MARK = "/* (nx2/oot_patches.py: a loop of one frame by whole frames) */"
+LOOP_DECL = "extern uint32_t hos_loop_step(uint64_t at, uint32_t step_bits, uint32_t start_bits, uint32_t end_bits);\n"
+
+
+def _loop_new(mul):
+    return mul.replace("memcpy(&_a,c->vreg[8],4);",
+                       "memcpy(&_a,c->vreg[8],4); _a=hos_loop_step(c->x[20], (uint32_t)_a, (uint32_t)recomp_load32(c,c->x[20] + 16), "
+                       "(uint32_t)recomp_load32(c,c->x[20] + 20));   " + LOOP_MARK + "\n    ", 1)
+
+
+def patch_loop_steps(s):
+    """(s, the sites patched here): f_802cfca0's two clock advances take hos_loop_step's step; a file without the function, one
+    patched before, or one whose code differs is left as it is"""
+    head = s.find(LOOP_HEAD)
+    if head < 0:
+        return s, 0
+    end = s.find("\nvoid f_", head + len(LOOP_HEAD))
+    body = s[head:end if end >= 0 else len(s)]
+    done = 0
+    for before, reg in LOOP_SITES:
+        old = before + LOOP_MUL % reg
+        new = before + _loop_new(LOOP_MUL % reg)
+        if new in body or body.count(old) != 1:
+            continue
+        at = head + body.index(old)
+        s = s[:at] + new + s[at + len(old):]
+        end = s.find("\nvoid f_", head + len(LOOP_HEAD))
+        body = s[head:end if end >= 0 else len(s)]
+        done += 1
+    if done and LOOP_DECL not in s:
+        s = s.replace('#include "a64.h"\n', '#include "a64.h"\n' + LOOP_DECL, 1)
+    return s, done
+
+
+POSE_HEAD = "void f_80944aa0(Ctx *__restrict A64_NOESC c) {\n"
+POSE_OLD = "    { { uint64_t _v=0; memcpy(&_v,&c->vreg[0][0],4); recomp_store32(c,(c->x[22]+0ULL),_v); } }\n"
+POSE_NEW = ("    { { uint64_t _v=0; memcpy(&_v,&c->vreg[0][0],4); _v=hos_loop_pose((uint32_t)_v, (uint32_t)recomp_load32(c,c->x[22] + 4), "
+            "(uint32_t)recomp_load32(c,c->x[22] + 8));   /* (nx2/oot_patches.py: a loop of one frame by its start) */ "
+            "recomp_store32(c,(c->x[22]+0ULL),_v); } }\n")
+POSE_DECL = "extern uint32_t hos_loop_pose(uint32_t time_bits, uint32_t start_bits, uint32_t end_bits);\n"
+
+
+def patch_loop_pose(s):
+    """(s, 1 if patched): the one store f_80944aa0 makes of a skeleton's time (the call that wraps it into its range, then the
+    store); a file without the function, one patched before, or one whose code differs is left as it is"""
+    head = s.find(POSE_HEAD)
+    if head < 0:
+        return s, 0
+    end = s.find("\nvoid f_", head + len(POSE_HEAD))
+    body = s[head:end if end >= 0 else len(s)]
+    if POSE_NEW in body or body.count(POSE_OLD) != 1:
+        return s, 0
+    at = head + body.index(POSE_OLD)
+    s = s[:at] + POSE_NEW + s[at + len(POSE_OLD):]
+    if POSE_DECL not in s:
+        s = s.replace('#include "a64.h"\n', '#include "a64.h"\n' + POSE_DECL, 1)
+    return s, 1
+
+
 # Counters that add the frame step, or the step times a whole number, cut to whole frames (host/frame_whole.h). At 60 fps the step
 # is 1; under a Frame rate cap above 60 it is the frame's own time, under 1 (0.42 at 144 fps), and the cut is 0 every frame:
 # - f_80a87e50, the pick-up indicator above Link's head (a rupee, a Deku Stick): the count it shows (+864) moves toward the
@@ -532,6 +608,8 @@ def patch_movie_frames(s):
 # - f_800672e0, the water renderer: its ripple simulation runs (int)step times the water's substeps (+76 of the pass) each frame.
 #   Cut to 0, the rings Link and the actors make in water stood still above 60 fps. Found by atk3001 for Lichii (zortos293/
 #   Lichii#1152), as ported to Fritchii (Frizti/Fritchii d389685a4, 063dbb741): its remainder is kept per water object (x21).
+#   Whole frames carried, a frame ran all its substeps or none (0 or 4 at 108 fps), and the rings stood still for a frame and
+#   then jumped (issue 1199): the substeps are carried instead (WHOLE_TIMES), 2 or 3 every frame.
 # - f_803edf70, the time of day: each frame it adds (int)(2 * step) game seconds (+60) to the seconds of the day (+40, a day of
 #   86400, then the day count +44). Cut, it added 1 a frame below 120 fps (the day slower: 83% at 100) and 0 above 120, where
 #   the clock stood still and the sun swung back and forth over the frozen hour.
@@ -546,15 +624,17 @@ def patch_movie_frames(s):
 #   (https://github.com/NotRexed/Hookshot/issues/2667). Its remainder is kept per web (+2296), before the clamp.
 # hos_frame_whole carries the fractions per counter while the frames' own time is the step, so each moves at the game's rate;
 # otherwise it cuts as the game does. A site is added here once it is seen to misbehave in game. (A site's function, its code to
-# replace, and the counter's address for its remainder.)
+# replace, and the counter's address for its remainder.) A site of WHOLE_TIMES multiplies the whole frames by a whole number of
+# substeps (the register it loaded them into): hos_frame_whole_times hands out the whole substeps and the register becomes 1.
 WHOLE_SITES = (
     # (the cut alone, the function's one: the multiply before it is a64_fpx_hot_mul32_fma32 in a lift where the function is
     # among A64_HOT_FUNCS)
     ("void f_80a87e50(Ctx *__restrict A64_NOESC c) {@",
      "    c->x[12]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);@",
      "c->x[19] + 864"),
-    # (the cut alone, the function's one)
+    # (the substeps' load and the cut, the function's one: x8 * x9 substeps follow)
     ("void f_800672e0(Ctx *__restrict A64_NOESC c) {@",
+     "    c->x[8]=recomp_load32(c,c->x[19] + 76);@"
      "    c->x[9]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);@",
      "c->x[21]"),
     # (the cut with the store after it: the function cuts into x8 the same way once more, in the branch that sets
@@ -582,36 +662,56 @@ WHOLE_SITES = (
 WHOLE_SITES = tuple((h.replace("@", "\n"), o.replace("@", "\n"), k) for h, o, k in WHOLE_SITES)
 WHOLE_MARK = "/* (the step's whole frames: nx2/oot_patches.py) */"
 WHOLE_DECL = "extern uint32_t hos_frame_whole(uint64_t at, uint32_t amount_bits);\n"
+WHOLE_TIMES_DECL = "extern uint32_t hos_frame_whole_times(uint64_t at, uint32_t amount_bits, uint32_t times);\n"
+WHOLE_TIMES = {"void f_800672e0(Ctx *__restrict A64_NOESC c) {\n": "c->x[8]"}   # (the water's substeps, issue 1199)
 
 
-def whole_new(old, key):
-    """old with its cut to whole frames (the one recomp_fp_to_int) made hos_frame_whole's for the counter at key"""
+def whole_new(old, key, times=None):
+    """old with its cut to whole frames (the one recomp_fp_to_int) made hos_frame_whole's for the counter at key; with times
+    (the register of the substeps it multiplies by), hos_frame_whole_times's whole substeps, and the register 1"""
     lines = old.split("\n")
     for i, line in enumerate(lines):
         if "recomp_fp_to_int(c->vreg[0][0]" in line:
             reg = line.split("=", 1)[0]
-            lines[i] = "%s=hos_frame_whole(%s, (uint32_t)c->vreg[0][0]);   %s" % (reg, key, WHOLE_MARK)
+            if times:
+                lines[i] = "%s=hos_frame_whole_times(%s, (uint32_t)c->vreg[0][0], (uint32_t)%s); %s=1;   %s" % (
+                    reg, key, times.strip(), times.strip(), WHOLE_MARK)
+            else:
+                lines[i] = "%s=hos_frame_whole(%s, (uint32_t)c->vreg[0][0]);   %s" % (reg, key, WHOLE_MARK)
     return "\n".join(lines)
 
 
 def patch_whole_frames(s):
     """The counters of WHOLE_SITES take hos_frame_whole's whole frames: (s, the sites patched here). A file without the function,
-    one patched before, or one whose code differs (another game version) is left as it is."""
+    one patched before, or one whose code differs (another game version) is left as it is. A site of WHOLE_TIMES that an earlier
+    build patched with the whole frames alone (a work folder keeps its lift) takes the substeps now."""
     done = 0
+    times_done = 0
     for head_text, old, key in WHOLE_SITES:
         head = s.find(head_text)
         if head < 0:
             continue
         end = s.find("\n}\n", head)
         body = s[head:end if end >= 0 else len(s)]
-        new = whole_new(old, key)
-        if new in body or body.count(old) != 1:
+        times = WHOLE_TIMES.get(head_text)
+        new = whole_new(old, key, times)
+        if new in body:
             continue
-        at = head + body.index(old)
-        s = s[:at] + new + s[at + len(old):]
+        earlier = whole_new(old, key) if times else None
+        if body.count(old) == 1:
+            replaced = old
+        elif earlier and body.count(earlier) == 1:
+            replaced = earlier
+        else:
+            continue
+        at = head + body.index(replaced)
+        s = s[:at] + new + s[at + len(replaced):]
         done += 1
+        times_done += bool(times)
     if done and WHOLE_DECL not in s:
         s = s.replace('#include "a64.h"\n', '#include "a64.h"\n' + WHOLE_DECL, 1)
+    if times_done and WHOLE_TIMES_DECL not in s:
+        s = s.replace('#include "a64.h"\n', '#include "a64.h"\n' + WHOLE_TIMES_DECL, 1)
     return s, done
 
 
@@ -1291,6 +1391,12 @@ def patch_file(s, name, protect_hearts=False):
         if movie != out:
             lines.append("oot_patches: the movie's frame count by the frames' time in " + name)
         out = movie
+    out, loops = patch_loop_steps(out)
+    if loops:
+        lines.append("oot_patches: %d animation clock(s) with whole frames for a loop of one frame in %s" % (loops, name))
+    out, poses = patch_loop_pose(out)
+    if poses:
+        lines.append("oot_patches: the drawn time of a loop of one frame by its start in " + name)
     ocw = patch_ocarina_wait(out)
     if ocw is not None:
         if OC_ENTRY_NEW in ocw:   # (made now, or by an earlier run over this file)

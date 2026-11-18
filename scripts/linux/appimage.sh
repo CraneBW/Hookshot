@@ -9,7 +9,8 @@
 # Built on the oldest system it is for (CI: Ubuntu 22.04): the sysroot it carries is that system's C library, so the
 # game it builds runs on glibc 2.35 and newer. work/ (hot_funcs.txt, hot_order.txt, hookshot_pieces.prof,
 # image/chunks.txt: addresses and counts from playing, no game code; hookshot_vk.profdata: a developer's own renderer
-# profile, used in place of the committed assets/profiles/ one) is carried along when it is there. No Vulkan back end is
+# profile, used in place of the committed assets/profiles/ one) is carried along when it is there. assets/profiles/ carries the
+# committed hot list too, whose functions every player's build compiles at -O2 (nx2/make_game.py hot_list_for). No Vulkan back end is
 # built here: every player's build compiles it from the sources carried below, for that PC's CPU and with the renderer's
 # play profile, with or without DLSS and FSR 4 (one way to build it).
 set -euo pipefail
@@ -52,7 +53,8 @@ cp -a third_party/opus "$T/third_party/"
 cp -a third_party/kenney_input "$T/third_party/"
 cp -a third_party/kenney_input_keyboard "$T/third_party/"
 # (the Vulkan back end's sources, which every player's build compiles (nx2/build.py), and, for NVIDIA DLSS when ticked in the
-# builder, scripts/ngx_sdk.py, compiled with HOOKSHOT_NGX_SDK. assets/ above carries its play profile, assets/profiles/)
+# builder, scripts/ngx_sdk.py, compiled with HOOKSHOT_NGX_SDK. assets/ above carries its play profile and the hot list,
+# assets/profiles/)
 mkdir -p "$T/scripts"
 cp scripts/ngx_sdk.py "$T/scripts/"
 cp -a gpu/vk gpu/compat gpu/third_party "$T/gpu/"
