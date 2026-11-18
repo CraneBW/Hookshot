@@ -366,7 +366,7 @@ GONE(RX_VK_CATCHUP_FORCE, "2026-11-16", "it does nothing: a catch-up only lets o
 SW(RX_VK_CHECKPOINTS, kill, enum, "on: NVIDIA diagnostic checkpoints before each draw where the driver has the extension", "0 turns off draw checkpoints; ext enables the extension only; 1 also uses AMD buffer markers where NV's are missing.")
 SW(RX_VK_CHECKPOINTS_STALL_S, tune, float, "2 s", "How long the GPU checkpoints may stay still before the buffer-marker watch says the GPU stalled.")
 SW(RX_VK_CHECK_BANKS, diag, bool, "off: no check", "Compares each constant-bank fill against the per-word path and logs up to 20 mismatches.")
-SW(RX_VK_CHUNK, tune, int, "120 draws and dispatches a part", "Draws and dispatches per part a long submission is cut into; 0 sends it whole.")
+SW(RX_VK_CHUNK, tune, int, "240 draws and dispatches a part", "Draws and dispatches per part a long submission is cut into; 0 sends it whole.")
 SW(RX_VK_CLAIM_HASH, attempt, bool, "off", "=1 makes a claimed capture copy compute the chunk hashes too.")
 SW(RX_VK_CLEAR_CPU_MAX, tune, int, "256 bytes", "Largest buffer clear also applied on the CPU in stream order; 0 leaves every clear to the GPU.")
 GONE(RX_VK_CLEAR_IN_PASS, "2026-11-16", "it does nothing: a clear after draws always gets a pass of its own")
