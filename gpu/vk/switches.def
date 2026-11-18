@@ -26,7 +26,7 @@ SW(HOS_AV1_ASYNC, attempt, bool, "off: the synchronous (software) AV1 decoder is
 SW(HOS_AV1_MISSING, diag, bool, "off", "=1 behaves as if the Media Foundation AV1 decoder were missing, to see the message a player gets.")
 SW(HOS_BG_CAP, attempt, int, "unset: off, background threads take cores as the others do", "The most cores background threads (priority above 16) hold at once while the frame's threads wait for one.")
 SW(HOS_BG_RUN_US, tune, int, "2000 us", "With HOS_BG_CAP, how long a background thread that took a free core is left alone.")
-SW(HOS_BG_THROTTLE, attempt, string, "unset: off", "<run>:<sleep> (ms): a background thread gives its core up and sleeps <sleep> after <run> of running; =1: 300:3000.")
+SW(HOS_BG_THROTTLE, attempt, string, "300:3000: OptimizeChangeBanc runs 300 us, then sleeps 3 ms (=0 off)", "<run>:<sleep> (ms): a background thread gives its core up and sleeps <sleep> after <run> of running; =1: 300:3000.")
 SW(HOS_BG_WAIT_US, tune, int, "8000 us", "With HOS_BG_CAP, how long a background thread waits under the cap before it takes any free core.")
 SW(HOS_CACHE_CORES, hw, bool, "Windows: on CPUs whose L3 caches differ in size, the game is kept to the largest L3's cores", "=0 lets the game's threads run on every core.")
 SW(HOS_CHAIN, diag, string, "off: one load and a branch per wait and signal", "Writes the guest threads' blocks and wake-ups to the given path, for the frame's critical path (scripts/chain.py).")

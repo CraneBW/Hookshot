@@ -37,7 +37,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#define HL_MATH_DEFAULT 0   /* (off by default here: HL_MATH=1 on) */
+#define HL_MATH_DEFAULT 1   /* (on by default, as in the fork; =0 off) */ 
 #define FPCR_FZ (1ull << 24)
 #define FPSR_IXC 0x10ull
 #define BOX_BIAS_PTR 0x84ca4680ULL   /* (a global pointer: 0x81a040bc adds the two floats at its +80 to every extent) */

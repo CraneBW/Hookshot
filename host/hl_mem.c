@@ -48,9 +48,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#define HL_MEM_COLD_DEFAULT 0   /* (off by default here: =1 on) */
-#define HL_MEM_COLD_HEAPS_DEFAULT 0   /* (off by default here: =1 on) */
-#define HL_MEM_COLD_LISTED_DEFAULT 0   /* (off by default here: =1 on) */
+#define HL_MEM_COLD_DEFAULT 1   /* (on by default, as in the fork; =0 off) */ 
+#define HL_MEM_COLD_HEAPS_DEFAULT 1   /* (on by default, as in the fork; =0 off) */ 
+#define HL_MEM_COLD_LISTED_DEFAULT 1   /* (on by default, as in the fork; =0 off) */ 
 #define COLD_UNIT_SHIFT 16                  /* (64 KB units: the commit-on-touch granule, 16 pages) */
 #define COLD_UNIT_MASK 0xFFFFULL
 #define COLD_PASS_MS 500

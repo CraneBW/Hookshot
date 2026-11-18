@@ -2322,7 +2322,7 @@ void hos_vcore_back(void) {
    mkw_glue.c: the poll hands over no context, so the compiler need not spill them). It, and everything it calls, must never
    read or write the thread's guest context (Ctx) or run guest code: what it would see there may be older than the loop. A
    stall dump of a thread spinning in a polled loop shows such older registers for the same reason. */
-/* (Hookshot, sprint 5) HOS_BG_THROTTLE=<run us>:<sleep us> (off by default here; 300:3000 the fork's): OoT's OptimizeChangeBanc (guest
+/* (Hookshot, sprint 5) HOS_BG_THROTTLE=<run us>:<sleep us> (300:3000 by default, as in the fork; =0 off): OoT's OptimizeChangeBanc (guest
    priority 27, the lowest: on the console it gets only the time nothing else wants) runs without end here, 35-44% of a logical
    processor at the Market, at the host's lowest priority, which keeps it off no SMT sibling: the executor, module worker or
    replay thread on the other half of its core runs up to 1.7x slower while it does (the replay's measurement, hos_reserved_cpus).
@@ -2332,7 +2332,7 @@ static void bg_throttle(HosThread *t) {
     static int64_t run_ns = -1, sleep_ms;
     if (run_ns < 0) {
         const char *e = getenv("HOS_BG_THROTTLE");
-        long long r = 0, s = 3000;   /* (off by default here: HOS_BG_THROTTLE=300:3000 is the fork's) */
+        long long r = 300, s = 3000;   /* (on by default, the fork's 300:3000: HOS_BG_THROTTLE=0 off) */
         if (e && sscanf(e, "%lld:%lld", &r, &s) < 1) r = 300;
         sleep_ms = s >= 1000 ? s / 1000 : 1;
         if (r > 0) hos_log("threads: OptimizeChangeBanc runs %lld us, then sleeps %lld ms (HOS_BG_THROTTLE)", r, (long long)sleep_ms);
