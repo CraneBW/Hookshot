@@ -777,7 +777,7 @@ SW(RX_VK_PLAY_SAVE_START_MB, tune, int, "64 MB (0: any growth, as before)", "Gro
 GONE(RX_VK_POOL_END_IMPORTED, "2026-11-16", "it does nothing: a pool's start and end are always the game pool's")
 SW(RX_VK_POOL_IDLE, tune, int, "8 presents (target_pool::kIdlePresents)", "How many presents a pooled render target may wait unused before it is destroyed.")
 SW(RX_VK_PRECOMPILE, kill, bool, "on in HOOKSHOT_RELEASE builds (the builders'), off in development builds", "Turns the shader preparation before the title off (0) or on (1).")
-SW(RX_VK_PRECOMPILE_COMPUTES, tune, enum, "the computes play dispatched plus the shipped list's; every kept one on a first start; listed on Mesa's Intel driver", "Which compute programs the preparation builds: all, listed, learned or none.")
+SW(RX_VK_PRECOMPILE_COMPUTES, tune, enum, "listed on Most and on Mesa's Intel driver; all for a preparation on All elsewhere", "Which compute programs the preparation builds: all, listed, learned or none.")
 SW(RX_VK_PRECOMPILE_SAVE_S, tune, int, "30 seconds (0: never)", "Build time of the noted pipelines past which the pipeline cache is written before the title.")
 SW(RX_VK_PRECOMPILE_STALL_S, tune, int, "30 seconds; a --prepare-shaders run leaves a compute compile at work (a CPU busy) to its watchdog", "Seconds without progress after which the precompile, or the load-at-create start's mesh fallback builds, goes on without the pipelines still in the driver.")
 SW(RX_VK_PRECOMPILE_WAIT, attempt, bool, "off: the precompile queues its pipelines and the game starts", "=1 waits at the start until they are built.")

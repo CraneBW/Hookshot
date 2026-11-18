@@ -1162,14 +1162,11 @@ shipped list's, and the ones in the game folder's `hookshot_computes.bin`, which
 dispatched (the same programs its own state list names). Without a list entry, a program is loaded and its pipeline
 made at its first dispatch, and a dispatch whose pipeline takes more than 50 ms is skipped. The log's
 `precompile: compute programs` and `compute pipelines` lines say how many were listed, from where, and how many
-pipelines came from the caches or were compiled. A first start, before this install's play has dispatched anything,
-keeps every compute program the game has, as it did before the list named any: a program the list misses is then ready
-too, at the cost of that start's memory. `RX_VK_PRECOMPILE_COMPUTES=listed` keeps only the listed ones on a first
-start as well, and is the default on Mesa's Intel driver, where the shader preparation and the first start's warm
-(`RX_VK_LOAD=create`) compile only those programs' pipelines too: every one was 9,691 driver compiles, hours on an Iris
-Xe, where the lists name about 230 programs, and a first start on an Iris Xe with 16 GB was killed for memory at 1,852 of
-4,059 programs (#1344); `learned` leaves the shipped list's out, to compare; `all` keeps every one at every start and `none`
-keeps none. The game keeps every compute program a shipped list names and never drops one: the bound is
+pipelines came from the caches or were compiled. On Most, both preparation and the first start warm the shipped and learned compute programs,
+including all their translated texture variants. An empty union of the two lists falls back to warming every kept compute.
+On All, preparation warms every kept compute except on Mesa's Intel driver, where the default stays listed to bound memory
+and compilation time. `RX_VK_PRECOMPILE_COMPUTES` overrides this choice: `listed` uses both lists, `learned`
+uses the local history, `all` warms every kept program and `none` skips compute warming. The game keeps every compute program a shipped list names and never drops one: the bound is
 `pipeline_states.py check`, which stops on a merged list that names more than `COMPUTE_MOST`, for someone to decide.
 
 `nx2/make_game.py` merges the sources at every build into the game folder's `hookshot_pipeline_states_shipped.bin`. It
