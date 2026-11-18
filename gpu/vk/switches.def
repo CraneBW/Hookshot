@@ -866,6 +866,7 @@ SW(RX_VK_RES_LOG, diag, bool, "off (on with RX_VK_LEDGER)", "Logs the allocation
 SW(RX_VK_RETIRE_MIN_SECS, tune, int, "2 seconds", "The shorter wait for a retired pool's import while the system heap is past RX_VK_IMPORT_HIGH.")
 SW(RX_VK_RETIRE_SECS, tune, int, "30 seconds", "How long a retired (or valve-evicted) pool's import is held before it is freed, in the wait mode.")
 SW(RX_VK_REUPLOAD_DIM, diag, string, "off", "Re-uploads every texture of the given <w>x<h> size whole each frame, to test whether write tracking missed a write.")
+SW(RX_VK_REUPLOAD_OWN, kill, bool, "on: a texture's re-upload takes only its own submission's copies of its storage", "=0 reads every copy the submit-time capture kept, as before (one-frame flashes in the Market after an arrival).")
 SW(RX_VK_ROBUST, player, bool, "follows robust_buffers= in hookshot_options.ini; Auto there is on", "0 or 1 overrides the Robust buffers option: bounds-checked buffer access off or on.")
 GONE(RX_VK_RT_STRICT_PIN, "2026-11-16", "it does nothing: on Windows the render thread may use the other fastest-kind cores")
 SW(RX_VK_SAMPLER_CACHE, player, bool, "the per-thread sampler table on; the parameters' cache per the Debug tab's Sampler cache row", "0 turns off both sampler caches; 1 turns the parameters' cache on, holding the Sampler cache row for the run.")
