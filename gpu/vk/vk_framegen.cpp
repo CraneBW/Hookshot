@@ -161,8 +161,9 @@ int auto_cap() {
     const int hz = (display_refresh_mhz() + 500) / 1000;
     return std::clamp(hz > 0 ? (hz + 29) / 30 : 2, 2, 4);
 }
-int multiplier() {   // (the Insert menu; 1 Auto (its most); the game's frames alone at 0)
-    return opts.framegen == 1 ? auto_cap() : std::clamp(opts.framegen, 1, kMaxMult);
+int multiplier() {   // (the Insert menu's, as it runs: framegen_now; 1 Auto (its most); the game's frames alone at 0)
+    const int framegen = framegen_now();
+    return framegen == 1 ? auto_cap() : std::clamp(framegen, 1, kMaxMult);
 }
 // (hookshot) A fixed multiplier makes as many frames a game frame as the display can show, m at most, so the game keeps its
 // own rate. Each made frame is a full-size pass on the game's queue and a present of its own, and a frame past the display's
@@ -1105,6 +1106,11 @@ bool wheel_upload(VkCommandBuffer cmd, const WheelPicture& pic) {
 
 } // namespace
 
+int framegen_capped(int framegen, int dlss_most) {
+    return framegen >= 2 && dlss_most > 0 ? std::min(framegen, dlss_most + 1) : framegen;
+}
+int framegen_now() { return framegen_capped(opts.framegen, dlss_fg_most()); }
+
 FgMaker framegen_maker() {
     // (none recorded for half a second: Frame generation off, or the window's presents without it)
     if (now_ns() - maker_at.load(std::memory_order_relaxed) > 500000000) return FgMaker::None;
@@ -1367,6 +1373,11 @@ VkImage framegen_made_image(uint32_t* w, uint32_t* h) {
 // that copy is the HUD, marked in the interpolation source's alpha (shaders/fg_hud.comp), and the interpolation keeps
 // those pixels where they are (vk_fsr3fi.h Inputs::hud_mask). A frame without the copy (no gameplay upscale: a menu, a
 // movie) keeps the old guess.
+// The mark alone still let the HUD smear (#1310 after #1464): the frame before's HUD stayed in the interpolation's previous
+// source and was dragged with the scene, and the inpainting spread the HUD's colours into the holes a turn opens beside it.
+// So the copy itself, cropped as the frame (hud.hudless), is what FSR 3.1 interpolates: its own HUD-less colour, the HUD in
+// neither frame, and this frame's HUD laid over the made frame after, where the presented frame differs from it
+// (vk_fsr3fi.h Inputs::present; RX_VK_FSR_FG_HUDLESS=0: the mark as before).
 namespace {
 struct HudState {
     std::mutex mu;   // (framegen_hud_before is called from the replay's workers)
@@ -1374,6 +1385,7 @@ struct HudState {
     Pipe mask;
     Img before, after;   // (the picture after the upscale, and as presented: its format and size)
     Img source;          // (the interpolation source: the frame's crop, RGBA8, the HUD's alpha 0)
+    Img hudless;         // (the same crop of the picture before the HUD, RGBA8: FSR 3.1's HUD-less colour)
     VkFormat format = VK_FORMAT_UNDEFINED;
     uint32_t pw = 0, ph = 0, sw = 0, sh = 0;
     VkImage picture = VK_NULL_HANDLE;   // (the picture copied: framegen_hud_before's, its image)
@@ -1428,16 +1440,17 @@ bool hud_source(VkCommandBuffer cmd, int cur, uint32_t sw, uint32_t sh, int x0, 
     if (!hud.init) {
         hud.init = true;
         const VkDescriptorType S = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, I = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        if (!make_pipe(hud.mask, BUILTIN_SPV_ARGS(FG_HUD_COMP_SPV), {S, S, S, I}, 16)) {
+        if (!make_pipe(hud.mask, BUILTIN_SPV_ARGS(FG_HUD_COMP_SPV), {S, S, S, I, I}, 16)) {
             hud.failed = true;
             logf("vk: fsr3fi: the HUD mask's pipeline was not made: the HUD guessed");
             return false;
         }
     }
-    if (hud.sw != w || hud.sh != h) hud_retire(hud.source), hud.sw = w, hud.sh = h;
+    if (hud.sw != w || hud.sh != h) hud_retire(hud.source), hud_retire(hud.hudless), hud.sw = w, hud.sh = h;
     const VkImageUsageFlags rw = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     if (!hud_image(cmd, hud.after, sw, sh, hud.format, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
-        !hud_image(cmd, hud.source, w, h, VK_FORMAT_R8G8B8A8_UNORM, rw | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
+        !hud_image(cmd, hud.source, w, h, VK_FORMAT_R8G8B8A8_UNORM, rw | VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
+        !hud_image(cmd, hud.hudless, w, h, VK_FORMAT_R8G8B8A8_UNORM, rw | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
         hud.failed = true;
         logf("vk: fsr3fi: the HUD mask's images (%ux%u) were not made: the HUD guessed", w, h);
         return false;
@@ -1452,7 +1465,8 @@ bool hud_source(VkCommandBuffer cmd, int cur, uint32_t sw, uint32_t sh, int x0, 
          {{fg.frames[cur].view, fg.nearest},
           {hud.before.view, fg.nearest},
           {hud.after.view, fg.nearest},
-          {hud.source.view, VK_NULL_HANDLE}},
+          {hud.source.view, VK_NULL_HANDLE},
+          {hud.hudless.view, VK_NULL_HANDLE}},
          w, h, pc, sizeof pc);
     if (!hud.told) {
         hud.told = true;
@@ -1516,7 +1530,14 @@ int fsr3fi_frames(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32
     fsr3fi::Inputs in;
     in.color = fg.frames[cur].view;
     in.color_image = fg.frames[cur].image;
-    if (hud.ready) {   // (the same frame, the HUD marked in its alpha: hud_source)
+    static const bool hudless = [] {
+        const char* e = getenv("RX_VK_FSR_FG_HUDLESS");
+        return !(e && *e && atoi(e) == 0);
+    }();
+    if (hud.ready && hudless) {   // (the picture before the HUD, interpolated; this frame, HUD and all, laid over it)
+        in.color = hud.hudless.view, in.color_image = hud.hudless.image;
+        in.present = fg.frames[cur].view;
+    } else if (hud.ready) {   // (the same frame, the HUD marked in its alpha: hud_source)
         in.color = hud.source.view, in.color_image = hud.source.image;
         in.hud_mask = true;
     }
@@ -1610,7 +1631,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
         }
         // (hookshot) AMD FSR 3.1's frame interpolation where it is asked (vk_fsr3fi.h): each made frame at its refresh's
         // place, from the scene's depth and motion. Given every present, with none to make too, so the next set has its
-        // history; a set it does not make goes to the renderer's own below. DLSS-G is not asked: it makes a fixed 2x to 8x
+        // history; a set it does not make goes to the renderer's own below. DLSS-G is not asked: it makes a fixed 2x and up
         float made_t[kMaxMult];
         int made_slot[kMaxMult], made_n = 0;
         for (int k = 0; k < n; k++)
