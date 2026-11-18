@@ -947,7 +947,7 @@ GONE(RX_VK_TABLE_NOW, "2026-11-16", "it does nothing: page table entries are alw
 GONE(RX_VK_TARGET_BLOCKS, "2026-11-16", "it does nothing: render targets' images always come from blocks of their own")
 SW(RX_VK_TARGET_POOL_MB, hw, int, "a twelfth of the VRAM the driver allows, 256 to 768 MB", "Cap, in MB, on the pool of render targets kept for reuse.")
 SW(RX_VK_TASK_CAP, tune, int, "0: one mesh workgroup per task thread", "Caps how many mesh workgroups a task program may start at <n> instead of one per task thread.")
-SW(RX_VK_TASK_MESH_FALLBACK, hw, bool, "on for AMD Navi 21-23 (RDNA 2) on Windows, off elsewhere; off with RX_VK_MESH_SHADERS=native", "1 runs task + mesh draws through the compute fallback on a GPU with mesh shaders; 0 uses the driver's mesh shaders.")
+SW(RX_VK_TASK_MESH_FALLBACK, hw, bool, "on for AMD Navi 21-23 (RDNA 2) on Windows, off elsewhere; off with RX_VK_MESH_SHADERS=native", "1 runs task + mesh draws through the compute fallback on a GPU with mesh shaders, including mesh-only draws on Windows Navi 21-23; 0 uses the driver's mesh shaders.")
 SW(RX_VK_TEMPORAL_CUT, kill, bool, "on: a camera cut starts a new temporal history for DLSS, FSR and frame generation", "=0 blends across cuts, as before.")
 SW(RX_VK_TEST_ALLOWED_FILE, diag, string, "off", "Reads the VRAM allowance cap in MB from a file once a second, so a test can shrink it during play.")
 SW(RX_VK_TEST_ALLOWED_FOLLOW, diag, bool, "off", "With a test allowance set, reports an exceeded allowance as the count itself, imitating AMD's Windows driver.")
