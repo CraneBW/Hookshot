@@ -533,6 +533,9 @@ case-sensitive, and an unknown one is ignored.
 
 ### Time and profiles
 
+For every thread, wait, lock and renderer stage on one timeline, build with the Tracy profiler:
+[development/tracy.md](development/tracy.md) (`HOOKSHOT_TRACY=1`, a developer's build; its captures never leave the PC).
+
 #### The profiling mode
 
 `HOS_PROFILE=1` (in the environment or `hookshot_env.txt`; it is the line [Report slow
