@@ -1989,6 +1989,7 @@ LIFT_ENV_NOT_OUTPUT = {   # (read by the lift's sources, and no change to what i
     "RX_VK_NO_F16": "nx2/bake_ds's own run",
     "HOS_MODS": "the mods folder: the ExeFS patches found in it are in the key by content (OOT_EXEFS_PATCHES_SHA1)",
     "HOS_NO_FASTFP": "the game's runtime (the lifted C reads it at play)",
+    "HOS_FMA_FAST": "the game's runtime (nx2/fma_soft.h, read by the generated C at play)",
 }
 
 
