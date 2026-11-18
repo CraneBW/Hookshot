@@ -1557,7 +1557,7 @@ const char* nfc_scan_says(int variant) {
     switch (host->nfc_scan(0)) {
     case 1: return looking;
     case 2:
-        snprintf(b, sizeof b, "Saved as \"%s\": it is in the NFC tag row's list now. The launcher's NFC page renames it.",
+        snprintf(b, sizeof b, "Saved as \"%s\": it is in the NFC tag row's list now. Rename its file in the folder to rename it.",
                  host->nfc_scan_name ? host->nfc_scan_name() : "");
         return b;
     case 3: return "No tag was found in ten seconds. Hold it flat on the controller's logo and scan again.";
