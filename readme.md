@@ -431,7 +431,7 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Scan tag on controller | Reads a tag you own with a Switch 2 Pro Controller (USB) and saves it in your NFC folder | |
 | Debug | Debug tools | Off, On (the tools below it while on) | Off |
 | | Developer: Frame pacing | Off, On | Off |
-| | Developer: Threaded rendering | Auto, On, Off (after a restart). Auto is On with 8 or more processor threads for the game | Auto |
+| | Developer: Threaded rendering | Auto, On, Off (after a restart). Auto is On with 6 or more processor cores for the game, and the render thread alone with 4 or 5 | Auto |
 | | Developer: Descriptor reuse | Off, On (after a restart) | On |
 | | Developer: Sampler cache | Off, On (after a restart) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
@@ -466,9 +466,10 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
   over the menu.
 - **Threaded rendering:** On draws the picture on threads of its own (a render thread and a recorder thread) while
   the game goes on to its next frame, for a higher frame rate on a processor with threads to spare; it is still being
-  tested and can show flashes. Off draws it on the game's own thread, as before. Auto chooses by the processor
-  (On with 8 or more threads for the game, Off with fewer, and Off wherever the mode is not safe). It applies after
-  a restart. `RX_VK_ASYNC` and `RX_VK_RECORDER`, when set, choose for one run.
+  tested and can show flashes. Off draws it on the game's own thread, as before. Auto chooses by the processor's cores
+  for the game, each core counted once however many threads it runs: On with 6 or more, the render thread alone with 4
+  or 5 (where the recorder thread beside it was slower), Off with fewer, and Off wherever the mode is not safe. It
+  applies after a restart. `RX_VK_ASYNC` and `RX_VK_RECORDER`, when set, choose for one run.
 - **Frame generation** makes extra frames between the game's own. It adds a little input delay, and fast motion can
   show artifacts. **Frame generation by** chooses who makes them: **DLSS FG**, NVIDIA DLSS Frame Generation where it
   runs (RTX 40 and newer, at 2x up to what NVIDIA's runtime makes on the GPU: 6x on an RTX 50, 2x on an RTX 40; the

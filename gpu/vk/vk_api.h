@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 34
+#define MKWVK_API_VERSION 35
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
 typedef struct MkwVkMonitor {
     char id[512];             /* opaque persistent preference; never a runtime handle or list index */
@@ -316,6 +316,11 @@ typedef struct MkwVkHost {
        seconds, 4 the tag is not a figure's, 5 no such controller over USB, 6 it could not be read or written */
     int (*nfc_scan)(int start);
     const char *(*nfc_scan_name)(void);
+    /* (version 35, hookshot: at the end) the A/B within one run (host/hos_ab.c, HOS_AB), for the frame trace's ab_side column: the side
+       of the frame from from_ns to to_ns (the host's clock, now_ns; from_ns 0 when not known): -1 outside the A/B (none set,
+       its warm-up), 0 the switch's normal value, 1 the A/B's, 2 or 3 those sides in a transition (a flip inside the frame,
+       or less than 0.3 s before its end), which scripts/ab_summary.py leaves out */
+    int (*ab_frame)(int64_t from_ns, int64_t to_ns);
 } MkwVkHost;
 /* (version 26) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };

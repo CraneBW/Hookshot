@@ -356,6 +356,7 @@ static const MkwVkHost vk_host = {
     hos_monitor_count, hos_monitor_info, hos_monitor_select,
     hos_sdl_rumble_test,
     hos_nfc_count, hos_nfc_name, hos_nfc_tap, hos_nfc_state, hos_nfc_dir, hos_nfc_scan, hos_nfc_scan_name,
+    hos_ab_frame,   /* (version 35, hookshot: the frame trace's ab_side, host/hos_ab.c) */
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
@@ -536,6 +537,7 @@ static volatile LONG presents;   /* (the frames shown, for the camera jitter bel
 void rx_nvn_present(const nvn_tex *t, const int crop[4]) {
     InterlockedIncrement(&presents);
     hos_slow_frame_present();   /* (HOS_SLOW_FRAMES: a late frame's samples written out, host/slow_frames.c) */
+    hos_ab_present();   /* (hookshot) HOS_AB: the frame counted for its side (host/hos_ab.c) */
     vk ? vk->nvn_present(t, crop) : wgr_nvn_present(t, crop);
 }
 /* (hookshot, nx2/oot_jitter.py) the temporal upscaler's camera jitter (NVIDIA DLSS, AMD FSR 4: gpu/vk/vk_temporal.cpp): this frame's sub-pixel offset of the scene's projection, in clip
