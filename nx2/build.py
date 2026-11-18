@@ -423,6 +423,17 @@ def image_too_big(exe):
             "build it at -O1 (not -O0), or split the lifted code into more than one module" % (span >> 20, IMAGE_LIMIT >> 20))
 
 
+# (Linux) the exe's functions the Vulkan back end (hookshot_vk.so) finds by name: an executable's functions are in its dynamic
+# symbol table only when the link exports them (on Windows they are DLL exports, __declspec(dllexport)). Every name the back end
+# looks up in the exe (GetProcAddress(GetModuleHandleA(nullptr), ...), dlsym(RTLD_DEFAULT, ...)) is here:
+# tests/test_host_exports.py reads gpu/ for them. A name the Linux host does not define (hl_drop.c, hos_hostsplit.c,
+# hos_guestpages.c and hos_memsplit.c are Windows-only) is exported as nothing and still not found, as before
+HOST_EXPORTS = ("hos_posix_*", "hos_jt_mark_ext",
+                "hos_gpu_live_pools", "hos_gpu_write_live", "hos_lag_sub", "hos_lag_frames", "hos_lag_counts",
+                "hos_mem_tag", "hos_mem_untag", "hos_gp_hold", "hos_gp_dropped_in", "hos_pool_trap_release", "hos_noaccess_import",
+                "hos_drop_spill_bytes", "hos_hostsplit_totals", "hos_ledger_pages")
+
+
 def HOT_ORDER():
     p = os.path.join(kit.WORK, "hot_order.txt")
     if not os.path.exists(p) or os.environ.get("RX_NO_ORDER"):
@@ -2240,14 +2251,15 @@ def main():
     if a.standalone and not vk_only and LINUX:
         exe = os.path.join(out, EXE)   # (+ hookshot.map: crash offsets -> f_<guest address>)
         t = time.time()
-        # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name)
+        # (--export-dynamic-symbol: HOST_EXPORTS, the functions the Vulkan back end looks up in the exe by name: the window's
+        # state its own Win32 calls read, the frame-timeline marks, the live pools and their checked write and the others)
         # (the instrumented objects hold the counters and host/pgo_rt.c writes them: -fprofile-instr-generate at this
         # final Linux link would make clang look for libclang_rt.profile, which the packaged tools need not have)
         # (HOOKSHOT_TRACY: Tracy's client is C++, so the C++ driver links, its runtime inside as the back end's is, and the
         # client's C API is exported for the back end's module)
         r = run_link([toolchain.need(toolchain.find("clang++")) if TRACY else cc] + target() + ["-fuse-ld=lld", "-o", exe] +
                      linker("-Map=" + exe + ".map") +
-                     ["-Wl,--gc-sections", "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
+                     ["-Wl,--gc-sections"] + ["-Wl,--export-dynamic-symbol=" + s for s in HOST_EXPORTS] + ["@" + rsp] + HOT_ORDER() +
                      (["-Wl,--export-dynamic-symbol=___tracy_*", "-static-libstdc++", "-static-libgcc"] if TRACY else []) +
                      (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS +
                      (["-l:libstdc++.a"] if SYSROOT else ["-lstdc++"]), exe)   # (native/'s C++: static with the AppImage's sysroot)

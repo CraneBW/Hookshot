@@ -1015,6 +1015,7 @@ GONE(RX_VK_WB_REPORTS, "2026-11-16", "it does nothing: CPU-owned report words ar
 SW(RX_VK_WB_SHADOW_MB, hw, int, "1/8 of the allowed VRAM (512 MB if unknown); at most 512 MB on an integrated GPU", "The most VRAM the write-back diff's shadows may take, in MB.")
 SW(RX_VK_WORKERS, hw, int, "6 with 16 hardware threads or more, else a third of them clamped to 2-4", "Number of background workers for shader translation and pipeline builds (1 to 16).")
 SW(RX_VK_WORK_LOCAL, attempt, bool, "off: the work counts are bumped at every command inside parallel segments", "=1 leaves them alone where nothing reads them.")
+SW(RX_VK_WRITE_LIVE, kill, bool, "on: left-out write-backs go through the host's checked write (hos_gpu_write_live)", "=0 writes them unchecked, as before (the Linux exe had no export of it).")
 SW(RX_VK_XESS, player, enum, "unset: the Insert menu's Upscaler row chooses", "0 keeps XeSS out for the run (library not loaded), 1 forces Intel XeSS over the row, 2 its Native AA.")
 SW(RX_VK_XESS_DIR, attempt, string, "libxess.dll is looked for beside the executable, then in the game folder", "Names a folder searched first for Intel's libxess.dll.")
 SW(RX_VK_XESS_HDR, kill, bool, "on: XeSS gets an HDR context when the game presents native HDR", "=0 makes XeSS use the LDR context and clamped colour even with native HDR.")
