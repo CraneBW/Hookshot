@@ -39,6 +39,9 @@
 #include "vk_texture.h"
 #include "evict_reason.h"
 #include "vk_ledger.h"   // (RX_VK_LEDGER)
+#ifdef TRACY_ENABLE
+#include "../../host/hos_tracy.h"   // (HOOKSHOT_TRACY: the profiler's zones; nothing in any other build)
+#endif
 #include "vk_menu.h"
 #include "vk_draw.h"
 #include "vk_programs.h"
@@ -1707,6 +1710,9 @@ bool astc_kinds_wanted(const Texture& tex) {
 }
 
 bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("texture upload_astc_gpu");
+#endif
     astc_fail = nullptr;
     if (tex.type != VK_IMAGE_TYPE_2D || tex.samples != VK_SAMPLE_COUNT_1_BIT || !astc_ready()) {
         astc_fail = "not a 2D image the GPU decoder takes";
@@ -2007,6 +2013,9 @@ bool unswizzle_ready() {
 
 /// The whole texture (every level and layer dirty overlaps) unswizzled on the GPU; false: not a texture for it
 bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("texture upload_unswizzle_gpu");
+#endif
     if (tex.type != VK_IMAGE_TYPE_2D || tex.astc || tex.bc || !(tex.usage & VK_IMAGE_USAGE_STORAGE_BIT) ||
         is_bc(tex.format) || is_astc(tex.format) || is_depth_format(tex.format) || nvn_tex_is_linear(&tex.d))
         return false;
@@ -2407,6 +2416,9 @@ bool upload_inner(Texture& tex, const Ranges* dirty);
 thread_local bool ahead_running = false;
 void ahead_learn(const Texture& tex);
 bool upload(Texture& tex, const Ranges* dirty) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("texture upload");
+#endif
     if (!tex.uploaded && !ahead_running) ahead_learn(tex);
     const auto t0 = std::chrono::steady_clock::now();
     up_route = UP_CPU;
@@ -3312,6 +3324,9 @@ bool park_restore(Texture& x, VkCommandBuffer cmd, uint64_t frame) {
 }
 
 Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw, int bh, int bpb, bool as_target) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("texture create");
+#endif
     PROF_EXACT();   // (texture_get's slow path: PROF_TEXGET samples the rest)
     auto tex = std::make_unique<Texture>();
     Texture& x = *tex;

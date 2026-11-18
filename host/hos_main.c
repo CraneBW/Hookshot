@@ -10,6 +10,9 @@
                 HOS_NVN_CONTINUE=1 (go on past nvnBootstrapLoader). */
 #include "hos.h"
 #include "save_backup.h"
+#ifdef TRACY_ENABLE
+#include "hos_tracy.h"
+#endif
 #ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/hookshot_env.h"
 #endif
@@ -2179,6 +2182,9 @@ static int game_main(int argc, char **argv) {
         const int helper = hos_crash_helper_main(argc, argv);
         if (helper >= 0) return helper;
     }
+#ifdef TRACY_ENABLE
+    hos_tracy_start();   /* (HOOKSHOT_TRACY: the profiler's client, in the game alone: host/hos_tracy.h) */
+#endif
     if (!narrow_paths_ok(argc, argv)) return 1;
     hos_game_layout();   /* (the game folder's cache/ and logs/, before anything writes there: host/game_layout.c) */
     {
@@ -2592,6 +2598,9 @@ int main(int argc, char **argv) {
         const int helper = hos_crash_helper_main(argc, argv);
         if (helper >= 0) return helper;
     }
+#ifdef TRACY_ENABLE
+    hos_tracy_start();   /* (HOOKSHOT_TRACY: the profiler's client, in the game alone: host/hos_tracy.h) */
+#endif
     int hos_display_init(void);
     void hos_display_loop(void);
     hos_game_layout();   /* (the game folder's cache/ and logs/, before anything writes there, --prepare-shaders too: host/game_layout.c) */
