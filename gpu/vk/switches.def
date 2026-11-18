@@ -484,6 +484,7 @@ SW(RX_VK_FG_LATENCY_LOG, diag, string, "unset: no file", "<file> writes one CSV 
 SW(RX_VK_FG_TIMELINE, kill, bool, "on: each frame of a fixed frame generation multiplier's set is presented at its own time on the game's timeline, under FIFO no sooner than a refresh after the one before", "=0 presents those sets as before: together with Frame pacing Off, evenly apart with it On, with the swapchain's images and 3 frame slots as before.")
 SW(RX_VK_FIFO, player, bool, "the menu's V-Sync row", "V-Sync On (FIFO) for one run, over the menu's V-Sync row.")
 SW(RX_VK_FINE_SEGMENTS, attempt, bool, "off: at most 6 segments of ~160 draws", "=1 cuts a big command buffer into up to 10 segments of ~128 draws and dispatches, more than there are recorders.")
+SW(RX_VK_FIRST_UPLOAD_OWN, kill, bool, "on: a texture's first upload takes only its own submission's copies of its storage", "=0 reads every copy the submit-time capture kept, as before (single frames of old textures entering the Market).")
 SW(RX_VK_FLASH, diag, bool, "off", "=1 runs the flash detector on shots: writes the three frames around a one-frame flash and dumps the next.")
 SW(RX_VK_FLASH_CELLS, diag, int, "40", "How many cells must flash for the detector to report one.")
 SW(RX_VK_FLASH_DIFF, diag, int, "48", "Per-cell brightness difference the flash detector counts as a flash.")
