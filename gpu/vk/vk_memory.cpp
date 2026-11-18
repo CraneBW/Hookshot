@@ -740,17 +740,74 @@ bool memory_table_flush() {
 #endif
     table_defer = false;
     if (table_pending.empty()) return false;
-    std::vector<std::pair<uint64_t, uint64_t>> pages;   // (page, value), in the order they were set
-    // (hookshot) a heap that has no room left (Windows' commit limit: #2941, 32 GB of RAM with a 2 GB page file, Hookshot at 24 GB
-    // as Hyrule Field loaded) threw std::bad_alloc here, on the presenting thread, and nothing between it and the game's code
-    // catches: the game closed. Then the changes are written into the table at once, as RX_VK_TABLE_NOW does: work submitted
-    // before may read them early, against the game closing
+    VkCommandBuffer cmd = upload_command_buffer();
+    GprofSpan gp(cmd, "ptable update (guest page table)");
+    gp.items = 0;
+    // (hookshot) a heap that has no room left (Windows' commit limit: 32 GB of RAM with a 2 GB page file, Hookshot at 24 GB as
+    // Hyrule Field loaded) threw std::bad_alloc here, on the presenting thread, and nothing between it and the game's code
+    // catches: the game closed. Then the changes are written into the table at once, as RX_VK_TABLE_NOW does: work
+    // submitted before may read them early, against the game closing
     try {
-        size_t n = 0;
-        for (const TableRun& r : table_pending) n += r.count;
-        pages.reserve(n);
-        for (const TableRun& r : table_pending)
-            for (uint64_t i = 0; i < r.count; i++) pages.push_back({r.first + i, r.address ? r.address + (i << 12) : 0});
+        std::vector<uint64_t> batch;
+        uint64_t batch_first = 0;
+        const auto emit = [&] {
+            vkCmdUpdateBuffer(cmd, guest_pages_buffer, batch_first * 8, batch.size() * 8, batch.data());
+            gp.items++;
+            gp.bytes += batch.size() * 8;
+            batch.clear();
+        };
+        const auto append = [&](const TableRun& r, uint64_t first, uint64_t end) {
+            if (!batch.empty() && batch_first + batch.size() != first) emit();
+            while (first < end) {
+                if (batch.empty()) batch_first = first;
+                const size_t n = (size_t)std::min<uint64_t>(8192 - batch.size(), end - first);
+                const size_t before = batch.size();
+                if (before + n > batch.capacity())
+                    batch.reserve(std::min<size_t>(8192, std::max(before + n, batch.capacity() * 2)));
+                batch.resize(before + n);   // zero mappings stay zero
+                if (r.address) {
+                    const uint64_t address = r.address + ((first - r.first) << 12);
+                    for (size_t i = 0; i < n; ++i) batch[before + i] = address + ((uint64_t)i << 12);
+                }
+                first += n;
+                if (batch.size() == 8192) emit();   // vkCmdUpdateBuffer takes at most 64 KiB
+            }
+        };
+        const bool ordered = std::adjacent_find(table_pending.begin(), table_pending.end(),
+            [](const TableRun& a, const TableRun& b) { return a.first + a.count > b.first; }) == table_pending.end();
+        if (ordered) {
+            for (const TableRun& r : table_pending) append(r, r.first, r.first + r.count);
+        } else {
+            // Walk range starts in page order. Among overlapping writes the highest original
+            // index owns the pages until it ends or another write starts.
+            std::vector<size_t> starts;
+            starts.reserve(table_pending.size());
+            for (size_t i = 0; i < table_pending.size(); ++i) starts.push_back(i);
+            std::sort(starts.begin(), starts.end(), [](size_t a, size_t b) {
+                return table_pending[a].first < table_pending[b].first;
+            });
+            std::vector<size_t> active;
+            size_t next = 0;
+            uint64_t page = 0;
+            while (next < starts.size() || !active.empty()) {
+                if (active.empty()) page = table_pending[starts[next]].first;
+                while (next < starts.size() && table_pending[starts[next]].first == page) {
+                    active.push_back(starts[next++]);
+                    std::push_heap(active.begin(), active.end());
+                }
+                const TableRun& r = table_pending[active.front()];
+                const uint64_t end = r.first + r.count;
+                if (end <= page) {
+                    std::pop_heap(active.begin(), active.end());
+                    active.pop_back();
+                    continue;
+                }
+                const uint64_t until = next == starts.size() ? end : std::min(end, table_pending[starts[next]].first);
+                append(r, page, until);
+                page = until;
+            }
+        }
+        if (!batch.empty()) emit();
     } catch (const std::bad_alloc&) {
         static std::atomic<int> said{0};
         uint64_t n = 0;
@@ -762,26 +819,9 @@ bool memory_table_flush() {
         if (said.fetch_add(1) < 8)
             logf("vk: page table: no memory for this recording's %llu page changes (the commit limit?): written at once",
                  (unsigned long long)n);
-        return false;
+        return gp.items != 0;
     }
     table_pending.clear();
-    std::stable_sort(pages.begin(), pages.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    std::vector<uint64_t> run;
-    VkCommandBuffer cmd = upload_command_buffer();
-    GprofSpan gp(cmd, "ptable update (guest page table)");
-    gp.items = 0;
-    uint64_t run_first = 0;
-    const auto emit = [&] {
-        if (!run.empty()) vkCmdUpdateBuffer(cmd, guest_pages_buffer, run_first * 8, run.size() * 8, run.data()), gp.items++, gp.bytes += run.size() * 8;
-        run.clear();
-    };
-    for (size_t i = 0; i < pages.size(); i++) {
-        if (i + 1 < pages.size() && pages[i + 1].first == pages[i].first) continue;   // (a later change of the same page wins)
-        if (!run.empty() && (pages[i].first != run_first + run.size() || run.size() == 8192)) emit();
-        if (run.empty()) run_first = pages[i].first;
-        run.push_back(pages[i].second);
-    }
-    emit();
     return true;
 }
 
@@ -1485,6 +1525,11 @@ uint64_t cap_buf_size(uint64_t need) {
     uint64_t s = min;
     while (s < need && s < (16ull << 20)) s <<= 1;
     if (s >= need) return s;
+    // On a 32 MiB spare budget, rounding a 17 MiB capture up to 32 MiB leaves no room for smaller spares.
+    if (need <= (32ull << 20) && cap_spare_max() <= (32ull << 20)) {
+        constexpr uint64_t step = 4ull << 20;
+        return (need + step - 1) & ~(step - 1);
+    }
     // (hookshot: above 16 MB in classes of 32, 64, 128 and 256 MB, so that a buffer given back fits the next capture)
     for (const uint64_t cm : {32, 64, 128, 192, 256})   // (stutter: 192 added, a 130-158 MB capture took the 256 MB class)
         if ((uint64_t)cm << 20 >= need) return (uint64_t)cm << 20;

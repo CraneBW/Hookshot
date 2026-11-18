@@ -51,6 +51,7 @@
 #include "gone_ring.h"   //
 #include "texture_budget.h"
 #include "texture_ahead.h"
+#include "texture_tiles.h"
 #include "vk_paths.h"
 
 #include <span>
@@ -2641,6 +2642,13 @@ bool upload_never(const Texture& tex) {
            // rendered, not uploaded)
            tex.aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 }
+void unswizzle_upload(std::span<uint8_t> dest, std::span<const uint8_t> src, uint32_t bpb,
+                      uint32_t width, uint32_t height, uint32_t depth, uint32_t tile_h, uint32_t tile_d) {
+    if (depth == 1 && !tile_d && texture_tiles::unswizzle(dest, src, uint64_t(width) * bpb, height, tile_h)) return;
+    // level_geo counts GOB columns from width * bpb, including for odd-width RGB textures.
+    Tegra::Texture::UnswizzleTexture(dest, src, bpb, width, height, depth, tile_h, tile_d, 0);
+}
+
 bool upload_inner(Texture& tex, const Ranges* dirty) {
     PROF(PROF_UPLOAD);
     if (upload_never(tex)) return false;
@@ -2791,9 +2799,9 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
                                 } else {
                                     rows = src + (uint64_t)a * row_bytes, rows_n = need - (uint64_t)a * row_bytes;
                                 }
-                                Tegra::Texture::UnswizzleTexture(
+                                unswizzle_upload(
                                     std::span<uint8_t>(blocks + a * out_row, (uint64_t)g.tw * h * src_bpb),
-                                    std::span<const uint8_t>(rows, rows_n), (u32)src_bpb, g.tw, h, 1, g.tile_h, 0, 1);
+                                    std::span<const uint8_t>(rows, rows_n), (u32)src_bpb, g.tw, h, 1, g.tile_h, 0);
                             }
                         };
                         std::vector<std::thread> pool;
@@ -2805,15 +2813,14 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
                             std::vector<uint8_t> ref(block_bytes);
                             Tegra::Texture::UnswizzleTexture(std::span<uint8_t>(ref.data(), block_bytes),
                                                              std::span<const uint8_t>(src, need), (u32)src_bpb, g.tw,
-                                                             th, g.td, g.tile_h, g.tile_d, 1);
+                                                             th, g.td, g.tile_h, g.tile_d, 0);
                             const bool same = !std::memcmp(ref.data(), blocks, block_bytes);
                             logf("vk: unswizzle check %#llx level %u rows %u+%u: %s", (unsigned long long)tex.gpu,
                                  level, row0, nrow, same ? "same" : "DIFFERENT");
                         }
                     } else {
-                        Tegra::Texture::UnswizzleTexture(std::span<uint8_t>(blocks, block_bytes),
-                                                         std::span<const uint8_t>(src, need), (u32)src_bpb, g.tw, th,
-                                                         g.td, g.tile_h, g.tile_d, 1);
+                        unswizzle_upload(std::span<uint8_t>(blocks, block_bytes), std::span<const uint8_t>(src, need),
+                                         (u32)src_bpb, g.tw, th, g.td, g.tile_h, g.tile_d);
                     }
                     st_unswizzle_bytes += (int64_t)block_bytes;
                     st_unswizzle_ns +=
