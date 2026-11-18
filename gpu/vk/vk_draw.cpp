@@ -10364,7 +10364,7 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
                                                          &output_format, VK_FORMAT_B10G11R11_UFLOAT_PACK32);
             if (input_view && output_view && input_format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 &&
                 output_format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 &&
-                typed_upscale(cmd, input_view, output_view, dst, 0, key, "generic RGB9E5 fallback", false)) {
+                typed_upscale(cmd, input_view, output_view, dst, 0, key, "generic RGB9E5 fallback", gameplay_network(key))) {
                 full_barrier(cmd);
                 texture_written(dst);
                 if (gameplay_taau) {
@@ -10419,8 +10419,8 @@ bool taau_key(uint64_t key) {
     // (the real network where the card runs it as the console does; on the software multiplies it cost most of a frame on AMD's cards, and a
     // locked 60 with this in its place: Hookshot issue 52)
     static const char* keys = getenv("RX_VK_TAAU_KEYS") ? getenv("RX_VK_TAAU_KEYS")
-                              : Shader::Backend::SPIRV::mma_software || env_on("RX_VK_NO_F16")
-                                    ? "fd029a317a9a4b94" : "-";   // (RX_VK_NO_F16: vk_shader.cpp leaves the network out)
+                              : Shader::Backend::SPIRV::mma_software || !float16_shaders()
+                                    ? "fd029a317a9a4b94" : "-";   // (no f16 shaders: vk_shader.cpp leaves the network out)
     char hex[24];
     snprintf(hex, sizeof hex, "%016llx", (unsigned long long)key);
     bool match = false;

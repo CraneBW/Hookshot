@@ -389,6 +389,30 @@ Shader::TextureType handle_texture_type(uint32_t handle) {
     return texture_type(has_view && v.set_target ? v.target : t.d.target);
 }
 
+/// Whether the translated shaders keep the game's 16-bit floats: where the device has shaderFloat16. A module that declares the
+/// Float16 capability without it is invalid (VUID-VkShaderModuleCreateInfo-pCode-08740) and what such a driver does with it is
+/// undefined: the profile said every device had them (GTX 10xx, Polaris RX 400/500: Hookshot issues 1 and 67). Without them the
+/// translator lowers the f16 math to 32 bits (host_info) and the cooperative-matrix networks, f16 by nature, are left out: their
+/// stand-ins draw the upscale (vk_draw.cpp). RX_VK_NO_F16=1: off whatever the device has; RX_VK_F16=1: on whatever it has (a test)
+bool float16_shaders() {
+    static const bool on = [] {
+        const bool has = dev.vk12.shaderFloat16 != VK_FALSE;
+        if (env_on("RX_VK_NO_F16")) {
+            logf("vk: shaders: 16-bit floats lowered to 32 bits, networks left out (RX_VK_NO_F16; the device %s shaderFloat16)",
+                 has ? "has" : "lacks");
+            return false;
+        }
+        if (env_on("RX_VK_F16")) {
+            logf("vk: shaders: 16-bit floats kept (RX_VK_F16=1; the device %s shaderFloat16)", has ? "has" : "lacks");
+            return true;
+        }
+        if (has) logf("vk: shaders: 16-bit floats kept (shaderFloat16)");
+        else logf("vk: shaders: 16-bit floats lowered to 32 bits, networks left out (the device has no shaderFloat16)");
+        return has;
+    }();
+    return on;
+}
+
 namespace {
 
 bool handle_is_integer(uint32_t handle) {
@@ -668,11 +692,7 @@ Shader::HostTranslateInfo host_info() {
     Shader::HostTranslateInfo h{};
     h.support_handle_table_arrays = handle_tables_on();
     h.support_float64 = true;
-    // (RX_VK_NO_F16, a test: the game's f16 math lowered to f32, as a card without f16 shaders would need (GTX 10xx, issue 98). Eden's
-    // lowering made a picture of noise of Kokiri on an RTX card, so it is not used by itself)
-    // (k10) and only where the GPU runs f16 shaders: RADV gives Polaris (RX 400/500) none (shaderFloat16 false), and f16 SPIR-V
-    // there drew Kokiri Forest as coloured noise on an RX 580. Eden's lowering to f32 is what Pascal takes as well
-    h.support_float16 = !env_on("RX_VK_NO_F16") && dev.vk12.shaderFloat16;
+    h.support_float16 = float16_shaders();   // (without shaderFloat16 the game's f16 math lowered to f32: GTX 10xx, issue 98)
     h.support_int64 = true;
     h.needs_demote_reorder = false;
     h.support_snorm_render_buffer = true;
@@ -1387,9 +1407,14 @@ uint64_t translator_stamp() {
         add(&narrow, sizeof narrow);
     }
     // (k10) f16 lowered to f32 on a GPU without f16 shaders (host_info): only then, so other GPUs keep their caches
+    // (and RX_VK_F16=1 (float16_shaders), a test that keeps f16 on such a GPU: its programs apart, the others' stamp as it was)
     if (!dev.vk12.shaderFloat16) {
         const uint32_t no_f16 = 0x6e663136u;   // ("nf16")
         add(&no_f16, sizeof no_f16);
+        if (float16_shaders()) {
+            const uint32_t half = 0x16f1u;
+            add(&half, sizeof half);
+        }
     }
     // (the records keep Shader::Info as it lies in memory: a cache written by another C++ library (the MSVC build's, then the
     // llvm-mingw one's libc++) has other layouts, and reading it crashed at start. The library and the sizes, so it starts again)
@@ -1621,7 +1646,7 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
                     at = e == std::string::npos ? keep.size() : e + 1;
                 }
                 // (device_policy.h networks_left_out: every vendor but NVIDIA; and where the multiplies run in software, whoever made the GPU)
-                if ((!kept_one && (Shader::Backend::SPIRV::mma_software || dev.policy.networks_left_out)) || env_on("RX_VK_NO_F16") || !dev.vk12.shaderFloat16)
+                if ((!kept_one && (Shader::Backend::SPIRV::mma_software || dev.policy.networks_left_out)) || !float16_shaders())
                     throw LeftOut("a network left out on this card");
             }
             const std::vector<uint32_t> spirv = Shader::Backend::SPIRV::EmitSPIRV(profile_pinned(), rt, t->program, bindings);

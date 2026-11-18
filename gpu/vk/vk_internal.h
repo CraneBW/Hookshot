@@ -154,6 +154,11 @@ extern Device dev;
 /// the caller answers VK_PIPELINE_COMPILE_REQUIRED (cold) without asking the driver.
 bool intel_compiles_side_by_side();   // (vk_menu.cpp: the row as this run started with it)
 bool intel_quick_compute();   // (vk_menu.cpp: the Intel quick compute builds row, as it is now: vk_draw.cpp compute_optimize)
+
+/// Whether translated shaders keep 16-bit floats (vk_shader.cpp): the device's shaderFloat16, or RX_VK_NO_F16 / RX_VK_F16. Without
+/// them the translator lowers the game's f16 math to 32 bits and the cooperative-matrix networks are left out (vk_draw.cpp's
+/// stand-ins draw their upscale)
+bool float16_shaders();
 inline bool intel_gate_on() {
 #ifdef _WIN32
     static const bool on = [] {

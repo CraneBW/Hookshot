@@ -51,6 +51,8 @@ FIXTURE = r"""
 #include <unordered_map>
 #include <vector>
 static void logf(const char*, ...) {}
+// (the switches' rule, gpu/vk/compat/hookshot_env.h: 0, false, off or no is off)
+static bool env_value_off(const char* v) { return !strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "off") || !strcmp(v, "no"); }
 static bool overlay_off() { return false; }
 struct ShadowPage {
     std::unique_ptr<uint8_t[]> b;
