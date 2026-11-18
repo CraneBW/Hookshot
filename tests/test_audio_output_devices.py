@@ -64,11 +64,12 @@ def check_host_callbacks(api, backend):
                 'monitor_select': 'hos_monitor_select'}
     assert len(fields) == len(table), 'Host interface/initializer lengths differ'
     # (the end of the table: playback, the microphone test (28), the frame trace's main_thread_times (29), the renderer's
-    # out_of_memory (30), the fullscreen monitor's three (31); take_text and
-    # options_path come earlier, the mods' and cheats' callbacks between them and playback)
+    # out_of_memory (30), the fullscreen monitor's three (31), the rumble test (33) and the NFC tab's seven (34); take_text
+    # and options_path come earlier, the mods' and cheats' callbacks between them and playback)
     tail = ['audio_output_count', 'audio_output_info', 'audio_output_select', 'audio_output_state', 'mic_test',
-            'main_thread_times', 'out_of_memory', 'monitor_count', 'monitor_info', 'monitor_select']
-    assert fields[-len(tail):] == tail, 'Mic test must follow playback (29 appends main_thread_times, 30 out_of_memory, 31 the monitor callbacks)'
+            'main_thread_times', 'out_of_memory', 'monitor_count', 'monitor_info', 'monitor_select', 'rumble_test',
+            'nfc_count', 'nfc_name', 'nfc_tap', 'nfc_state', 'nfc_dir', 'nfc_scan', 'nfc_scan_name']
+    assert fields[-len(tail):] == tail, 'Mic test must follow playback (29 appends main_thread_times, 30 out_of_memory, 31 the monitor callbacks, 33 the rumble test, 34 NFC)'
     assert fields.index('take_text') < fields.index('options_path') < fields.index('audio_output_count'), \
         'take_text and options_path must come before playback'
     for field, value in expected.items():

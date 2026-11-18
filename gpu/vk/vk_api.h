@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 32
+#define MKWVK_API_VERSION 34
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
 typedef struct MkwVkMonitor {
     char id[512];             /* opaque persistent preference; never a runtime handle or list index */
@@ -299,6 +299,23 @@ typedef struct MkwVkHost {
     int (*monitor_count)(void);
     int (*monitor_info)(int index, struct MkwVkMonitor *out);
     void (*monitor_select)(const char *id);
+    /* (version 33, hookshot: at the end) a short rumble on the controllers at the Rumble strength as it is now: the Insert
+       menu's row plays it when it is changed (host/pad_sdl.c) */
+    void (*rumble_test)(void);
+    /* (version 34, hookshot: at the end) the NFC tags of the player's folder (host/nn_nfp.c), for the Insert menu's NFC tab: how
+       many there are (listing them again), one's name (its file's, without the ending), one held to the reader (index; -1: taken
+       away; returns 0 when its file is not an NFC tag's), and what the reader is doing (bits: 1 the game uses NFC tags, 2 it waits
+       for one now, 4 one is held to it, 8 the game has read it), and the folder */
+    int (*nfc_count)(void);
+    const char *(*nfc_name)(int index);
+    int (*nfc_tap)(int index);
+    int (*nfc_state)(void);
+    const char *(*nfc_dir)(void);
+    /* (version 34) a tag on the Switch 2 Pro Controller's reader copied into that folder (host/nn_nfp.c, host/pad_switch2.c):
+       start 1 begins a scan; returns 0 none, 1 looking for a tag, 2 saved (nfc_scan_name: its file's name), 3 no tag in ten
+       seconds, 4 the tag is not a figure's, 5 no such controller over USB, 6 it could not be read or written */
+    int (*nfc_scan)(int start);
+    const char *(*nfc_scan_name)(void);
 } MkwVkHost;
 /* (version 26) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };

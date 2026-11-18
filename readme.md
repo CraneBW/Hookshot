@@ -421,9 +421,14 @@ Camera, Mouse, Movement and Menu. The table lists those tabs' rows in that order
 | | Walk mode | Hold, Toggle | Hold |
 | | Walk speed | 15% to 90%, in steps of 5 | 45% |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
+| | Controller menu button | None, Home, Back left (GL), Back right (GR) | Home |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
-| | Layout preset | Nintendo (Def), Xbox / PC, Swap Face, Custom (on the Controls page) | Nintendo (Def) |
+| | Layout preset | Nintendo (Def), Xbox / PC, Swap Face, Switch 2 Pro, Custom (on the Controls page) | Nintendo (Def) |
 | | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck (on the Controls page) | Auto |
+| NFC | NFC tag | The tag files of your NFC folder, by their names | The first |
+| | Tap tag | Holds the chosen tag to the game's reader | |
+| | Remove tag | Takes it off the reader | |
+| | Scan tag on controller | Reads a tag you own with a Switch 2 Pro Controller (USB) and saves it in your NFC folder | |
 | Debug | Debug tools | Off, On (the tools below it while on) | Off |
 | | Developer: Frame pacing | Off, On | Off |
 | | Developer: Threaded rendering | Auto, On, Off (after a restart). Auto is On with 8 or more processor threads for the game | Auto |
@@ -703,6 +708,25 @@ it. Without them the kernel's hid-nintendo driver runs the controller, and it ge
 anything SDL reports as a Switch Pro Controller or Joy-Con, and that includes third-party controllers in Switch mode
 (8BitDo, GameSir and others; SDL gives them Nintendo's ids). Some of them may turn it into weak rumble or none: set
 `HOS_HD_RUMBLE=0` to give them the plain motor rumble.
+
+**NFC tags:** where the game asks for a figure's NFC tag, the Insert menu's **NFC** tab gives it one. The tags are files
+in a folder of yours, dumps of tags you own: `.bin` (an NTAG215's 540 bytes; 532 and 572 byte ones too) or a Flipper
+Zero's `.nfc`. The folder is `%LOCALAPPDATA%\Hookshot\nfc` on Windows and `~/.local/share/hookshot/nfc` on Linux
+(`HOOKSHOT_NFC_DIR` names another); copy them in yourself.
+Choose one in the **NFC tag** row and press **Tap tag** while the game waits for one (or before: it stays at the reader
+until the game reads it). With a Nintendo Switch 2 Pro Controller plugged in over USB (Windows), a real tag held on the
+controller is read too, and **Scan tag on controller** saves one into the folder. Only a tag's ID and its figure's model
+are read from a file; what a game writes to a tag is kept beside your saves instead (`user/nfc`), and no tag, real or
+file, is ever written. [docs/nfc.md](docs/nfc.md) has the details.
+
+**The Nintendo Switch 2 Pro Controller over USB (Windows):** Windows has no driver a game can use for it, so the game
+reads it itself: plugged in with its cable, it is a controller with its motion sensor and rumble like any other, with no
+bridge program. Pick **Switch 2 Pro** as the Layout preset (Controls page) for its own buttons and the Switch's icons;
+its Home button opens this menu (**Controller menu button**, which can also be GL or GR, or none). Only one program can
+have the controller: close Steam (it takes it for Steam Input) and any bridge program first, or the log
+says another program has it. A controller that stops taking rumble (it happens; the log says so) plays its own buzz and
+click instead until it is unplugged and plugged in again. Not over Bluetooth, where the controller speaks a pairing of
+Nintendo's own. `HOS_SWITCH2=0` leaves the controller alone.
 
 To change which gamepad button or key presses a Switch button, or which keys move, walk and turn the camera, open the
 Controls tab's Controls page. Choose a row and a column (Input 1 or 2 for the gamepad, Key 1 or 2 for the keyboard: each
