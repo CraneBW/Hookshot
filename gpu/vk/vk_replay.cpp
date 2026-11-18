@@ -1442,10 +1442,7 @@ Recording& begin_recording(uint64_t value) {
     r.value = value;
     r.part = ++rec_part_next;
     memory_recording_part(r.part);
-    const uint64_t done = completed();
-    memory_recording_value(value, done);
-    // Loads can submit work for many seconds between presents.
-    if ((r.part & 31) == 0) texture_complete_writes(done);
+    memory_recording_value(value, completed());
     texture_begin_recording(r.upload, value);
     draw_begin_recording(r.slot, r.cmd, value);
     rec::slot_done();
