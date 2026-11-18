@@ -52,6 +52,9 @@ int hos_mouse_take(int32_t *dx, int32_t *dy) {
 int hos_mouse_test_on(void) { return 0; }   /* (hookshot: a test's own mouse, HOS_MOUSE_TEST, is display.c's on Windows) */
 int hos_key_down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }   /* (hookshot: this window's own table of keys, win32_posix.c) */
 
+/* (nn_hid.c) the game's menus do not take the mouse here: its capture, and with it its buttons, stay the game's */
+int hos_mouse_in_game_menu(void) { return 0; }
+
 /* (mouse_native.c) motion taken and not used, put back for the next taker (the player camera's) */
 void hos_mouse_give_back(int32_t dx, int32_t dy) {
     InterlockedExchangeAdd(&mouse_dx, dx);
