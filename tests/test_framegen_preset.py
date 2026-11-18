@@ -91,7 +91,6 @@ int step_output_choice(int id, int dir) { return id + dir; }
 int output_for_aspect(int) { return opts.output_res; }
 const char* tx_framegen(int) { return ""; }
 const char* hn_framegen(int, int) { return ""; }
-bool framegen_by_dlss_offered() { return true; }   // (the Frame generation by row offers DLSS FG here)
 int fg_most = 0;   // (DLSS FG's runtime's most made frames while it makes the frames, vk_dlss.cpp; 0: no cap)
 int dlss_fg_most() { return fg_most; }
 /* CAPPED */

@@ -139,7 +139,6 @@ std::string output_name_key(const char* text) { return text; }
 void refresh_outputs() {}
 bool can_outputs() { return false; }
 bool output_forced() { return false; }
-bool framegen_by_dlss_offered() { return true; }   // (vk_menu.cpp: Frame generation by offers DLSS FG)
 // (the Fullscreen monitor row: covered by test_fullscreen_monitor_menu.py)
 int monitor_pick;
 std::string monitor_want, monitor_saved_name;

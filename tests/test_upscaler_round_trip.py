@@ -125,7 +125,6 @@ std::string output_want, output_saved_name;
 std::string output_id_key(const char* text) { return text; }
 std::string output_name_key(const char* text) { return text; }
 bool output_forced() { return false; }
-bool framegen_by_dlss_offered() { return true; }   // (vk_menu.cpp: Frame generation by offers DLSS FG)
 bool can_outputs() { return false; }
 void output_chosen() { CHECK(false); } // No playback-device row is exercised by this fixture.
 void refresh_outputs() {}
