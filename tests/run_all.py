@@ -344,12 +344,12 @@ class Result:
 # (--changed, the dev-loop proposal's D1) the checks that read what changed: most tests name the files they cut code from or run,
 # by path or by name, so a test whose text names a changed file is picked. A change to this runner, or to a shared .py of tests/
 # that is not a test, picks every check. Before a pull request the whole run is still the one that counts (docs/workflow.md)
-HOOKSHOT_REMOTE = "git.magicbean.dev/magicbeandev/hookshot"   # (scripts/forge.py's HOST and REPO, as add_remote matches them)
+HOOKSHOT_REMOTE = "git.magicbean.dev/magicbeandev/hookshot"   # (forge.py's HOST and REPO, as add_remote matches them)
 
 
 def default_base():
-    """--changed's base when none is named: main on the remote that points at Hookshot (scripts/forge.py adds one as forge
-    unless one already does: CONTRIBUTING.md's git rebase forge/main), else origin/main"""
+    """--changed's base when none is named: main on the remote that points at Hookshot (forge.py, from MagicBeanDev/Tooling,
+    adds one as forge unless one already does: CONTRIBUTING.md's git rebase forge/main), else origin/main"""
     r = subprocess.run(["git", "-C", ROOT, "remote", "-v"], capture_output=True, text=True)
     for line in (r.stdout if r.returncode == 0 else "").splitlines():
         parts = line.split()
