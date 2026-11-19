@@ -80,6 +80,7 @@
 #include "translate_wait.h"
 #include "precompile_save.h"   // (the pipeline cache written before the title after a long precompile)
 #include "bounded_wait.h"   // (the load-at-create start's wait for its builds, bounded by their progress)
+#include "start_steps.h"    // (a first start's warm and load at create on the bar as one count)
 #include "quick_pipe.h"
 
 #include "vk_builtin_spv.h"   // (RX_VK_SHADER_DIR)
@@ -8307,6 +8308,7 @@ bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
         mesh_ring_at += bytes;
     }
     end_pass(cmd);
+    GprofSpan gp(cmd, "meshconv (an indirect mesh draw's arguments -> {count, 1, 1}, with its barriers)");   // (RX_VK_PASS_TIMING)
     VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
     VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
     di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
@@ -8689,6 +8691,11 @@ bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
     fallback_records_address = f->records_address;
     const uint32_t capacity = Shader::Backend::SPIRV::MESH_FALLBACK_CAPACITY;
     end_pass(cmd);
+    // (RX_VK_PASS_TIMING: the fills, barriers and dispatches below as one span of their own, "fallback prog <key>", not glue
+    // between the spans; its barriers are in it, not among the "barrier" spans. After end_pass, which closes the pass's span)
+    char label[32] = "";
+    if (gprof_on()) snprintf(label, sizeof label, "fallback prog %016llx", (unsigned long long)p.key);
+    GprofSpan span(cmd, label);
     // (the shared pair: the last fallback draw on it, of any program of this thread, has read it before it is reset)
     full_barrier(cmd);
     const uint32_t groups{(uint32_t)std::clamp(d.groups[0], 0, (int)capacity)};
@@ -8984,6 +8991,33 @@ int mask_radius_env() {
     static const int r = std::clamp(getenv("RX_VK_MASK_RADIUS") ? atoi(getenv("RX_VK_MASK_RADIUS")) : 0, 0, 4);
     return r;
 }
+/// (hookshot, RX_VK_MASK_BLEND) What mask_stabilize no longer uses: the history images a new mask size replaced, and the views of
+/// textures that went (texture_destroy_generation). Given back 120 presents later, when no work in flight can use them, as the TAAU's
+/// replaced histories are. They were overwritten where they stood: an image, its memory and its view lost at every size change (the
+/// dynamic resolution makes one every few frames), and a view kept for each texture image the mask was blended into, after the image went,
+/// and found again under its handle for another image
+struct MaskOld {
+    VkImage image;
+    VmaAllocation mem;
+    VkImageView view;
+    uint64_t frame;
+};
+std::vector<MaskOld> mask_old;
+void mask_retire(VkImage& image, VmaAllocation& mem, VkImageView& view, uint64_t frame) {
+    if (image || view) mask_old.push_back({image, mem, view, frame});
+    image = VK_NULL_HANDLE, mem = nullptr, view = VK_NULL_HANDLE;
+}
+void mask_reap(uint64_t frame) {
+    for (size_t i = 0; i < mask_old.size();) {
+        if (frame - mask_old[i].frame < 120) {
+            i++;
+            continue;
+        }
+        if (mask_old[i].view) vkDestroyImageView(dev.device, mask_old[i].view, nullptr);
+        if (mask_old[i].image) destroy_image(mask_old[i].image, mask_old[i].mem);
+        mask_old.erase(mask_old.begin() + (ptrdiff_t)i);
+    }
+}
 void mask_stabilize(VkCommandBuffer cmd, Texture* tex, uint32_t level, uint32_t layer, float weight) {
     if (!tex || !tex->image || tex->format != VK_FORMAT_R8G8B8A8_UNORM || !(tex->usage & VK_IMAGE_USAGE_STORAGE_BIT)) return;
     if (!dev.push_descriptor || !vkCmdPushDescriptorSetKHR) return;
@@ -9021,6 +9055,17 @@ void mask_stabilize(VkCommandBuffer cmd, Texture* tex, uint32_t level, uint32_t 
     const uint32_t w = std::max(1u, tex->width >> level), h = std::max(1u, tex->height >> level);
     // (the mask's own storage view at that level and layer, made once a texture and level)
     static std::map<std::tuple<VkImage, uint32_t, uint32_t>, VkImageView> views;
+    static uint64_t views_gen = 0;
+    mask_reap(texture_frame_no());
+    if (views_gen != texture_destroy_generation()) {   // (a texture went: every view is given back, the ones still wanted made again)
+        for (auto& kv : views) {
+            VkImage none = VK_NULL_HANDLE;
+            VmaAllocation no_mem = nullptr;
+            mask_retire(none, no_mem, kv.second, texture_frame_no());
+        }
+        views.clear();
+        views_gen = texture_destroy_generation();
+    }
     VkImageView& mv = views[{tex->image, level, layer}];
     if (!mv) {
         VkImageViewCreateInfo vc{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -9035,6 +9080,7 @@ void mask_stabilize(VkCommandBuffer cmd, Texture* tex, uint32_t level, uint32_t 
     static uint64_t hist_frame = 0;
     end_pass(cmd); // History image transitions must be outside dynamic rendering.
     if (hist_w != w || hist_h != h) {
+        for (int i = 0; i < 2; i++) mask_retire(hist[i], hist_mem[i], hist_view[i], texture_frame_no());   // (the old size's, given back later)
         for (int i = 0; i < 2; i++) {
             VkImageCreateInfo ic{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
             ic.imageType = VK_IMAGE_TYPE_2D, ic.format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -11919,8 +11965,16 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         // (and where the driver's own cache lost what the marker says was built: notes_lost_by_driver)
         if (precompile_covers_notes() && !env_on("HOOKSHOT_PREPARE_ONLY") && notes_lost_by_driver())
             remove(precompile_built_path().c_str());
-        if (!precompile_covers_notes()) precompile_warm(progress);
-        if (precompile_covers_notes()) return precompile_at_create(progress);
+        // (a first start's two passes on the bar as one count: start_steps. The second's steps counted before the warm, which only
+        // borrows the programs; a --prepare-shaders run has no second pass, and its warm ends the bar)
+        const bool warms = !precompile_covers_notes();
+        const bool then = warms && !env_on("HOOKSHOT_PREPARE_ONLY");
+        start_steps::begin(progress, then, then ? program_cache_fallback_steps() : 0);
+        if (warms) precompile_warm(progress ? start_steps::warm : nullptr);
+        if (precompile_covers_notes()) {
+            precompile_at_create(progress ? start_steps::create : nullptr);
+            return start_steps::end();
+        }
         // (the window was closed in it; or this is the preparation's own process, which leaves no marker: its warm filled
         // the driver's cache, the first start of the game warms again and loads at create calls from then on)
         if (prepare_stopped() || env_on("HOOKSHOT_PREPARE_ONLY")) return;
