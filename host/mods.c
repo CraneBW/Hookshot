@@ -76,7 +76,11 @@ typedef struct {
 static Mod *mods;
 static int nmods, cap_mods;
 static char root_dir[MAX_PATH], state_path[MAX_PATH], cache_dir[MAX_PATH];
-static uint64_t start_key;   /* the order and the switches at the start: mods_state_key */
+#define MODS_KEY_NONE 0xcbf29ce484222325ull   /* (state_key with no mods: FNV-1a's offset basis) */
+/* the order and the switches at the start: state_key. With no mods folder, or none in it, hos_mods_init returns before
+   it takes it, so it starts as state_key's answer for no mods: else the menu counted "the mods" as changed at every
+   close and asked to restart */
+static uint64_t start_key = MODS_KEY_NONE;
 
 static void put(const char *key, const char *host, const char *rel, uint64_t size, int is_dir, int mod) {
     if ((table_n + 1) * 2 > table_cap) {   /* (grow: rehash) */
@@ -325,7 +329,7 @@ static void write_state(void) {
 
 /* the order and the switches as one number: what the menu compares with the start's */
 static uint64_t state_key(void) {
-    uint64_t h = 0xcbf29ce484222325ull;
+    uint64_t h = MODS_KEY_NONE;
     for (int i = 0; i < nmods; i++) {
         for (const char *p = mods[i].name; *p; p++) h = (h ^ (uint8_t)*p) * 0x100000001b3ull;
         h = (h ^ (uint64_t)(mods[i].enabled ? 0x101 : 0x100)) * 0x100000001b3ull;
