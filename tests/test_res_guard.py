@@ -3,7 +3,7 @@
 f_80cb38d0 looks a type-0 handle up in the resource manager's table. A negative id, one past the table or an empty entry
 went on to read the entry's +0x150 with a null entry (guest address 0x150). The patch sends the three branches to the
 function's own invalid-handle path (L_80cb3a18), which stores null for its callers to test. Checked on a fragment written
-as the lift writes the function: the three branches moved, nothing else; a second run changes nothing; a file without the
+as the lift writes the function (its registers in locals, and in the context): the three branches moved, nothing else; a second run changes nothing; a file without the
 function, or with the code changed (another game version), is left as it is.
 
 python -I -B tests/test_res_guard.py
@@ -56,7 +56,17 @@ def main():
     other = FRAGMENT.replace("if (x19_ == 0) { goto L_80cb3940; }\nL_80cb3940", "if (x19_ != 0) { goto L_80cb3940; }\nL_80cb3940")
     if op.patch_res_guard(other) != (other, 0):
         raise SystemExit("FAIL: a function whose code differs was changed")
-    print("PASS: the resource lookup's three invalid-handle branches take its null path, once, and nothing else")
+    # (the lift's other form: the registers in the context, not in locals)
+    ctx = FRAGMENT
+    for a, b in zip(op.RES_FORMS[0], op.RES_FORMS[1]):
+        ctx = ctx.replace(a, b)
+    s, n = op.patch_res_guard(ctx)
+    head, end = op._function(s, op.RES_HEAD)
+    if n != 1 or any(old in s[head:end] for old in op.RES_FORMS[1]) or s[head:end].count(op.RES_GUARD) != 3:
+        raise SystemExit("FAIL: the lift's form with the registers in the context was not patched")
+    if op.patch_res_guard(s) != (s, 1):
+        raise SystemExit("FAIL: a second run changed the context form")
+    print("PASS: the resource lookup's three invalid-handle branches take its null path, once, and nothing else (both forms)")
 
 
 if __name__ == "__main__":

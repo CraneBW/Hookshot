@@ -784,9 +784,14 @@ HORSE_DECL = "extern int hos_oot_horse_whole_step(uint32_t step_bits, uint64_t s
 # gets null, which its callers test
 RES_HEAD = "void f_80cb38d0(Ctx *__restrict A64_NOESC c) {\n"
 RES_GUARD = "   /* (nx2/oot_patches.py: an invalid resource handle takes the null path) */"
-RES_SITES = ("if (((x8_ >> 31) & 1)) { goto L_80cb3940; }",            # (a negative id)
-             "if (!((fn_ == fv_) && !fz_)) { goto L_80cb3940; }",     # (one past the table)
-             "if (x19_ == 0) { goto L_80cb3940; }")                     # (an empty entry)
+# (the three as the lift writes them: with the function's registers as locals (nx2/guest_locals.py), or in the context)
+RES_FORMS = (("if (((x8_ >> 31) & 1)) { goto L_80cb3940; }",            # (a negative id)
+              "if (!((fn_ == fv_) && !fz_)) { goto L_80cb3940; }",     # (one past the table)
+              "if (x19_ == 0) { goto L_80cb3940; }"),                    # (an empty entry)
+             ("if (((c->x[8] >> 31) & 1)) { goto L_80cb3940; }",
+              "if (!((c->n == c->v) && !c->z)) { goto L_80cb3940; }",
+              "if (c->x[19] == 0) { goto L_80cb3940; }"))
+RES_SITES = RES_FORMS[0]
 # Three characters' update modules (f_80159dc0, f_8015d490, f_838baa40) carry a character that stands on a moving floor by the
 # floor's velocity, but first test the physics time object's 1/dt (its +40) against 100, and above it (a frame under 10 ms: at
 # 60 fps, time slowed below 0.6) carry it by a tenth of it. Above 100 fps every frame is under 10 ms, so Link and the enemies
@@ -1133,20 +1138,22 @@ def patch_horse_jump(s):
 
 def patch_res_guard(s):
     """The resource lookup's three invalid-handle branches to its null path: (s, 1) when it is in s with them (made now or
-    before), (s, 0) when it is not here or its code differs (another game version: left as it is)"""
+    before), (s, 0) when it is not here or its code differs (another game version: left as it is). Either form of the lift"""
     at = _function(s, RES_HEAD)
     if at is None:
         return s, 0
     head, end = at
     body = s[head:end]
-    news = [old.replace("L_80cb3940", "L_80cb3a18") + RES_GUARD for old in RES_SITES]
-    if all(body.count(n) == 1 for n in news):
-        return s, 1
-    if any(body.count(old + "\n") != 1 for old in RES_SITES):
-        return s, 0
-    for old, new in zip(RES_SITES, news):
-        body = body.replace(old + "\n", new + "\n", 1)
-    return s[:head] + body + s[end:], 1
+    for sites in RES_FORMS:
+        news = [old.replace("L_80cb3940", "L_80cb3a18") + RES_GUARD for old in sites]
+        if all(body.count(n) == 1 for n in news):
+            return s, 1
+        if any(body.count(old + "\n") != 1 for old in sites):
+            continue
+        for old, new in zip(sites, news):
+            body = body.replace(old + "\n", new + "\n", 1)
+        return s[:head] + body + s[end:], 1
+    return s, 0
 
 
 def patch_floor_carry(s):
