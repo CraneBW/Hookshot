@@ -776,6 +776,17 @@ HORSE_BRANCH = "if (!c->n) { goto L_82c5ae48; }\n"
 HORSE_SKIP = ("    if (hos_oot_horse_whole_step((uint32_t)c->vreg[10][0], " + SOUND_SLOT + " + 2192)) { goto L_82c5ae48; }"
               "   /* (nx2/oot_patches.py: a horse's jump blend above 60 fps) */\n")
 HORSE_DECL = "extern int hos_oot_horse_whole_step(uint32_t step_bits, uint64_t slot);\n"
+# The resource lookup by handle, f_80cb38d0 (Rekarina's resguard set, GPL-3.0, read for what the game does): a type-0 handle's
+# id indexes the resource manager's table ([[main+0x4e22540]+0x120], its count at +0x840, its entries at +0x848). A negative
+# id, one past the table, or an empty entry went on to L_80cb3940, which reads the entry's +0x150 with a null entry: the guest
+# address 0x150. On PC an entry was sometimes still empty when a scene looked it up (walking or turning the camera in the
+# forest, at any frame rate, rarely). The three take the function's own path for an invalid handle (L_80cb3a18): the output
+# gets null, which its callers test
+RES_HEAD = "void f_80cb38d0(Ctx *__restrict A64_NOESC c) {\n"
+RES_GUARD = "   /* (nx2/oot_patches.py: an invalid resource handle takes the null path) */"
+RES_SITES = ("if (((x8_ >> 31) & 1)) { goto L_80cb3940; }",            # (a negative id)
+             "if (!((fn_ == fv_) && !fz_)) { goto L_80cb3940; }",     # (one past the table)
+             "if (x19_ == 0) { goto L_80cb3940; }")                     # (an empty entry)
 # Three characters' update modules (f_80159dc0, f_8015d490, f_838baa40) carry a character that stands on a moving floor by the
 # floor's velocity, but first test the physics time object's 1/dt (its +40) against 100, and above it (a frame under 10 ms: at
 # 60 fps, time slowed below 0.6) carry it by a tenth of it. Above 100 fps every frame is under 10 ms, so Link and the enemies
@@ -1118,6 +1129,24 @@ def patch_horse_jump(s):
     if HORSE_DECL not in s:
         s = s.replace('#include "a64.h"\n', '#include "a64.h"\n' + HORSE_DECL, 1)
     return s, 1
+
+
+def patch_res_guard(s):
+    """The resource lookup's three invalid-handle branches to its null path: (s, 1) when it is in s with them (made now or
+    before), (s, 0) when it is not here or its code differs (another game version: left as it is)"""
+    at = _function(s, RES_HEAD)
+    if at is None:
+        return s, 0
+    head, end = at
+    body = s[head:end]
+    news = [old.replace("L_80cb3940", "L_80cb3a18") + RES_GUARD for old in RES_SITES]
+    if all(body.count(n) == 1 for n in news):
+        return s, 1
+    if any(body.count(old + "\n") != 1 for old in RES_SITES):
+        return s, 0
+    for old, new in zip(RES_SITES, news):
+        body = body.replace(old + "\n", new + "\n", 1)
+    return s[:head] + body + s[end:], 1
 
 
 def patch_floor_carry(s):
@@ -1713,6 +1742,11 @@ def patch_file(s, name, protect_hearts=False):
     if floor != out:
         lines.append("oot_patches: a moving floor's carry above 60 fps in " + name)
     out = floor
+    res, found = patch_res_guard(out)
+    counts["resource guard"] += found
+    if res != out:
+        lines.append("oot_patches: the resource lookup's invalid handles take its null path in " + name)
+    out = res
     cue, found = patch_song_cue(out)
     counts["song note flag"] += found
     if cue != out:
@@ -1813,6 +1847,9 @@ def report(paths, counts, protect_hearts=False):
         print("oot_patches: WARNING: the horse's jump step test was found %d times, not once" % total["horse jump step"])
     if total["floor carry"] != len(FLOOR_SITES):   # (without them, above 100 fps a moving floor leaves Link and enemies behind)
         print("oot_patches: WARNING: a moving floor's carry was found at %d of %d places" % (total["floor carry"], len(FLOOR_SITES)))
+    if total["resource guard"] != 1:   # (without it, a scene that looks up a resource not loaded yet can read guest address 0x150)
+        print("oot_patches: WARNING: the resource lookup's invalid-handle branches were found %d times, not once"
+              % total["resource guard"])
     if total["cloth time"] != 1:   # (without it, below 60 fps Link's cap and the other cloth run slow: they swing out and settle slowly)
         print("oot_patches: WARNING: the cloth's time was found %d times, not once" % total["cloth time"])
     if total["cloth solve"] != 1:   # (without it, above 60 fps with HOS_FPS_CLOTH_60=1 the cloth is still solved every frame)

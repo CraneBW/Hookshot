@@ -305,6 +305,10 @@ uint64_t hos_call_guest_kept(uint64_t fn, uint64_t a0, uint64_t a1, uint64_t a2,
 int rx_option(int id, int otherwise) { (void)id; return otherwise; }
 void hos_mods_init(const char *image_path);
 int hos_mods_romfs(const char *rel, char *out, size_t cap);
+int hos_event_skip_romfs(const char *key, const char *mod, char *out, size_t cap) {   /* (event_skip.c: not here) */
+    (void)key; (void)mod; (void)out; (void)cap;
+    return 0;
+}
 const char *hos_romfs_dir;   /* (TEST_ROMFS_ON=1: the game's RomFS folder; else none, and mods.c merges no table of its own,
                                  the last mod's is the base, the prompts' entries merged into it) */
 const char *hos_options_file(void) { return ""; }   /* (prompts.c reads the settings file: none here) */

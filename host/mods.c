@@ -612,6 +612,7 @@ int hos_mods_romfs(const char *rel, char *out, size_t cap) {
     lower_slash(key);
     int hos_prompts_romfs(const char *key, const char *mod, char *out, size_t cap);   /* prompts.c: the button prompts */
     int hos_texts_romfs(const char *key, const char *mod, char *out, size_t cap);   /* texts.c: the texts' PC wording */
+    int hos_event_skip_romfs(const char *key, const char *mod, char *out, size_t cap);   /* event_skip.c: every cutscene skippable */
     if (sizes_served[0] && !strcmp(key, sizes_key)) {   /* (the merged size table: the prompts' entries are in it) */
         snprintf(out, cap, "%s", sizes_served);
         static volatile LONG told;
@@ -627,7 +628,8 @@ int hos_mods_romfs(const char *rel, char *out, size_t cap) {
         return 1;
     }
     Entry *e = table_n ? find(key) : NULL;
-    if (!e || e->is_dir) return hos_prompts_romfs(key, NULL, out, cap) || hos_texts_romfs(key, NULL, out, cap);
+    if (!e || e->is_dir)
+        return hos_prompts_romfs(key, NULL, out, cap) || hos_texts_romfs(key, NULL, out, cap) || hos_event_skip_romfs(key, NULL, out, cap);
     const int merged = hos_prompts_romfs(key, e->host, out, cap);   /* (the size table: the prompts' entries merged in) */
     if (!merged) snprintf(out, cap, "%s", e->host);
     static volatile LONG logged;

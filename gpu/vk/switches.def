@@ -231,6 +231,7 @@ SW(HOS_SHORT_SLEEP_PAUSE, attempt, bool, "off: a short sleep yields until its ti
 SW(HOS_SHORT_SLEEP_POLLERS, hw, int, "a quarter of the logical processors (none where not known)", "Caps how many game threads may yield through a short sleep at once (0: no limit, as before).")
 SW(HOS_SHORT_SLEEP_TIMER, hw, bool, "the game's sub-ms sleeps wait on the timer with few logical processors, else yield", "1 puts every sub-millisecond sleep on the timer; 0 makes them all yield, as before.")
 SW(HOS_SIZE_TRACE, diag, bool, "off", "Logs who asks for the picture's texture sizes, with a backtrace (first 24).")
+SW(HOS_SKIP_ANY_EVENT, kill, bool, "on: every cutscene can be skipped, the opening, the staff credits and the title scene too (host/event_skip.c)", "=0 keeps the game's no-skip setting for those three.")
 SW(HOS_SKIP_OPENING, player, bool, "the menu's skip opening row", "Overrides the menu's Skip opening row for a run.")
 SW(HOS_SLEEP_LOG, diag, bool, "off", "Logs guest sleeps by caller every 5 s (count, asked, slept), and OoT's present poll sleeps.")
 SW(HOS_SLOW_FRAMES, diag, string, "off", "The slow-frame recorder: all threads sampled into a ring, a late frame's samples written to <path>-n.txt.")

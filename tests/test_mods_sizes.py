@@ -186,6 +186,7 @@ static int64_t hos_now_ns(void) { return 0; }
 static DWORD hos_game_path_a(char *buf, DWORD size) { return (DWORD)snprintf(buf, size, "%shookshot", game_root); }
 int hos_prompts_romfs(const char *key, const char *mod, char *out, size_t cap) { (void)key; (void)mod; (void)out; (void)cap; return 0; }
 int hos_texts_romfs(const char *key, const char *mod, char *out, size_t cap) { (void)key; (void)mod; (void)out; (void)cap; return 0; }
+int hos_event_skip_romfs(const char *key, const char *mod, char *out, size_t cap) { (void)key; (void)mod; (void)out; (void)cap; return 0; }
 ''' + "\n".join(pieces) + FIXTURE_MAIN
     with tempfile.TemporaryDirectory(prefix="mods-sizes-") as tmp:
         tmp = Path(tmp)
