@@ -76,6 +76,8 @@ static uint8_t *guest(uint64_t a) {
 }
 #define GP(a) ((void *)guest(a))
 #define G64(a) (*(uint64_t *)GP(a))
+#define HOS_HEAP_BASE 0x1000000000ULL   /* (hos.h; hos_oot_note_link's walk: no Link here) */
+static int hos_guest_range(uint64_t a, uint64_t n) { (void)a, (void)n; return 0; }
 typedef int SRWLOCK;
 #define SRWLOCK_INIT 0
 static void AcquireSRWLockExclusive(SRWLOCK *l) { (void)l; }
