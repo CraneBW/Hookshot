@@ -110,6 +110,7 @@ unsigned upscalers_available() { return ur::bit(ur::GAME) | ur::dlss_bits(true);
 bool filter_needed() { return true; }
 const char* dlss_preset_env() { return nullptr; }
 bool framegen_by_fixed() { return false; }   // (vk_menu.cpp: Frame generation by with nothing to choose)
+bool pre_bloom_env() { return false; }   // (RX_VK_DLSS_PRE_BLOOM unset: the DLAA before the bloom row decides)
 /* ROW_FIXED */
 /* STOPS */
 /* AUTO_STATE */

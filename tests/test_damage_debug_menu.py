@@ -59,9 +59,11 @@ bool laptop_row() { return false; }   // (a dedicated card: no Set up for a weak
 int upscalers_available() { return 1; }
 constexpr int DLSS_OK = 0;
 int dlss_why() { return 1; }
+int upscaler() { return 0; }   // (the game's own: the DLAA before the bloom row hidden)
 namespace ur {
 bool upscaler_shown(int n) { return n > 1; }
 bool model_shown(bool available) { return available; }
+bool pre_bloom_shown(bool dlss_ok, int upscaler) { return dlss_ok && (upscaler == 1 || upscaler == 2); }
 }
 '''
     for name in ("bool cheats_on(", "bool is_laptop_row(", "bool row_shown(", "int tab_row_count(", "int tab_row_to_global(",
