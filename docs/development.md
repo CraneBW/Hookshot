@@ -1239,7 +1239,9 @@ The rules worth knowing (the script's notes have all of them):
   ignores them). `env` prints PowerShell's `$env:` lines; `vk` builds `hookshot_vk.dll` and checks it exports `mkwvk_init`
   (an undefined symbol already fails the link there). The game's files are found in `~\Games` and `~\Games\Hookshot` (the
   launcher's builds), else name them (`HOOKSHOT_DEV_ROMFS`, `HOOKSHOT_DEV_EXEFS`). A drive with little room: point
-  `HOOKSHOT_DEV_HOME` and the two stores at one folder on a bigger drive, so the objects stay hard links.
+  `HOOKSHOT_DEV_HOME` and the two stores at one folder on a bigger drive, so the objects stay hard links. The queue sees
+  a player there as on Linux: a `hookshot.exe` whose environment has no `HOOKSHOT_JOB` (read from the process itself, as
+  Linux reads `/proc`) holds timed runs and `--when-idle` jobs, and `status` names it.
 
 ### Build times
 
