@@ -2,6 +2,7 @@
 // Game-free tests for gpu/vk/linux_pressure.h and the post-precompile shader-module release / reload in
 // gpu/vk/vk_progcache.cpp (compiled and run by tests/test_linux_pressure.py).
 #include "../gpu/vk/linux_pressure.h"
+#include "../gpu/vk/fallback_lanes.h"   // (program_cache_save and _read: a stage's free lanes)
 
 #include <atomic>
 #include <chrono>
