@@ -84,6 +84,14 @@ enum { HOS_OPT_TRANSITION_AUTOSAVE = 59 };
    as the right stick) read it by its number, as they read 8. The existing option callback: no new member. 59 is the
    transition autosave's and 60 stays the item wheel's.) */
 enum { HOS_OPT_MOUSE_INVERT_X = 61 };
+/* (hookshot) Vibration: 0 Auto, 1 Basic, 2 Off (host/vibration.h). Auto plays the best each controller can do (a
+   DualSense on a cable its voice coils through RenHDrum, a Switch controller its own HD rumble, the others their motors),
+   Basic every controller's motors, Off nothing. The strength is option 9, every backend's. 63 and 64: 58 is the render
+   thread's, 59 transition autosave, 60 reserved for the item wheel, 61 mouse invert X; 62, 65 and 66 are free */
+enum { HOS_OPT_VIBRATION = 63 };
+/* (hookshot) What plays the controller used last, written back by the host each poll (host/pad_sdl.c): its kind times 16
+   plus what it says (host/vibration.h's VIB_PAD_*, VIB_SAY_*); Test vibration's cell and help read it. */
+enum { HOS_OPT_VIBRATION_STATUS = 64 };
 /* (HOS_OPT_HUD_LAYOUT, 71: Graphics' HUD layout, host/hos_wide_ui.c reads it at each present by its number: on a screen
    that is not 16:9, 0 the HUD's corners at the screen's edges, 1 the HUD in the middle 16:9 as before #95 (on a narrower
    screen fitted to its width, as the menus). HOS_WIDE_UI, when set, stands over it. The existing option callback: no new
@@ -268,9 +276,11 @@ typedef struct MkwVkHost {
        keep up with the sound, [2] shown late (over 50 ms after the one before), [3] decoding time in ns, [4] decoders that did
        not start (another one took over). Returns the build's version (HOOKSHOT_VERSION).
        Version 30: and Link's pose, for the one-second samples: pose = {x, y, z} his world position (game units), then the
-       gameplay camera's {yaw, pitch} (radians), exact (perf_report.h sends them as cells and bins). *has_pose is 1 only
-       when they are current: 0 unless perf_tracking(1) was called, and 0 while Link isn't updating (the title, the file
-       select, a load: nothing set in the last second) or camera zero isn't the gameplay view (a cutscene's) */
+       gameplay camera's {yaw, pitch} (radians: yaw 0 toward +z and pi/2 toward +x, in [-pi, pi]; pitch above 0 looking up, in
+       [-pi/2, pi/2]), exact (perf_report.h sends them as cells and bins). *has_pose is 1 only when they are current: 0 unless
+       perf_tracking(1) was called, 0 while Link isn't updating (the title, the file select, a load: nothing set in the last
+       second), while no map is set (map is empty), while an event plays (a cutscene) and from a change of the map until his
+       next update, or when camera zero isn't the gameplay view */
     const char *(*perf_info)(char *map, int cap, int64_t movie[5], float pose[5], int *has_pose);
     /* Version 27 (hookshot): the frame trace's main-thread columns (RX_VK_FRAME_TRACE, gpu/vk/vk_replay.cpp): the game's main
        thread's (sead::MainThread) time so far, in ns: [0] waiting for a virtual core, [1] blocked in a wait or sleep, both
