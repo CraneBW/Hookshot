@@ -2602,6 +2602,9 @@ def write_game_home(out, relative):
             os.remove(partial)
 
 
+ROMFS_IN_PLACE_ENV = "HOOKSHOT_ROMFS_IN_PLACE"   # (--romfs-in-place, as scripts/dev_packs.py asks it of the build)
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--nup", help="your copy as one file: a .nup package, or a .nx archive made from one (nxconvert pack-nup)")
@@ -2620,6 +2623,10 @@ def parse_args():
     p.add_argument("--game", help="your copy: a .nup or .nx file, or a folder with romfs and exefs in it (the same as --nup, or --romfs and --exefs)")
     p.add_argument("--prepare", action="store_true", help="for RecompLauncher: no window, progress lines, --out ~/Games/Hookshot unless given")
     p.add_argument("--update", help="a game folder built before: built again from the game files it keeps (the game's update offer)")
+    p.add_argument("--romfs-in-place", action="store_true", default=None,
+                   help="with --romfs (development: scripts/dev_packs.py): read the romfs where it is, without a copy or links in "
+                        "the game folder, which then has no romfs: the game is started with --romfs naming it. "
+                        "HOOKSHOT_ROMFS_IN_PLACE=1 asks the same of a --romfs build and is passed over by any other")
     p.add_argument("--no-prepare-shaders", action="store_true",
                    help="leave the shaders' preparation to the game's first start (the builder's \"Prepare shaders now\" unticked)")
     p.add_argument("--compile-shaders", choices=tuple(COMPILE_LEVELS),
@@ -2657,6 +2664,11 @@ def parse_args():
             a.nup = a.game
         else:
             fail("Your copy of the game was not found: %s" % a.game)
+    if a.romfs_in_place and (a.nup or a.update or not a.romfs):
+        fail("--romfs-in-place reads a romfs folder where it is: give it with --romfs and --exefs, not a .nup or --update.")
+    if a.romfs_in_place is None:   # (scripts/dev_packs.py sets it for the builds it runs; a tree from before ignores it and links)
+        a.romfs_in_place = (os.environ.get(ROMFS_IN_PLACE_ENV, "0") not in ("", "0") and bool(a.romfs)
+                            and not a.nup and not a.update)
     a.default_work = p.get_default("work")   # (main: the builder's own work folder, stop_stray_compilers)
     return a
 
@@ -2988,7 +3000,13 @@ def main(a=None):
         if not remaining_assets:
             stand_in_damaged_files(out, romfs)
     else:
-        check_cache_paths(out, (kept, romfs))
+        # (--romfs-in-place: the romfs is read where it is, never linked or copied into the game folder, which so has none; the
+        # game is started with --romfs naming it. scripts/dev_packs.py's packs and bases: where a hard link is refused (a
+        # Windows sandbox may only read the dump) the link was a 26 GB copy, and the pack's comparison with the base read both)
+        in_place = bool(getattr(a, "romfs_in_place", False))
+        if in_place:
+            romfs = os.path.abspath(a.romfs)
+        check_cache_paths(out, (kept,) if in_place else (kept, romfs))
         refuse_dump_links(a.exefs)
         refuse_dump_links(a.romfs)
         why = romfs_problem(a.romfs)   # (said before anything is read or built)
@@ -2999,7 +3017,8 @@ def main(a=None):
         # (before the folder's copies are touched: a dump of another version, refused, used to replace .hookshot_exefs first, and
         # the next build from the .nup those were read from took them as its own and was refused too)
         check_supported_build(exefs)
-        link_or_copy(a.romfs, romfs)
+        if not in_place:
+            link_or_copy(a.romfs, romfs)
         shutil.rmtree(kept, ignore_errors=True)
         shutil.copytree(exefs, kept)
         with contextlib.suppress(FileNotFoundError):   # (the copies are this dump's now, not the .nup's that stamp names)
