@@ -313,7 +313,10 @@ runs the native network; this is a test override, not a requirement for GPUs alr
 Frame generation by at **FSR 3.1 FG**, or at **DLSS FG** (`RX_VK_FSR_FG=0` never, `=1` over the row; `RX_VK_FSR_FG_HUD=0` lets
 AMD's passes move the HUD with the scene, as they did, for an A/B). In play it interpolates the picture from just before
 the game draws its HUD, AMD's HUD-less colour, and lays the frame's HUD over each made frame; menus and movies, which have no
-such picture, keep the HUD guessed (`RX_VK_FSR_FG_HUDLESS=0`: the HUD marked in the frame's alpha in play, as before, for an A/B). Native HDR PsychoV35
+such picture, keep the HUD guessed (`RX_VK_FSR_FG_HUDLESS=0`: the HUD marked in the frame's alpha in play, as before, for an A/B).
+The HUD goes over each made frame by how see-through it is, learned from frame to frame, so its glows, shadows and faint
+icons show the made frame's own scene rather than a halo of the real frame's (`RX_VK_FSR_FG_HUD_LAYER=0`: the HUD laid
+over as presented, for an A/B; docs/temporal-history.md). Native HDR PsychoV35
 automatically enables the compatible independent RGBA16F depth/motion input path unless `RX_VK_PSYCHOV35_DLSS=0`.
 This does not enable the legacy FSR
 upscaler. To isolate FSR generation on NVIDIA hardware, select Frame generation by **FSR 3.1 FG** or use
@@ -900,13 +903,15 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `RX_CPM=<dir>` | The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) |
 | `RX_TARGET=windows` | On Linux: the Windows game, with llvm-mingw's Linux build in `HOOKSHOT_MINGW` |
 | `RX_RELEASE=1` | A release build (`make_game.py` sets it): no console window, the shaders prepared before the title |
+| `A64_HOT_FUNCS=<file>` or `A64_HOT_FUNCS=` | Explicit hot-function list (empty disables it), unless `HOOKSHOT_HOT_LIST=0`. Relative paths are read from the checkout root, not the caller's directory. The lift key hashes the selected list's contents, not unused lists |
 | `RX_PGO=gen` or `RX_PGO=<file>` | The hot code counting its branches for a profile, or built with one (`make_game.py` passes the shipped profile) |
 | `RX_VK_PGO=gen` or `RX_VK_PGO=<file>` | The Vulkan back end's own files counting their branches for a profile, or built with one (`make_game.py` passes `work/hookshot_vk.profdata` when it is there, else the committed `assets/profiles/hookshot_vk.profdata.xz`; a compiler that can't read it builds without): [the renderer's play profile](#the-renderers-play-profile) |
 | `RX_HOT_OPT=<level>` | The hot pieces' optimisation level (default `O2`); `O1` for [a faster build for development](#a-faster-build-for-development) |
-| `HOOKSHOT_HOT_LIST=0` | Builds with no [hot list](#the-hot-list): every lifted function at `-O1`, as every player's build was before the list was committed (an A/B against it, or a shorter build: 25 s on 12 cores in an incremental pair, more from scratch and on fewer cores). Unset: the checkout's `work/hot_funcs.txt`, else a list `A64_HOT_FUNCS` names in the shell, else the committed `assets/profiles/hot_funcs.txt`. The lift key holds the choice, so switching it translates the game again |
+| `HOOKSHOT_HOT_LIST=0` | Builds with no [hot list](#the-hot-list): every lifted function at `-O1`, as every player's build was before the list was committed (an A/B against it, or a shorter build: 25 s on 12 cores in an incremental pair, more from scratch and on fewer cores). Otherwise: explicit `A64_HOT_FUNCS`, then the checkout's `work/hot_funcs.txt`, then the committed `assets/profiles/hot_funcs.txt` |
 | `HOOKSHOT_CHUNK_OPT=all` or `=<file>` | Compiles the lifted chunks at `-O2` instead of `-O1`: `all`, or a file naming them (a `code_*.c` a line, or an `f_` name a line for the chunks that define it). A compile-only choice like `RX_HOT_OPT`: the lift's C is unchanged, the object keys name the flags, and a `-O2` object is never taken for a `-O1` one. The hot pieces keep `RX_HOT_OPT`. The cut below brings an all-`O2` build from 23:06 to 4:37 here; [an all-O2 build](#an-all-o2-build) has what it measured |
 | `HOOKSHOT_CHUNK_PART_MB=<MB>` | With `HOOKSHOT_CHUNK_OPT`: the size of the parts a chunk sent to `-O2` is cut into (default 6), each compiled as its own object beside the build's others. `-O2`'s passes cost more than linearly in a function's size, so the parts compile sooner than the whole chunk and side by side; the lifted C is not changed. `0` compiles the whole chunks, as before |
 | `HOOKSHOT_CHUNK_LEVEL=<level>` | With `HOOKSHOT_CHUNK_OPT`: the optimisation level its chunks compile at (default `O2`; `O1`, `O2` or `O3`). The level is in the object key, so a `-O3` object is never taken for a `-O2` one |
+| `RX_A64_RT_O2=0` | Compile shared `a64_rt.c` and `a64_suyu.c` instruction/runtime helpers at the cold lifted code's `-O1`, as before. Default: these two files at `-O2`; other semantic flags, cold game chunks and the lift cache stay unchanged. Current-main A/B measurements are still pending |
 | `HOOKSHOT_SPLIT_GIANTS=<KB>` | Compiles each lifted function of 256 KB of C or more as pieces of about `<KB>` (8 is the measured best) cut at its labels, with a dispatch loop under its own name (`nx2/split_giants.py`). Measured on a Ryzen 5 5600, 16 GB: the 15 giant-function chunks compile 2.6x faster one at a time (their largest compile's peak memory 2,263 -> 586 MB; a single 2-6 MB function's peak falls to about a fifth), and a whole first build's compile (`--jobs 4`) takes ~21% less time, with ~6% less summed compiler memory. The lifted files are not changed (`build.py` compiles a copy). The hot pieces (`code_hot*.c`, built at `-O2`) are split too: a hot function of 256 KB or more, like the 4.79 MB `f_81b8c000`, is no longer one translation unit (on a Ryzen 9 9950X3D a 47-function hot-list build from scratch went 8 min 26 s -> 3 min 19 s, its compile 446 s -> 137 s; the giant alone 438 s -> 56 s). On by default at 8; `0` turns it off |
 | `HOOKSHOT_LIGHT_PASSES=0` | Turns off the light passes (on by default): lifted chunks whose functions are all under `HOOKSHOT_LIGHT_PASSES_KB` (1024) KB of C compile at `-O1` without its module passes (the inliner, ipsccp, globalopt, function-attrs ...; `-mllvm -opt-disable`). Those chunks compile about a fifth faster for ~3% more code (Ryzen 5 5600, `--jobs 4`). 56 of the game's 75 chunks are light (-21% on them, ~15% of a first build's compile), their `HOOKSHOT_SPLIT_GIANTS` pieces too; the giant functions' chunks and the hot pieces keep every pass. It needs LLVM 22 or newer (`-opt-disable`): with an older clang (a Linux system's) the build says so and keeps every pass |
 | `RX_MARCH=<level>` | The CPU level to build for. Default: `native` (this PC's own CPU) on a CPU with `x86-64-v3`'s features, else `x86-64-v2`, else `x86-64`; `x86-64-v3` if clang can't say what `native` is here. With `native` the CPU clang finds goes into the object keys (`-DHOOKSHOT_NATIVE_CPU=`, in the build log), so another CPU compiles again ([issue 182](https://git.notrexed.dev/Hookshot/Hookshot/issues/182)). `RX_MARCH=x86-64-v3` builds as before. `native` also tunes for this CPU (the Steam Deck's Zen 2 too), so there is no tuning switch. The third-party code is built for `x86-64-v3` on every CPU that has it, not `native`, so the objects a release ships fit (`HOOKSHOT_THIRD_PARTY_OBJECTS`); with an `RX_MARCH`, or below v3, it is built as the rest |
@@ -954,7 +959,7 @@ in: the lift puts them in `code_hot.c` (their float helpers inline), `nx2/split_
 committed: `assets/profiles/hot_funcs.txt` (680 functions; where and how it was recorded: `assets/profiles/README.md`),
 which `make_game.py` (`hot_list_for`) gives the lift as `A64_HOT_FUNCS`, copied to `<work>/hot_funcs.txt` (read where it
 is when `--work` is the checkout's own `work/`); the AppImage and the Windows builder carry it. A developer's own list goes
-first: the checkout's `work/hot_funcs.txt`, else one named by `A64_HOT_FUNCS` in the shell. `HOOKSHOT_HOT_LIST=0` builds
+first: an explicit `A64_HOT_FUNCS` in the shell, else the checkout's `work/hot_funcs.txt`. `HOOKSHOT_HOT_LIST=0` builds
 with none. The build log says which (`the hot list: ...`), and the lift how many of its names it found (`hot functions
 (A64_HOT_FUNCS): 680 of 680 listed found, in code_hot.c`).
 
@@ -1092,6 +1097,51 @@ the `.linkkey` file. Outside the checkout's own `work/`, the build's clean-up ca
 Each build also writes `sa/build/compile_commands.json`, every compile with its flags, for clangd and clang-tidy (point
 clangd at that folder, or link the file to the checkout's top, which `.gitignore` leaves out). The lifted C is left out (about
 1.4 GB, which clangd's background index would read); the host's commands still name the lifted headers' folders.
+
+#### Windows COFF ThinLTO and thread-local state
+
+An inline namespace-scope `thread_local` can leave unresolved TLS initialization routines in an llvm-mingw COFF
+ThinLTO link. The profiler's POD state is explicitly zero-initialized with `inline constinit thread_local`; it needs
+no dynamic initializer. The recorder's `Arena` cannot use that fix: its `tail` initially points to its own `head`,
+and its destructor drains outstanding packets and frees its chunks. `rec::t_arena()` owns one function-local
+`thread_local Arena` per thread, shared by every translation unit on that thread, with the same exit cleanup.
+Keep all recorder callers using the accessor; do not replace it with a namespace-scope inline TLS object.
+
+The game-free regression compiles the production profiler scopes and recorder core, including the real `Packet`,
+`Enc`, boundary drain and destructor, into three translation units at `-O2`. It links and runs them first without LTO,
+then with `-flto=thin -fuse-ld=lld`. It checks cross-TU ownership of both TLS objects, zero initialization and thread
+separation, and packets encoded in separate TUs draining in order at a boundary and at thread exit. It requires native
+Clang with LLD/ThinLTO and a C++20 runtime, but no dump, Vulkan headers, GPU, profile or Python packages.
+It does not change production flags or add a PGO/LTO switch.
+
+From this checkout, in PowerShell on Windows, with the Builder's `tools.lock`-pinned llvm-mingw **20261104** and Python
+installed under `$tools`:
+
+```powershell
+$tools = 'C:\path\to\HookshotBuilder\tools'
+$python = Join-Path $tools 'python\python.exe'
+$cxx = Join-Path $tools 'llvm-mingw\bin\x86_64-w64-mingw32-clang++.exe'
+$env:PATH = "$(Join-Path $tools 'llvm-mingw\bin');$env:PATH"
+
+# Same harness and flags, reading the unmodified public base directly from git:
+& $python -I -B tests/test_thinlto_tls.py --cxx $cxx --source-ref 9e6f231d0ded199793e8270d20ec60cdb765d28f
+# Then the PR's working-tree sources:
+& $python -I -B tests/test_thinlto_tls.py --cxx $cxx
+
+# Existing real-consumer checks (CPM's Vulkan headers, no Vulkan library):
+$headers = Join-Path $tools 'cpm\vulkanheaders\v1.4.345\include'
+& $python -I -B tests/test_prof_sampling.py --cxx $cxx
+& $python -I -B tests/test_recorder_sync.py --cxx $cxx --headers $headers
+& $python -I -B tests/test_recorder_own_idle.py --cxx $cxx --headers $headers
+```
+
+Git must be on `PATH` and the named base commit available locally for `--source-ref`; it never changes the checkout.
+On the affected toolchain, the failure being reproduced is the base's ThinLTO **link** (undefined TLS initialization
+routine), after its non-LTO executable passed; the fixed sources must link and pass in both modes. Record the actual
+phase, diagnostic and exit codes for both commands. A source-extraction error, missing tool or passing base is not
+fail-before/pass-after evidence. The regression is discovered by `tests/run_all.py` through its compiler declaration;
+Linux can run the same test with native `clang++` and LLD, but an ELF pass does not demonstrate the Windows COFF fix.
+Link correctness is not an FPS claim; report any full renderer build or game run separately.
 
 #### The renderer's play profile
 
