@@ -71,8 +71,7 @@ uint64_t hos_space_end;
 
 #ifdef _WIN32
 static void no_power_throttling(void) {
-    const char *e = getenv("HOS_POWER_THROTTLING");
-    if (e && atoi(e)) return;
+    if (env_on("HOS_POWER_THROTTLING")) return;
     typedef BOOL(WINAPI * SetInfo)(HANDLE, int, LPVOID, DWORD);
     SetInfo set = (SetInfo)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetProcessInformation");
     if (!set) return;
@@ -224,7 +223,7 @@ static int reserve_guest(void) {
         const int no_dmabuf = env_on("RX_VK_NO_DMABUF");   /* (as the renderer reads it: the switches' rule) */
         if (usable && no_dmabuf && !e)
             hos_log("mem: RX_VK_NO_DMABUF: the guest window is anonymous memory, for host-pointer imports");
-        if (e ? atoi(e) != 0 : usable && !no_dmabuf) {
+        if (e ? !env_value_off(e) : usable && !no_dmabuf) {
             const int fd = (int)syscall(SYS_memfd_create, "hookshot-guest", 1u /* MFD_CLOEXEC */ | 2u /* MFD_ALLOW_SEALING */);
             if (fd >= 0 && ftruncate(fd, (off_t)GUEST_SPACE) == 0) {
                 fcntl(fd, 1033 /* F_ADD_SEALS */, 0x0002 /* F_SEAL_SHRINK */ | 0x0004 /* F_SEAL_GROW */);
@@ -568,6 +567,15 @@ static void load_hookshot_env(void) {
         if (!len || *s == '#' || !strchr(s, '=')) continue;
         char *eq = strchr(s, '=');
         *eq = 0;
+        /* a note after the value ("HOS_AUDIO=0  # mute"): cut at a '#' that follows a space or a tab, and the spaces
+           before it, so the note is not read as part of the value (where 0 once read as off, "0  # mute" would read
+           as on) */
+        for (char *v = eq + 1; *v; v++)
+            if (*v == '#' && v > eq + 1 && (v[-1] == ' ' || v[-1] == 9)) {
+                *v = 0;
+                while (v > eq + 1 && (v[-1] == ' ' || v[-1] == 9)) *--v = 0;
+                break;
+            }
         if (!(other && *other) && !env_line_allowed(s, eq + 1)) {
             fprintf(stderr, "env: hookshot_env.txt: %s left out (only the game's switches, and no paths, are taken from it)\n", s);
             continue;

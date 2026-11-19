@@ -208,7 +208,7 @@ read (one rule for the ones that have moved there) and how to read those lines:
 Set `HOS_OOT_TRACE_SAVES=1` to log save requests and report when the transition autosave is suppressed. The trace defaults to off.
 
 The running game reads its switches from the environment or from `hookshot_env.txt` beside `image.bin` (one
-`NAME=VALUE` a line, `#` for notes; `HOS_ENV_FILE=<path>` reads that file instead; `HOS_OPTIONS_FILE=<path>`, from the
+`NAME=VALUE` a line, `#` for notes, on a line of their own or after a value and a space; `HOS_ENV_FILE=<path>` reads that file instead; `HOS_OPTIONS_FILE=<path>`, from the
 environment only, does the same for the settings, `hookshot_options.ini`, so a scripted run leaves the player's as they are). The environment goes first: a name
 already set when the game starts keeps its value and the file's line for it is left out (the log says so). A switch
 that stands in for a menu row lasts for its run; the options file keeps the player's value (`env_override` in
@@ -224,7 +224,11 @@ environment. The README has the ones players are asked to try (`RX_VK_ASTC_RGBA8
 experiments: `grep -rnE '(getenv|env_on)\("' host gpu/vk` lists them, and the comment where each is read says what it
 does. An on/off switch ("(set)" below) is on for `1` or any other value, and off when it is unset, empty, `0`, `false`,
 `off` or `no` (`env_on` in `gpu/vk/compat/hookshot_env.h`, `kit.env_on` in Python); it used to be that any value turned
-one on, `0` included. A switch that takes a number or a list reads its value as it says.
+one on, `0` included. A switch that is on until it is turned off (`HOS_AUDIO=0`, `HOS_VCORES=0`) reads the same words:
+unset it keeps its default, and `0`, `false`, `off` or `no` turn it off, as does an empty value where the system allows one
+(on Windows an empty value is the same as unset; `HOS_WIDE_UI` empty falls to its menu row) (`env_on_or`); that is every such
+switch of `host/`, while some of `gpu/vk`'s are still read as numbers, where only `0` is off. A switch that takes a number or a
+list reads its value as it says.
 
 `RX_VK_MESH_NOCULL=<prefix,...>` turns off the culling in the task shaders whose native code key starts with one of
 the prefixes. On a Steam Deck, `RX_VK_MESH_NOCULL=2c56dc1006942f74` avoids the same hang without leaving anything out:
@@ -838,6 +842,30 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `HOS_SHADOW_BUCKET=<step>` | The storage a character's shadow map reserves (`host/shadow_slot.h`). OoT sizes each near character's square depth map anew every frame (384 from far, up to 1920 near) and makes a frame's render targets one after another in a first-fit heap, so a map a few pixels larger moved every target after it to a new address: 15-16 textures made a frame in Castle Town's market with the camera turning. Such a map is answered the storage size and alignment of the next multiple of the step up (384 by default: 768, 1152, 1536, 1920), so the targets after it stay where they are until it crosses a step; the texture keeps its own size. `0`: every texture its own storage, as before |
 | `HOS_FMA_FAST=0` | The correctly rounded FMA in front of suyu's exact bodies off (`nx2/fma_soft.h`; default on). It exists only in a build without FMA3 (an x86-64-v2 build, which `host_march()` makes for a CPU without AVX2: Intel before Haswell, AMD before Excavator): there the guest's FMADD/FMSUB/FNMADD/FNMSUB/FMLA otherwise go to the multi-word exact body, about 180 ns a call. Same values and FPSR either way (`tests/test_fma_soft.py`); `0` is for finding out whether it is the cause of something |
 
+
+#### The driver's own shader cache (Linux)
+
+Each start logs the driver's shader cache twice (`gpu/vk/driver_cache_env.h`):
+
+- `vk: driver shader cache at the start: N MB (...)` is the size of NVIDIA's folder and of each of Mesa's layouts
+  (`mesa_shader_cache`, `mesa_shader_cache_sf`, `mesa_shader_cache_db`) in Mesa's folder: `MESA_SHADER_CACHE_DIR`,
+  else `$XDG_CACHE_HOME`, else `~/.cache`. The count stops after 50,000 files or 250 ms; the size is then "at least".
+- `vk: driver shader cache: Mesa's cache in <folder> (<what chose it>), layout ...; RADV's VRS ...` says which folder this
+  start's driver cache is in and whether RADV's VRS is forced. A variable the host set or dropped itself is named in
+  `HOOKSHOT_DRIVER_ENV_SET` (a comma-separated list; not a switch), and this line calls it Hookshot's. RADV forces VRS only on
+  gfx10.3 and later GPUs, where it has `VK_KHR_fragment_shading_rate`. It does so when `RADV_FORCE_VRS_CONFIG_FILE` names a
+  file that exists (the Steam Deck's Game Mode sets it for Half Rate Shading), or, without that variable, when
+  `RADV_FORCE_VRS` is other than `1x1`. Forced VRS gives every graphics pipeline another key. Measured on a Steam Deck OLED
+  (RADV, Mesa 26.2.0-devel): with Game Mode's file, empty or `1x1`, the 32,438 noted pipelines compiled at about 20 a second
+  (25-30 minutes) instead of loading in 22 s. The variable naming no file, or Mesa's folder alone, changed nothing.
+
+Each completed build of the noted or predicted pipelines adds its environment (keys and folder) to `cache/hookshot_driver_env.txt`,
+which keeps the last 8. The next start compares its own against that list. If no build had its keys, it warns that neither cache
+has its pipelines. If a build had its keys in another folder and the prediction ran, it adds an info line: the predicted
+pipelines are only in the driver's cache, so each is compiled when first drawn. The Builder prepares in the desktop's
+environment and Steam starts the game in its own, so read these lines first when the start from Steam compiles what the
+preparation built.
+
 ### Building
 
 A build reads and writes tens of gigabytes. When the game folder or the build files folder is on a hard drive,
@@ -1311,8 +1339,10 @@ python -I scripts/pipeline_tour.py compare <new tour dir>/play.bin <old tour dir
 ```
 
 `tour` runs its parts (the opening; the child overworld; the dungeons at both ages; the adult overworld) one after another,
-one game at a time, in a reflinked copy of the game folder (`<game folder>-tour`: on btrfs or XFS, and refused when one is
-there from an earlier tour), at nice 19 (on `--cpus` if given), in games of `--chunk` stops
+one game at a time, in a copy of the game folder (`<game folder>-tour`: reflinked on btrfs or XFS; elsewhere, as on ext4,
+`romfs/` hard-linked, as the game only reads it, and the rest copied, about 11 GB, refused when the drive lacks the room or
+`romfs/` is on another drive, and checked after the tour for any change to `romfs/`; refused when one is there from an
+earlier tour), at nice 19 (on `--cpus` if given), in games of `--chunk` stops
 (8; a fresh game each, as one game's memory only grows), and merges their lists; `--publish` then runs
 `nx2/pipeline_states.py tour` with the GPU and build the bridge reported and the settings and route the runs used
 (`merge` merges any lists). Each game runs under a memory guard (the script's `MEM`, `--mem key=value`): it starts only with

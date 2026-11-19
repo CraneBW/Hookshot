@@ -53,7 +53,7 @@ def main():
     args = parser.parse_args()
     src = (ROOT / "host/hos_main.c").read_text(encoding="utf-8")
     begin = src.index('const int no_dmabuf = env_on("RX_VK_NO_DMABUF")')
-    decide = src.index("if (e ? atoi(e) != 0 :", begin)
+    decide = src.index("if (e ? !env_value_off(e) :", begin)
     code = src[begin:src.index("{", decide) + 1]
     with tempfile.TemporaryDirectory(prefix="no-dmabuf-window-") as tmp:
         c, exe = Path(tmp) / "fixture.c", Path(tmp) / "fixture"

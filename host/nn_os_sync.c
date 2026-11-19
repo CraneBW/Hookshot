@@ -187,7 +187,7 @@ static void bury_locked(Obj *o) {
 static void insert_locked(Obj *o) {
     if (!table || used * 2 >= cap) {
         static int by_object = -1;   /* (HOS_SYNC_REHASH_OLD=1: liveness read from each object, as before) */
-        if (by_object < 0) by_object = getenv("HOS_SYNC_REHASH_OLD") != NULL;
+        if (by_object < 0) by_object = env_on("HOS_SYNC_REHASH_OLD");
         uint64_t ncap = cap ? cap * 2 : 1 << 16;
         Table *t = (Table *)calloc(1, sizeof(Table) + ncap * (sizeof(Obj *) + sizeof(uint64_t) + 1));
         Obj **nt = t->slot;
