@@ -328,6 +328,10 @@ def fill_fpx(gen_dir, used):
         raise SystemExit("chunks: %s does not begin with the lifter's FPX helpers for no shape" % path)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(a64_lift.fpx_header(used) + text[len(empty):])
+    # (hookshot) the hot pieces' native helpers (a64_hot_fp.inc) are made from the same shapes: the lifter wrote them for none
+    if getattr(a64_lift, "NATIVE_FP", False):
+        with open(os.path.join(gen_dir, a64_lift.NATIVE_INC), "w", encoding="utf-8", newline="\n") as f:
+            f.write(a64_lift.native_header(used))
 
 
 class _Spawned:

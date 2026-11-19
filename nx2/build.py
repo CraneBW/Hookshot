@@ -1829,6 +1829,13 @@ def main():
     # estimate calls hotter either, which is what a profile already did for the functions it knows ("pgo", the default): that
     # function alone then takes 1.9 GB, and with a matching profile the object is the same byte for byte
     hot_fl = hot_fl + ["-mllvm", "-disable-hoisting-to-hotter-blocks=all"]
+    # (hookshot, RX_HOT_CAPTURE_USES=<n>, experiment) the hot pieces' own limit for the context's capture tracking (flags() gives every
+    # file 5000): the hottest functions use the context 12 000 to 68 000 times, past the limit the compiler takes the context
+    # for escaped, and every guest load or store then may touch it (each guest register written to memory at once, read back
+    # after every guest store)
+    if os.environ.get("RX_HOT_CAPTURE_USES"):
+        hot_fl = ["-capture-tracking-max-uses-to-explore=" + os.environ["RX_HOT_CAPTURE_USES"]
+                  if f.startswith("-capture-tracking-max-uses-to-explore=") else f for f in hot_fl]
     # (hookshot) RX_PGO=gen: code_hot.c counts its branches (host/pgo_rt.c writes them; -O1 builds much sooner, and the counters are
     # placed before the optimiser, so a profile from it fits the -O2 build). RX_PGO=<merged .prof>: built with that profile
     if PGO == "gen":
@@ -1848,6 +1855,10 @@ def main():
     split_dir = os.path.join(out, "split")
     part_mb = chunk_part_mb() if CHUNK_OPT_O2 is not None and not KEPT else 0
     split_flag = chunk_split_flag(part_mb) if part_mb else ""
+    # (hookshot) the hot pieces' native floating-point helpers (a64_hot_fp.inc, a64_lift.py NATIVE_FP): a file only they include,
+    # so it is in their keys alone and the other chunks' objects stay when it changes
+    hot_inc = os.path.join(gen, "a64_hot_fp.inc")
+    hot_deps = deps + (open(hot_inc, "rb").read() if os.path.exists(hot_inc) else b"")
     jobs, cut = [], False
     for s in srcs:
         name = os.path.basename(s)
@@ -1861,7 +1872,7 @@ def main():
             for i, part in enumerate(parts):
                 jobs.append((cc, part, os.path.join(obj_dir, name[:-2] + ".p%d.o" % i), sfl + [split_flag], deps))
         else:
-            jobs.append((cc, s, obj, sfl, shim_deps if os.path.dirname(s) == NX2_RT else deps))
+            jobs.append((cc, s, obj, sfl, shim_deps if os.path.dirname(s) == NX2_RT else hot_deps if name.startswith("code_hot") else deps))
     jobs.sort(key=lambda j: -compile_cost(j[1], costs))
     if part_mb:
         print("build: HOOKSHOT_CHUNK_OPT: chunks cut into parts of about %d MB (%d part files)"
