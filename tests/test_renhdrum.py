@@ -3,8 +3,9 @@
 
 `check` reads the file's headers only. Over made-up PE and ELF images: a good one passes; one needing a library a player
 would have to install (the VC++ Runtime, llvm-mingw's libunwind.dll or libc++; a libstdc++) fails and names it; one
-without an export host/rumble_renhdrum.c binds fails and names it; one for another machine fails; a file that is
-neither stops with a message, not a traceback. The script never loads the library (no ctypes): checking never runs it.
+without an export host/rumble_renhdrum.c binds fails and names it; one for another machine fails; one of the other
+system's format fails (a Linux library named renhdrum.dll: Windows refuses it with a "Bad Image" box, 0xc000012f); a
+file that is neither stops with a message, not a traceback. The script never loads the library (no ctypes): checking never runs it.
 
 `build` is run with cargo and the toolchain stubbed: the command is a locked, offline build of the tracked source, for
 x86_64-pc-windows-gnullvm linked by the llvm-mingw given (the unwinder static, no time stamp) or for
@@ -169,6 +170,18 @@ class Check(unittest.TestCase):
                 self.assertIn(hashlib.sha256(data).hexdigest(), out.getvalue())
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 rh.main(["check", os.path.join(d, "none.dll")])
+
+    def test_the_other_systems_format(self):
+        # (a Linux library named renhdrum.dll: Windows will not load it, "Bad Image" 0xc000012f; and a DLL named .so)
+        with tempfile.TemporaryDirectory() as d:
+            for name, data in (("renhdrum.dll", elf()), ("renhdrum.so", pe())):
+                path = os.path.join(d, name)
+                with open(path, "wb") as f:
+                    f.write(data)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(rh.main(["check", path]), 1, name)
+                self.assertIn("not usable", out.getvalue(), name)
 
     def test_nothing_is_loaded(self):
         src = (ROOT / "scripts" / "renhdrum.py").read_text(encoding="utf-8")
