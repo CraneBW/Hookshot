@@ -20,12 +20,28 @@ class RecompLauncherJsonTests(unittest.TestCase):
         # output_res, resolution, upscaling, frame_rate_cap, dlss)
         ini_key = menu.split("const char* ini_key(const Row& r) {", 1)[1].split("\n}", 1)[0]
         rows |= set(re.findall(r'return "([a-z_0-9]+)";', ini_key))
+        # (#1633: the rows the menu's modules describe, gpu/vk/menu/, by their keys)
+        for module in (ROOT / "gpu" / "vk" / "menu").glob("*.cpp"):
+            rows |= set(re.findall(r'\.key = "([a-z_0-9]+)"', module.read_text(encoding="utf-8")))
         keys = {key for setting in manifest["settings"] for choice in setting["choices"] for key in choice["set"]}
         self.assertTrue(keys)
         # (keys the game reads that are no menu row: Compile shaders, which the preparation reads, vk_draw.cpp compile_all)
         draw = (ROOT / "gpu" / "vk" / "vk_draw.cpp").read_text(encoding="utf-8")
         read_elsewhere = {"compile_shaders"} if '"compile_shaders="' in draw else set()
         self.assertEqual(keys - rows - read_elsewhere, set())
+
+    def test_builds_into_the_launchers_game_folder(self):
+        # (RecompLauncher issue 215: without --out the build went to ~/Games/Hookshot, not the drive the player
+        # installed to. The folder it builds into is the one it plays, and the settings and saves live in it.)
+        manifest = json.loads((ROOT / "recomplauncher.json").read_text(encoding="utf-8"))
+        prepare = manifest["prepare"]["args"]
+        out = prepare[prepare.index("--out") + 1]
+        self.assertTrue(out.startswith("{install}/"))
+        self.assertEqual(manifest["start"]["args"], ["--play", out])
+        self.assertEqual(manifest["folders"]["game"][0]["path"], out)
+        self.assertEqual(manifest["config"][0]["file"][0]["path"], out + "/hookshot_options.ini")
+        self.assertIn(out + "/user", manifest["saves"])
+        self.assertNotIn("{home}/Games", json.dumps(manifest))
 
     def test_appimage_carries_it(self):
         self.assertIn('cp recomplauncher.json "$APPDIR/recomplauncher.json"',
