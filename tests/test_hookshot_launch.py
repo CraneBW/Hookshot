@@ -28,6 +28,7 @@ def game(folder):
         "printf 'APPDIR=%s\\n' \"${APPDIR-UNSET}\"\n"
         "printf 'LD_LIBRARY_PATH=%s\\n' \"${LD_LIBRARY_PATH-UNSET}\"\n"
         "printf 'HOOKSHOT_TOOLS=%s\\n' \"${HOOKSHOT_TOOLS-UNSET}\"\n"
+        "printf 'STORE=%s\\n' \"${HOOKSHOT_SHADER_STORE-UNSET}\"\n"
         "printf 'PYTHONPATH=%s\\n' \"${PYTHONPATH-UNSET}\"\n"
         "printf 'CHECK=%s\\n' \"${HOOKSHOT_NO_UPDATE_CHECK-UNSET}\"\n",
         encoding="utf-8",
@@ -39,12 +40,13 @@ def game(folder):
 
 
 class LaunchTests(unittest.TestCase):
-    def run_launch(self, *args, home, cwd=None):
+    def run_launch(self, *args, home, cwd=None, **more):
         e = os.environ.copy()
         e.pop("DISPLAY", None)
         e.pop("WAYLAND_DISPLAY", None)
         e.update(HOME=str(home), APPDIR="/from/the/appimage", APPIMAGE="/tmp/Hookshot.AppImage", ARGV0="Hookshot", OWD="/old",
                  LD_LIBRARY_PATH="/builder/lib", HOOKSHOT_TOOLS="/builder/tools", PYTHONPATH="/builder/python")
+        e.update(more)
         return subprocess.run([str(LAUNCH), *args], env=e, cwd=cwd, text=True, capture_output=True, check=False)
 
     def test_the_folder_starts_bin_hookshot_without_the_builders_libraries(self):
@@ -58,6 +60,17 @@ class LaunchTests(unittest.TestCase):
         for line in ("APPDIR=UNSET", "LD_LIBRARY_PATH=UNSET", "HOOKSHOT_TOOLS=UNSET", "PYTHONPATH=UNSET", "CHECK=1"):
             self.assertIn(line, lines)
         self.assertNotIn("launcher", lines)
+
+    def test_the_shader_store_switch_reaches_the_game(self):
+        # (the game's own switch: kept, as make_game.game_env keeps it for the shaders prepared at the build)
+        for store in ("/mnt/fast/shaders", "0"):
+            with tempfile.TemporaryDirectory(prefix="hookshot-launch-") as tmp:
+                folder = Path(tmp) / "Games" / "Hookshot"
+                game(folder)
+                ran = self.run_launch(str(folder), home=tmp, HOOKSHOT_SHADER_STORE=store)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+            self.assertIn("STORE=" + store, ran.stdout.splitlines())
+            self.assertIn("HOOKSHOT_TOOLS=UNSET", ran.stdout.splitlines())
 
     def test_no_folder_is_games_hookshot(self):
         with tempfile.TemporaryDirectory(prefix="hookshot-launch-") as tmp:
