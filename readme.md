@@ -14,9 +14,12 @@
 
 
 <p align="center">
+  <a href="#features">Features</a> |
   <a href="#project-status">Status</a> |
   <a href="#install-and-play">Install and play</a> |
   <a href="#in-game-menu">In-game menu</a> |
+  <a href="#mods">Mods</a> |
+  <a href="#save-editor">Save editor</a> |
   <a href="#if-something-goes-wrong">Problems</a> |
   <a href="#build-from-source">Build from source</a> |
   <a href="#how-it-works">How it works</a> |
@@ -25,7 +28,7 @@
   <a href="#license">License</a>
 </p>
 
-[Documentation](docs/README.md) · [Common issues and answers](docs/common-issues.md) · [Report a bug](https://github.com/NotRexed/Hookshot/issues/new/choose)
+[Documentation](docs/README.md) · [Common issues and answers](docs/common-issues.md) · [Report a bug](https://git.notrexed.dev/Hookshot/Hookshot/issues/new/choose)
 
 Hookshot is a static recompilation. The game's code is translated to C and compiled into a Windows or Linux program,
 the console's system software is reimplemented, and the Switch 2 graphics are rebuilt on Vulkan. All of this happens
@@ -43,6 +46,44 @@ Discord: https://discord.gg/rexed
 > This repository **does not contain the game, keys or an executable**, and it does not explain how to get them. You
 > need your own copy. Everything the build creates (`hookshot.exe`, the generated code, the shader caches and your
 > saves) comes from your game and stays on your PC. Never share those files.
+
+## Features
+
+**Runs natively**
+- The game's own code, translated to C and compiled for your PC: no emulator. Windows (Hookshot Builder, one setup
+  file) and Linux and Steam Deck (one AppImage).
+- High frame rates (60, 90, 120, 144, 165, 240 or uncapped, and 30), with the game kept at real-time speed.
+- Any screen shape: ultrawide, 16:10 and 4:3, with the HUD at the screen's edges or in the middle 16:9.
+
+**Graphics**
+- Upscaling and anti-aliasing: NVIDIA DLSS and DLAA, AMD FSR 4 and FSR 3.1, Intel XeSS, or none.
+- Frame generation: DLSS Frame Generation (up to what your card allows) and FSR 3.1 frame generation on every GPU, with
+  the HUD kept still.
+- Render and output resolution, view distance (foliage, detail, grass, shadows), shadow resolution, anisotropic
+  filtering, HDR, CRT monitor and TV filters, and a fullscreen monitor choice.
+- An FPS counter with a frame-time graph and a details page; <kbd>F12</kbd> saves a screenshot.
+
+**Mods and saves**
+- [**Mods**](#mods): RomFS mods, ExeFS code patches and Atmosphère cheats, in the emulators' folder layout. Turn them
+  on and off and put them in order on the in-game **Mods** tab or the Builder's **Mods + Editor** page. Mods that each
+  grow files load together.
+- [**Save editor**](#save-editor): the Builder's **Mods + Editor** page edits your save: stats, inventory, story
+  progress and every save entry, with a backup each time it saves.
+- In-game tools on the **Debug** tab: the inventory editor, rupees, teleport, travel, switch age, free camera, no-clip
+  flight, set time and more.
+- Saves are backed up outside the game folder at every start and as you save, and come back if they go missing.
+
+**Controls**
+- Controllers and keyboard and mouse, with every control remappable (the ocarina notes too) and mouse look.
+- Motion aiming with a controller's gyroscope, an item wheel, and item cycling.
+- One Vibration setting for every controller: a DualSense on a USB cable plays the game's fine haptics through its voice
+  coils, and Switch controllers get their own HD rumble.
+- **NFC**: amiibo from your own dumps.
+
+**Everything else**
+- An in-game menu (<kbd>F1</kbd>) drawn in the game's own style, in several languages.
+- Audio output device choice, and a microphone test with level and gain for the ocarina.
+- Crash reports from the game's own window, with your graphics card filled in.
 
 ## Project status
 
@@ -311,7 +352,7 @@ With Insert or F1, or with F1 only, <kbd>Esc</kbd> does not open the menu: it on
 an older version on Insert or F1, the default then, move to Insert, F1 or Esc; F1 only stays.
 <kbd>F12</kbd> saves a screenshot of the game's picture as a PNG in the game folder's `screenshots` folder, menu open or not
 (the menu and the FPS counter are not in it); not while a control waits for its key, and not when a control is bound to F12.
-The menu has five tabs, Graphics, Audio, Gameplay, Controls and Debug:
+The menu's tabs are Graphics, Audio, Gameplay, Controls, NFC and Debug, and Mods when you have mods:
 <kbd>Q</kbd> and <kbd>E</kbd> (or <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd>) switch between them, LB and RB on
 a controller (or the triggers). <kbd>Up</kbd> and <kbd>Down</kbd> choose a row, <kbd>Left</kbd> and <kbd>Right</kbd>
 change it (<kbd>Enter</kbd> changes it too); beside the rows, the help says what the row is and, on a line of its own,
@@ -831,6 +872,29 @@ left out, and the file's line there says how many.
 **Cheats** of the mods that are on are listed under them on the Mods tab and switched there, at once. Cheats that change
 memory run as Atmosphere runs them, every frame (opcodes 0 to A and C0 to C3); a cheat that writes the game's code is
 listed as not supported (make it an ExeFS patch instead). `{Master}` codes are always on.
+
+On Windows, Hookshot Builder's **Mods + Editor** page (beside Play) does the same with the mouse: tick a mod to use it,
+move it with its ▲ and ▼ buttons (a mod lower in the list wins a file two mods have), **Add mods…** or **Open mods folder**. When the
+code patches you have on change, it rebuilds the game, or uses a build of that same mix kept from before.
+
+## Save editor
+
+Hookshot Builder's **Mods + Editor** page (Windows, beside Play) has a **Save editor** tab for your game folder's saves.
+Close the game first. Pick a save slot, then:
+
+- **Stats**: hearts, magic, rupees and the other numbers on the save.
+- **Inventory**: search the items, then **Give** or **Take away** the selected one, or **Give everything missing**. With
+  "Taking away also forgets it was found" ticked, taking an item also clears the flag saying you found it.
+- **Progress**: search the story flags (a temple, a talk, Navi...) and turn them on or off.
+- **All entries**: every entry of the save by name, with "Edited only" to see what you changed, for anything the other
+  tabs don't cover.
+
+**Save** writes the save, **Save and play** writes it and starts the game, and **Undo changes** goes back to what is on
+disk. A backup of the save is kept each time the editor saves.
+
+In the game, the **Debug** tab has its own tools (turn on **Debug tools** first): the **Inventory** editor (unlock or
+relock equipment, items, upgrades and quest items, and change amounts), **Rupees**, **Teleport** and **Travel**,
+**Switch age**, **Free camera**, **No-clip flight**, **Set time**, **Movement speed** and damage settings.
 
 ## Build from source
 
