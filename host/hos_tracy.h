@@ -1,4 +1,4 @@
-/* (hookshot) The Tracy profiler's zones, for the host (C) and the Vulkan back end (C++): docs/development/tracy.md.
+/* (hookshot) The Tracy profiler's zones, for the host (C) and the Vulkan back end (C++): docs/dev/reference/profiling.md, Tracy.
 
    A build made with HOOKSHOT_TRACY=1 (nx2/build.py) defines TRACY_ENABLE: Tracy's client (third_party/tracy) is compiled
    into the game's executable alone, which exports its C API; the back end's module calls the same client through it, so

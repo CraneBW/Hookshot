@@ -1144,7 +1144,7 @@ class RepoSaves(unittest.TestCase):
         self.assertEqual(oot.repo_save_problems(oot.REPO_SAVES), [])
 
 class WindowsDefault(Case):
-    """The Windows default for Hookshot is the launcher's %APPDATA%\\Hookshot\\save (docs/saves.md); the old game folder
+    """The Windows default for Hookshot is the launcher's %APPDATA%\\Hookshot\\save (docs/user/saves.md); the old game folder
     (%USERPROFILE%\\Games\\Hookshot\\user\\save, the 2.x Builder's and a build started on its own) is still found and said."""
 
     def setUp(self):

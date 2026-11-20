@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// (hookshot, issue 388) Whether the pipeline cache's file (cache/hookshot_vk_pipelines.bin, 1.2 GB after a preparation) is read
+// (hookshot) Whether the pipeline cache's file (cache/hookshot_vk_pipelines.bin, 1.2 GB after a preparation) is read
 // at the start (vk_draw.cpp pcache_init), where RX_VK_PCACHE_LOAD does not say, and how NVIDIA's own shader cache is found for
 // that. Nothing of Vulkan here: tests/test_pcache_load.py.
 //

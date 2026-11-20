@@ -1,4 +1,4 @@
-/* HookshotBuilder.exe in HookshotBuilder-<version>-windows-x64.zip (docs/releases.md): installs the Hookshot Builder the zip
+/* HookshotBuilder.exe in HookshotBuilder-<version>-windows-x64.zip (docs/dev/reference/releases.md): installs the Hookshot Builder the zip
    carries, with the build tools tools.lock names, and starts it. It looks for no release itself: the Hookshot Launcher
    (MagicBeanDev/LongshotLauncher) installs and updates the builder from Hookshot's releases, and RecompLauncher runs this.
    The builder has no window: only --cli installs and starts it, --play starts a built game, and this file as a game folder's
