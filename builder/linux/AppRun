@@ -5,7 +5,8 @@
 # tools.lock's linux-x64 lines, outside the image: builder/linux/linux_tools.py finds them (the Hookshot Launcher's, or the
 # builder's own toolchains folder) and, for --cli, downloads what is missing.
 #   Hookshot.AppImage --cli <args>     nx2/make_game.py itself, e.g. --cli --nup game.nup --out ~/Games/Hookshot
-#                                      (RecompLauncher's prepare: --cli --prepare --game <copy>)
+#                                      (RecompLauncher's prepare: --cli --prepare --game=<copy> --out <folder>, or with no
+#                                      --game, built again from the game files the folder kept)
 #   Hookshot.AppImage --play           start the game in ~/Games/Hookshot
 #   Hookshot.AppImage --play <folder>  start the game in that folder (RecompLauncher's start)
 #   Hookshot.AppImage <folder>         the same

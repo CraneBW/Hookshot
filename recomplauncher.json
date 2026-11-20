@@ -16,7 +16,7 @@
     ],
     "args": [
       "--play",
-      "{home}/Games/Hookshot"
+      "{install}/Hookshot"
     ]
   },
   "prepare": {
@@ -27,10 +27,18 @@
     "args": [
       "--cli",
       "--prepare",
-      "--game",
-      "{game}"
+      "--game={game}",
+      "--out",
+      "{install}/Hookshot",
+      "--work",
+      "{install}/recompdata/cache/work"
     ],
-    "label": "Building the game from your copy (15 to 30 minutes)",
+    "done": [
+      "{install}/Hookshot/image.bin"
+    ],
+    "keeps_copy": true,
+    "version": "2",
+    "label": "Building the game (15 to 30 minutes the first time)",
     "timeout": 7200,
     "options": [
       {
@@ -75,20 +83,20 @@
       "format": "ini",
       "file": [
         {
-          "path": "{home}/Games/Hookshot/hookshot_options.ini"
+          "path": "{install}/Hookshot/hookshot_options.ini"
         }
       ]
     }
   ],
   "saves": [
     "{local}/hookshot",
-    "{home}/Games/Hookshot/user"
+    "{install}/Hookshot/user"
   ],
   "folders": {
     "saves": [
       {
-        "path": "{home}/Games/Hookshot/user",
-        "if": "{home}/Games/Hookshot/user"
+        "path": "{install}/Hookshot/user",
+        "if": "{install}/Hookshot/user"
       },
       {
         "path": "{local}/hookshot"
@@ -96,7 +104,7 @@
     ],
     "game": [
       {
-        "path": "{home}/Games/Hookshot"
+        "path": "{install}/Hookshot"
       }
     ]
   },
