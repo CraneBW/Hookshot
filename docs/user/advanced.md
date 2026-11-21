@@ -85,7 +85,8 @@ script. Each version's builder is on [Hookshot's releases](https://git.notrexed.
 
 On Windows, unpack `HookshotBuilder-<version>-windows-x64.zip` and run `HookshotBuilder.exe --cli` with the same
 options. `--check` only checks your game's version; `--log <file>` saves the build's output; `--jobs <n>` (or
-`HOOKSHOT_JOBS=<n>`) limits how many files compile at once. To build from a clone of this repository, see the
+`HOOKSHOT_JOBS=<n>`) limits how many files compile at once, and how many CPU threads every other step of the build uses
+(translating, the button prompts, preparing the shaders), so the PC stays usable while it builds. To build from a clone of this repository, see the
 [developer setup](../dev/setup.md).
 
 ## Linux: faster GPU memory (/dev/udmabuf)
