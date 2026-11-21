@@ -2114,14 +2114,15 @@ def main():
         vdeps = tree_headers(*vdeps_roots)
         output_device_deps = open(os.path.join(HOST, "audio_output_devices.h"), "rb").read()
         # (hookshot) Dear ImGui (third_party/imgui) draws the overlays over the window's image (gpu/vk/vk_imgui.cpp; vk_menu.cpp
-        # draws with it). Its objects see only its own headers; its headers are a dependency of the two files that include them
+        # draws with it). Its objects see only its own headers; its headers are a dependency of the files that include them
+        # (vk_wheel.cpp: its stb_truetype draws the item wheel's labels off Windows, vk_wheel_text.h)
         imgui = os.path.normpath(os.path.join(kit.HERE, "..", "third_party", "imgui"))
         zbic = os.path.join(kit.ROOT, "third_party", "zbic")
         imgui_flags = ["-I" + imgui, "-DIMGUI_IMPL_VULKAN_NO_PROTOTYPES", "-DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS",
                        "-DIMGUI_DISABLE_WIN32_FUNCTIONS", "-DIMGUI_DISABLE_DEMO_WINDOWS", "-DIMGUI_DISABLE_DEBUG_TOOLS"]
         imgui_deps = b"".join(open(os.path.join(d, f), "rb").read() for d in (imgui, os.path.join(imgui, "backends"), zbic)
                               for f in sorted(os.listdir(d)) if f.endswith(".h"))
-        imgui_users = ("vk_imgui.cpp", "vk_menu.cpp")
+        imgui_users = ("vk_imgui.cpp", "vk_menu.cpp", "vk_wheel.cpp")
         for f in ("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp", "backends/imgui_impl_vulkan.cpp"):
             vk_jobs.append((cxx, os.path.join(imgui, *f.split("/")),
                             os.path.join(obj_dir, "vk_imgui_" + os.path.basename(f)[:-4] + ".o"), tp_vflags + imgui_flags,
