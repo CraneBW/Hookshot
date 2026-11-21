@@ -66,6 +66,8 @@ CACHES = ("hookshot_programs.bin", "hookshot_programs.idx", "hookshot_programs.z
           "hookshot_pipelines.bin.built",
           "hookshot_computes.bin", "hookshot_compute_variants.bin", "hookshot_pipeline_states.bin",
           "hookshot_pipeline_states_v1.bin", "hookshot_prepared.bin", "hookshot_vk_pipelines.bin", "hookshot_vk_pipelines.stamp",
+          # (the size of the cache's one translator's pipelines, which bounds what another translator carries: pcache_stamp.h)
+          "hookshot_vk_pipelines.base",
           # (the textures a draw has sampled, for RX_VK_TEX_AHEAD: gpu/vk/texture_ahead.h)
           "hookshot_textures_drawn.bin")
 PLAY_FILES = re.compile(r"hookshot_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
