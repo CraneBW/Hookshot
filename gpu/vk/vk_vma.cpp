@@ -759,6 +759,14 @@ bool vram_usage_now(uint64_t* used, uint64_t* budget) {
     vmaSetCurrentFrameIndex(vma, ++budget_frame);
     return vram_usage(used, budget) && dev.memory_budget;
 }
+// (hookshot) whether an allocation sits in a device-local heap (vk_memory.cpp radv_import_headroom leaves those alone)
+bool allocation_in_vram(VmaAllocation allocation) {
+    if (!allocation) return false;
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(vma, allocation, &info);
+    return info.memoryType < dev.memory.memoryTypeCount &&
+           (dev.memory.memoryHeaps[dev.memory.memoryTypes[info.memoryType].heapIndex].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT);
+}
 bool system_heap_usage(uint64_t* used, uint64_t* budget) {
     vmaSetCurrentFrameIndex(vma, ++budget_frame);
     VmaBudget b[VK_MAX_MEMORY_HEAPS]{};
