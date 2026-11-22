@@ -571,6 +571,7 @@ SW(RX_VK_HALF_RATE_SHADING, attempt, bool, "off: RADV_FORCE_VRS_CONFIG_FILE is d
 GONE(RX_VK_HANDLE_POINTER, "2026-11-16", "it does nothing: a handle word that is a storage pointer is always recognised")
 GONE(RX_VK_HANDLE_POINTER_ALL, "2026-11-16", "it does nothing: only fragment stages zero a handle that is a storage pointer")
 SW(RX_VK_HANDLE_TABLES, kill, bool, "on where the GPU has non-uniform indexing and the descriptor limits (256 per stage, 512 per set), else off", "=0 turns off handle tables translated as descriptor arrays.")
+SW(RX_VK_HANDLE_TABLE_COUNT, kill, bool, "on: the elements of a handle table behind the game's own count of its records name no texture", "=0 binds every element of a handle table, as before.")
 SW(RX_VK_HANG_DUMP, diag, string, "no watchdog", "Writes every thread's stack to this file once no frame was shown for RX_VK_HANG_SEC seconds.")
 SW(RX_VK_HANG_SEC, diag, int, "20 seconds (at least 5)", "Seconds without a frame before the hang dump is written.")
 SW(RX_VK_HOLD_GPU_MS, tune, float, "1000 ms (never under RX_VK_HOLD_MS)", "Longest time stopped queues are held on for a thread waiting for the GPU.")
