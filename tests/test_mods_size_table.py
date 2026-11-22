@@ -26,6 +26,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path, PurePosixPath
 
 RUN_ALL_ARGS = ["--cc", "gcc"]
@@ -106,12 +107,17 @@ def unframe(data):
             return out
 
 
-# made-up tables: the game's; ours (the prompts': the font's entry raised, 0x30); two mods' (the first raises 0x10; the
-# second a grown placement file's 0x20, a new file 0x50 and a named entry)
-GAME = [(0x10, 100), (0x20, 200), (0x30, 300), (0x40, 400)], [("Collide/A", 50), ("Collide/B", 60)]
-OURS = restbl([(0x10, 100), (0x20, 200), (0x30, 900), (0x40, 400)], GAME[1])
-MOD_A = restbl([(0x10, 111), (0x20, 200), (0x30, 300), (0x40, 400)], GAME[1])
-MOD_B = restbl([(0x10, 100), (0x20, 250), (0x30, 300), (0x40, 400), (0x50, 500)], [("Collide/A", 50), ("Collide/B", 70)])
+# made-up tables: the game's (the font's entry: FONT_CRC, for the RomFS's font of GAME_FONT bytes); ours (the prompts': the
+# game's with the font's entry raised to fit OUR_FONT, as host/prompts.c makes it at the start); two mods' (the first raises
+# 0x10; the second a grown placement file's 0x20, a new file 0x50 and a named entry)
+FONT_CRC = zlib.crc32(FONT[:-3].encode())   # (the table's key: the path without .zs)
+OUR_FONT = struct.pack("<I", 0x18029A7F) + bytes(28)   # (prompts/External.bfotf, every face's: one font)
+GAME_FONT = 16
+NEED = len(OUR_FONT) + 300 - GAME_FONT   # (our font's size with the game's allowance over its own font)
+GAME = [(0x10, 100), (0x20, 200), (0x40, 400), (FONT_CRC, 300)], [("Collide/A", 50), ("Collide/B", 60)]
+OURS = restbl([(0x10, 100), (0x20, 200), (0x40, 400), (FONT_CRC, NEED)], GAME[1])
+MOD_A = restbl([(0x10, 111), (0x20, 200), (0x40, 400), (FONT_CRC, 300)], GAME[1])
+MOD_B = restbl([(0x10, 100), (0x20, 250), (0x40, 400), (0x50, 500), (FONT_CRC, 300)], [("Collide/A", 50), ("Collide/B", 70)])
 
 
 def merge_checks(cc, src, tmp):
@@ -159,7 +165,7 @@ def merge_checks(cc, src, tmp):
     raised, got = run(MOD_B, OURS)
     check(got == merged(MOD_B, OURS), "the mod's table with ours merged in")
     check(raised == 1, "%d of our entries went in, not 1 (the font's)" % raised)
-    check(struct.unpack_from("<II", got, 22 + 8 * 2) == (0x30, 900), "the font's entry is not ours")
+    check(struct.unpack_from("<II", got, 22 + 8 * 4) == (FONT_CRC, NEED), "the font's entry is not ours")
     check(struct.unpack_from("<II", got, 22 + 8 * 1) == (0x20, 250), "the mod's grown entry was lowered")
     # entries only on one side, both ways, and named ones: each the larger, sorted
     a = restbl([(5, 1), (0x20, 999), (0xFFFFFFF0, 7)], [("B", 9), ("D", 1)])
@@ -250,8 +256,10 @@ def documented_example_checks(exe, tmp):
     run("a single mod is not the collection root", mods / "_01-example", expected)
 
 
-def routing_checks(cc, tmp, zstandard, host):
-    """mods.c and prompts.c as they are, over folders: what the game is served"""
+def build_fixture(cc, tmp, host):
+    """mods.c, prompts.c, texts.c, zs.c and restbl.c as they are (from host), over host/posix's file calls, into one program
+    (tmp/fixture) that opens each RomFS path it is given as the game would: `open <path>: <file served>`, or (the game's).
+    tests/test_prompts_size_table.py builds it too"""
     posix = (ROOT / "host/posix/win32_posix.c").read_text(encoding="utf-8")
     src = tmp / "src"
     src.mkdir(parents=True)
@@ -309,11 +317,10 @@ int hos_event_skip_romfs(const char *key, const char *mod, char *out, size_t cap
     (void)key; (void)mod; (void)out; (void)cap;
     return 0;
 }
-const char *hos_romfs_dir;   /* (TEST_ROMFS_ON=1: the game's RomFS folder; else none, and mods.c merges no table of its own,
-                                 the last mod's is the base, the prompts' entries merged into it) */
+const char *hos_romfs_dir;   /* (the game's RomFS folder: prompts.c serves its own table, the font's entry raised) */
 const char *hos_options_file(void) { return ""; }   /* (prompts.c reads the settings file: none here) */
 int main(int argc, char **argv) {
-    if (getenv("TEST_ROMFS_ON")) hos_romfs_dir = getenv("TEST_ROMFS");
+    hos_romfs_dir = getenv("TEST_ROMFS");
     hos_mods_init(NULL);
     for (int i = 1; i < argc; i++) {
         char out[4096] = "";
@@ -330,29 +337,34 @@ int main(int argc, char **argv) {
                     str(src / "mods.c"),
                     str(src / "prompts.c"), str(src / "texts.c"), str(src / "zs.c"), str(ROOT / "host/restbl.c"), str(tmp / "posix.c"), str(tmp / "main.c"),
                     *(str(ZSTD / f) for f in ZSTD_SOURCES), "-o", str(exe)], check=True)
+    return exe
+
+
+def routing_checks(cc, tmp, zstandard, host):
+    """mods.c and prompts.c as they are, over folders: what the game is served"""
+    exe = build_fixture(cc, tmp, host)
 
     documented_example_checks(exe, tmp / "documented-example")
 
-    def case(name, mods, ours=OURS, opens=(TABLE, FONT), romfs=False):
-        """a game folder with the prompts (the faces' font, ours as their table unless None) and mods {folder: {path: bytes}};
-        the fixture opens each of opens: {path: what was served}, the merged table's content if served, the log"""
+    def case(name, mods, game_table=None, opens=(TABLE, FONT)):
+        """a game folder with the prompts (the faces' font), a RomFS with its table (game_table, else GAME) and font, and mods
+        {folder: {path: bytes}}; the fixture opens each of opens: {path: what was served}, the merged table's content if
+        served, the log"""
         top = tmp / name
         game = top / "game"
         (game / "prompts/xbox").mkdir(parents=True)
         (game / "hookshot_options.ini").write_text("button_prompts=2\n")   # (Xbox: no controller asked for)
         (game / "romfs" / TABLE).parent.mkdir(parents=True)
-        (game / "romfs" / TABLE).write_bytes(frame(restbl(*GAME)))
-        (game / "prompts/External.bfotf").write_bytes(struct.pack("<I", 0x18029A7F) + bytes(28))   # (every face's: one font)
-        if ours is not None:
-            (game / "prompts/rsizetable.zs").write_bytes(frame(ours))
+        (game / "romfs" / TABLE).write_bytes(frame(game_table if game_table is not None else restbl(*GAME)))
+        (game / "romfs" / FONT).parent.mkdir(parents=True)
+        (game / "romfs" / FONT).write_bytes(frame(bytes(GAME_FONT)))
+        (game / "prompts/External.bfotf").write_bytes(OUR_FONT)
         (top / "mods").mkdir()
         for folder, files in mods.items():
             for rel, data in files.items():
                 (top / "mods" / folder / "romfs" / rel).parent.mkdir(parents=True, exist_ok=True)
                 (top / "mods" / folder / "romfs" / rel).write_bytes(data)
         env = dict(os.environ, TEST_GAME_EXE=str(game / "hookshot"), HOS_MODS=str(top / "mods"), TEST_ROMFS=str(game / "romfs"))
-        if romfs:   # (the game's RomFS folder: prompts.c finds the game's table name in it)
-            env["TEST_ROMFS_ON"] = "1"
         out = subprocess.run([str(exe), *opens], env=env, check=True, capture_output=True, text=True, timeout=60).stdout
         served = {}
         for line in out.splitlines():
@@ -365,9 +377,9 @@ int main(int argc, char **argv) {
         return served, content, out
 
     mod_file = "mods/%s/romfs/" + TABLE
-    # no mod: our table and the font
+    # no mod: our table (the RomFS's, the font's entry raised) and the font
     served, _, log = case("none", {})
-    check(served == {TABLE: "game/prompts/rsizetable.zs", FONT: "game/cache/prompts/External.bfotf.zs"}, "no mod: %s" % served)
+    check(served == {TABLE: "game/cache/prompts/rsizetable.zs", FONT: "game/cache/prompts/External.bfotf.zs"}, "no mod: %s" % served)
     # a mod with a table: the mod's with ours merged in, and the font; in either order of opening
     for i, opens in enumerate(((TABLE, FONT), (FONT, TABLE))):
         served, content, log = case("one-%d" % i, {"seed": {TABLE: frame(MOD_B)}}, opens=opens)
@@ -388,7 +400,7 @@ int main(int argc, char **argv) {
     check(not version_errors, "\n".join(version_errors))
     # a mod without a table that grows a file: our table (its entry is still the game's), its file, the font
     served, _, log = case("grows", {"grown": {GROWN: frame(b"x" * 4096)}}, opens=(TABLE, GROWN, FONT))
-    check(served == {TABLE: "game/prompts/rsizetable.zs", GROWN: mod_file.replace(TABLE, GROWN) % "grown",
+    check(served == {TABLE: "game/cache/prompts/rsizetable.zs", GROWN: mod_file.replace(TABLE, GROWN) % "grown",
                      FONT: "game/cache/prompts/External.bfotf.zs"}, "a mod without a table: %s" % served)
     # two mods with tables: the one that sorts last is the base (its entries; the other's raise is not in it)
     served, content, log = case("two", {"01-a": {TABLE: frame(MOD_A)}, "02-b": {TABLE: frame(MOD_B)}})
@@ -396,11 +408,12 @@ int main(int argc, char **argv) {
     check(("02-b" in log.split("with the button prompts' sizes")[0].splitlines()[-1]), "two mods: 02-b's table:\n" + log)
     check(served[FONT] == "game/cache/prompts/External.bfotf.zs", "two mods: the font")
     # a mod table that cannot take ours: as it is, and the game's own icons
-    served, _, log = case("bad", {"bad": {TABLE: frame(b"NOT A TABLE" * 4)}}, romfs=True)
+    served, _, log = case("bad", {"bad": {TABLE: frame(b"NOT A TABLE" * 4)}})
     check(served == {TABLE: mod_file % "bad", FONT: "(the game's)"}, "a table that cannot be merged: %s" % served)
     check("not a resource size table as the game's" in log and "the game's own icons in texts" in log, "its log:\n" + log)
     # no table of ours (the faces' fonts fit the game's entry): the mod's as it is, and the font
-    served, _, log = case("no-ours", {"seed": {TABLE: frame(MOD_B)}}, ours=None)
+    roomy = restbl([(0x10, 100), (0x20, 200), (0x40, 400), (FONT_CRC, 100000)], GAME[1])
+    served, _, log = case("no-ours", {"seed": {TABLE: frame(MOD_B)}}, game_table=roomy)
     check(served == {TABLE: mod_file % "seed", FONT: "game/cache/prompts/External.bfotf.zs"}, "no table of ours: %s" % served)
     # a mod with a table and the font of its own: its font wins, its table still gets ours
     served, content, log = case("own-font", {"seed": {TABLE: frame(MOD_B), FONT: b"a mod's own font"}})
