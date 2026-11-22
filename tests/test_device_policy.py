@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VK = ROOT / "gpu" / "vk"
 
 # The yes/no fields, in DevicePolicy's order
-BOOLS = """fetch_bounds nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer
+BOOLS = """fetch_bounds nan_bits mesh_fallback_strict_fmul bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer
 amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallback intel_compile_gate compute_builds_serial
 pcache_fetch_lock split_before_draw astc_on_cpu inline_deku_web_loads networks_left_out dma_buf_imports nv_checkpoints
 allowance_at_count_rule
@@ -119,7 +119,7 @@ PCS = [
     dict(name="RX 6700 XT, AMD's Windows driver (RDNA 2 compiler)",
          facts=(0x1002, 0x73DF, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 " + AMD_OLD, "AMD Radeon RX 6700 XT", 1, 0,
                 12272, 11500, 32600, 12, 12, 6, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="bc_copy_per_layer fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallback allowance_at_count_rule "
             "mirrors split_ub_flush warp64 fsr4_tune room_in_blocks_rule threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 85, 4, 7158, 2048, 768, 512, 1437, -1, 256, 24, 64, 32, 97, 4, 4, 4, 6, 6, 3)),
@@ -129,7 +129,7 @@ PCS = [
     dict(name="RX 9070 XT, AMD's Windows driver (LLPC)",
          facts=(0x1002, 0x7550, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 (LLPC)", "AMD Radeon RX 9070 XT", 1, 0,
                 16304, 15300, 32600, 16, 16, 8, 1, 1, 1, 1, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
+         on="bc_copy_per_layer fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
             "fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 85, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
@@ -267,7 +267,7 @@ PCS = [
     dict(name="RX 5700 (8 GB), AMD's Windows driver (RDNA 1 compiler)",
          facts=(0x1002, 0x731F, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "25.9.1 " + AMD_OLD, "AMD Radeon RX 5700", 1, 0,
                 8176, 7378, 16300, 12, 12, 6, 0, 1, 0, 0, 0, 1, 1, 64, 64, 0x20),
-         on="fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="bc_copy_per_layer fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 fsr4_tune "
             "astc_bc_all room_in_blocks_rule squeeze_damped threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 85, 4, 4769, 2044, 614, 461, 922, -1, 256, 12, 32, 16, 97, 1, 4, 4, 6, 6, 3)),
@@ -277,7 +277,7 @@ PCS = [
     dict(name="Ryzen 9 7900X's graphics (32 GB), AMD's Windows driver, on 8 of 24 threads",
          facts=(0x1002, 0x164E, "AMD_PROPRIETARY", 0x800161, "INTEGRATED_GPU", "26.10.1 " + AMD_OLD, "AMD Radeon(TM) Graphics", 1, 0,
                 16300, 10232, 32600, 24, 8, 4, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="bc_copy_per_layer fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial astc_on_cpu allowance_at_count_rule split_ub_flush warp64 fsr4_tune "
             "astc_bc_all threaded_auto_render",
          num=(0, 0, 0, 2, 85, 16, 7162, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
@@ -311,6 +311,9 @@ ENV = [
     (NVIDIA, {"RX_VK_COMPUTE_SERIAL": "2"}, {"compute_builds_serial": 1}, ["compute_builds_serial"], []),      # (was off)
     (AMD_WIN, {"RX_VK_MESH_STRICT_FMUL": "0"}, {"mesh_fallback_strict_fmul": 0}, ["mesh_fallback_strict_fmul"], []),
     (NVIDIA, {"RX_VK_MESH_STRICT_FMUL": "1"}, {"mesh_fallback_strict_fmul": 1}, ["mesh_fallback_strict_fmul"], []),
+    (AMD_WIN, {"RX_VK_BC_COPY_PER_LAYER": "0"}, {"bc_copy_per_layer": 0}, ["bc_copy_per_layer"], []),
+    (AMD_WIN, {"RX_VK_BC_COPY_PER_LAYER": ""}, {}, [], []),
+    (NVIDIA, {"RX_VK_BC_COPY_PER_LAYER": "1"}, {"bc_copy_per_layer": 1}, ["bc_copy_per_layer"], []),
     (UHD, {"RX_VK_COMPUTE_SERIAL": "0"}, {"compute_builds_serial": 0}, ["compute_builds_serial"], []),
     (UHD, {"RX_VK_COMPUTE_SERIAL": "off"}, {"compute_builds_serial": 0}, ["compute_builds_serial"], []),
     (UHD, {"RX_VK_COMPUTE_SERIAL": ""}, {}, [], []),                                   # (was off)

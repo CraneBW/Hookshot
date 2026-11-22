@@ -250,7 +250,7 @@ inline bool parse_decimal(const char* text, double hi, double& out) {
 enum class Sw : unsigned {
     astc_on_cpu, batch_submits, compute_builds_serial, pcache_fetch_lock, split_before_draw, ub_snapshot, split_ub_flush,
     occ_copy, mirrors, fsr4_tune, position_invariant, equal_depth_bias, cap_spare_max, staging_keep, workers,
-    mesh_fallback_strict_fmul,
+    mesh_fallback_strict_fmul, bc_copy_per_layer,
     fetch_bounds, nan_bits, gather_offset,   // (device_policy_fixes_env's three)
     count
 };
@@ -289,6 +289,16 @@ struct DevicePolicy {
     // 0x800161 / 26.11.2). Emitting NoContraction f32 multiplies as fma(a, b, -0.0f) (IEEE-754 bit-exact, single
     // v_fmaak_f32) blocks the reassociation. RX_VK_MESH_STRICT_FMUL. Read (coopmat_init; in the program cache's stamp)
     bool mesh_fallback_strict_fmul = false;
+    // AMD's Windows driver (diagnosed on RDNA 2: RX 6700 XT, RX 6600, driver 0x800161): a single multi-layer
+    // VkBufferImageCopy (layerCount > 1) into a block-compressed (BC3/BC7) mip-tail level whose extent is not a multiple
+    // of 4 (e.g. 5x5 mip 8 on the 1365 x 1365 x 90 terrain material arrays, 6x6 on 1536/768, 9x9 on 300) truncates the
+    // copy to floor(w/4) x floor(h/4) blocks per layer, leaving the right and bottom edge blocks zeroed (pure black) even
+    // with explicit bufferRowLength/bufferImageHeight. Splitting non-4-aligned multi-layer copies into one
+    // VkBufferImageCopy region per layer inside the same call uses the single-layer copy path at zero measurable cost while
+    // keeping 8-layer decode/encode runs intact; enabled across AMD's Windows driver (matching bc_small_runs) so untested
+    // AMD Windows generations (RDNA 1, RDNA 3, GCN) cannot regress there. RX_VK_BC_COPY_PER_LAYER. Read
+    // (vk_texture.cpp bc_encode_into)
+    bool bc_copy_per_layer = false;
     // AMD's and Intel's drivers and the mobile ones Eden runs on: gathers nudged by 1/512 of a texel, so that the four
     // texels a gather picks match Maxwell's at texel edges (emit_spirv_image.cpp ImageGatherSubpixelOffset, Eden's, which
     // Hookshot had never turned on). Eden and Lichii turn it on for these drivers: shadow edges drawn as dashed lines
@@ -531,6 +541,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     p.fetch_bounds = !f.nvidia();
     p.nan_bits = f.driver_id == VK_DRIVER_ID_AMD_PROPRIETARY && f.driver_info && std::strstr(f.driver_info, "proprietary shader compiler");
     p.mesh_fallback_strict_fmul = p.nan_bits;
+    p.bc_copy_per_layer = f.amd_win();
     switch (f.driver_id) {
     case VK_DRIVER_ID_AMD_PROPRIETARY:
     case VK_DRIVER_ID_AMD_OPEN_SOURCE:
@@ -688,6 +699,7 @@ template <class Get> void device_policy_env(DevicePolicy& p, const DeviceFacts& 
     flag(Sw::split_before_draw, "RX_VK_SPLIT_BEFORE_DRAW", p.split_before_draw);
     flag(Sw::occ_copy, "RX_VK_OCC_COPY", p.occ_copy);
     flag(Sw::mesh_fallback_strict_fmul, "RX_VK_MESH_STRICT_FMUL", p.mesh_fallback_strict_fmul);
+    flag(Sw::bc_copy_per_layer, "RX_VK_BC_COPY_PER_LAYER", p.bc_copy_per_layer);
     {   // (off only: the tuning rewrites AMD's shaders for AMD's GPUs, and a value that says on leaves the default)
         const char* e = nullptr;
         if (word("RX_VK_FSR4_TUNE", e) == 0) p.fsr4_tune = false, mark(Sw::fsr4_tune, "RX_VK_FSR4_TUNE", e);
@@ -774,6 +786,7 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
         l.flag("fetch_bounds", p.fetch_bounds, p.set(Sw::fetch_bounds));
         l.flag("nan_bits", p.nan_bits, p.set(Sw::nan_bits));
         l.flag("mesh_fallback_strict_fmul", p.mesh_fallback_strict_fmul, p.set(Sw::mesh_fallback_strict_fmul), "0x800161");
+        l.flag("bc_copy_per_layer", p.bc_copy_per_layer, p.set(Sw::bc_copy_per_layer), "0x800161");
         l.flag("gather_offset", p.gather_offset, p.set(Sw::gather_offset));
         l.flag("frag_shuffle_fallback", p.frag_shuffle_fallback);
         l.flag("position_invariant", p.position_invariant, p.set(Sw::position_invariant));

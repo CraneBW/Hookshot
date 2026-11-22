@@ -351,6 +351,7 @@ SW(RX_VK_BATCH_MAX, tune, int, "32 command buffers", "The most command buffers h
 SW(RX_VK_BATCH_POLL_US, tune, int, "2000 us", "A progress poll sends held submits only once the oldest has waited this many microseconds (0: always).")
 SW(RX_VK_BC_CACHE_LAZY, hw, bool, "on where the driver allows more than 9.5 GB of VRAM, off elsewhere", "1 stores transcoded BC textures in the BC cache only once evictions begin; 0 stores every one.")
 SW(RX_VK_BC_CACHE_MB, tune, int, "1024 MB", "The most memory, in MB, the cache of transcoded BC textures keeps; 0: none kept.")
+SW(RX_VK_BC_COPY_PER_LAYER, hw, bool, "on on AMD's Windows driver, off elsewhere", "1 copies non-4-aligned multi-layer BC re-encodes as one VkBufferImageCopy region per layer; 0 uses a single multi-layer region.")
 SW(RX_VK_BC_IDLE_S, tune, int, "0: the BC scratch images are kept once made", "Seconds of disuse after which the ASTC-to-BC scratch images are given back; 0 never.")
 SW(RX_VK_BC_LAYERS, tune, int, "1 (clamped 1-8)", "How many layers the ASTC-to-BC scratch images have, which is how many one run decodes and encodes.")
 SW(RX_VK_BC_POOL, attempt, bool, "off: the BC scratch images each get a dedicated allocation", "=1 takes the two ASTC-to-BC scratch images from the shared image pool instead of dedicated allocations.")
