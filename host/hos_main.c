@@ -2110,6 +2110,12 @@ float hos_aspect_ratio = 0;   /* (the window's default shape: host/display.c) */
 /* (nx2/oot_wide.py) read by the widescreen patches in the game's code; 0: the game's own 16:9 */
 volatile uint64_t hos_wide_out, hos_wide_scene;
 volatile float hos_wide_ratio, hos_wide_squeeze, hos_wide_margin;
+int hos_camera_trace_enabled(void) {
+    FILE *marker = fopen("camera-clearance.trace", "rb");
+    if (!marker) return 0;
+    fclose(marker);
+    return 1;
+}
 volatile uint32_t hos_wide_keep_mask = 0xf;   /* (nx2/oot_wide.py KEEP_VTABLES: the screens that keep the whole picture, a bit each; MkwVkHost.wide_menus) */
 /* The loading cover between two areas (the game's UILoadingFadeScreen, KEEP_VTABLES[3]): a black picture over the whole
    3840 x 2160 UI grid, and an icon. Drawn in the middle 16:9 with the menus, it leaves the sides open, and the game draws
