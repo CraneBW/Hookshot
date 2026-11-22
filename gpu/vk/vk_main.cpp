@@ -74,13 +74,21 @@ bool load_global() {
     // (hookshot) The drivers are the loader's to find: it reads the ones in use from the display adapters. Nothing here
     // sets VK_ICD_FILENAMES or VK_DRIVER_FILES, which make the loader take the named files and no other driver: DriverStore
     // keeps the packages of drivers no longer in use, and one of those named listed no GPU at all (a black window on NVIDIA
-    // and AMD cards alike). pick_device chooses the GPU; RX_VK_DEVICE or the GPU row choose another
-    HMODULE m = LoadLibraryExA("vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    // and AMD cards alike). pick_device chooses the GPU; RX_VK_DEVICE or the GPU row choose another.
+    // The loader's entry is the executable's (MkwVkHost.vulkan_loader_proc, host/rx_backend.c): Vulkan shims (Streamline,
+    // OptiScaler) hook the executable's imports and missed the calls this DLL made through a loader of its own
+    if (mkwvk::host && mkwvk::host->vulkan_loader_proc) {
+        get_instance_proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(mkwvk::host->vulkan_loader_proc());
+    } else {
+        HMODULE m = LoadLibraryExA("vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!m) return false;
+        get_instance_proc = (PFN_vkGetInstanceProcAddr)(void*)GetProcAddress(m, "vkGetInstanceProcAddr");
+    }
 #else
     HMODULE m = LoadLibraryA("vulkan-1.dll");   // (linux: libvulkan.so.1, host/posix/win32_posix.c)
-#endif
     if (!m) return false;
     get_instance_proc = (PFN_vkGetInstanceProcAddr)(void*)GetProcAddress(m, "vkGetInstanceProcAddr");
+#endif
     if (!get_instance_proc) return false;
 #define VKX_LOAD(f) f = (PFN_##f)get_instance_proc(nullptr, #f);
     VKX_GLOBAL(VKX_LOAD)

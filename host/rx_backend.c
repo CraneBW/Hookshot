@@ -338,6 +338,16 @@ uint64_t hos_mods_changed(void);
 int hos_cheat_info(int i, const char **name, const char **mod, const char **note, int *kind, int *on);
 void hos_cheat_set(int i, int on);
 
+#ifdef _WIN32
+static uintptr_t host_vulkan_loader_proc(void) {
+    HMODULE loader = LoadLibraryExA("vulkan-1.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!loader) return 0;
+    FARPROC resolver = GetProcAddress(loader, "vkGetInstanceProcAddr");
+    if (!resolver) FreeLibrary(loader);
+    return (uintptr_t)resolver;
+}
+#endif
+
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -357,6 +367,11 @@ static const MkwVkHost vk_host = {
     hos_sdl_rumble_test,
     hos_nfc_count, hos_nfc_name, hos_nfc_tap, hos_nfc_state, hos_nfc_dir, hos_nfc_scan, hos_nfc_scan_name,
     hos_ab_frame,   /* (version 35, hookshot: the frame trace's ab_side, host/hos_ab.c) */
+#ifdef _WIN32
+    host_vulkan_loader_proc,   /* (version 36: vkGetInstanceProcAddr as the executable resolves it) */
+#else
+    NULL,
+#endif
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
