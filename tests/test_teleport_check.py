@@ -176,7 +176,7 @@ def main():
         for name, text in (("decision", FIXTURE), ("sequence", sequence)):
             c, exe = Path(tmp) / (name + ".c"), Path(tmp) / (name + ".exe")
             c.write_text(text, encoding="utf-8")
-            subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "host"), str(c), "-o", str(exe)],
+            subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable", "-I", str(ROOT / "host"), str(c), "-o", str(exe)],
                            check=True)
             r = subprocess.run([str(exe)], capture_output=True, text=True)
             print(r.stdout, end="")

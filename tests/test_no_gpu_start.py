@@ -134,7 +134,7 @@ int main(int argc, char **argv) {
     hos_crash_record_parse("", &r);
     const int v = hos_crash_verdict(&r, &f, 1, 1, 0), cause = hos_crash_cause(v, &r, &f, 1, 1);
     char message[2000];
-    hos_crash_message(message, sizeof message, v, hos_crash_stage(&f), cause, 0);
+    hos_crash_message(message, sizeof message, v, hos_crash_stage(&f), cause);
     printf("vulkan=%d failed=%d verdict=%d\n%s\n", f.vulkan, hos_crash_start_failed(&f), v, message);
     return 0;
 }

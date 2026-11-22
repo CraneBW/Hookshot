@@ -70,7 +70,9 @@ struct {
         bool shaderStorageImageArrayNonUniformIndexing = true, shaderUniformTexelBufferArrayNonUniformIndexing = true,
              shaderStorageTexelBufferArrayNonUniformIndexing = true;
         VkBool32 shaderBufferInt64Atomics{};
+        VkBool32 shaderInt8 = 1;   // (Hookshot's make_profile: 8- and 16-bit integers where the device has them)
     } vk12;
+    struct { VkBool32 shaderInt16 = 1; } features;
     bool float_atomic_add = false;
     struct { struct { uint64_t minStorageBufferOffsetAlignment = 16; } limits; } props;
     struct { bool gather_offset = false, warp64 = false, frag_shuffle_fallback = false; } policy;

@@ -480,7 +480,11 @@ def source_checks(draw):
         body = block(draw, marker, where="gpu/vk/vk_draw.cpp")
         if body.count("start_note_refs(") != 1 or call not in body or "pipe_notes_refs(" in body:
             raise SystemExit("FAIL: %s does not take the notes' references once through %s" % (marker.split("(")[0], call))
-    if draw.count("pipe_notes_refs(") != 2:   # (start_note_refs' walk and the definition)
+    # (start_note_refs' walk and the definition; and Hookshot's precompile_index_only, the one walk of a start that skips
+    # the startup compilation: it runs in the precompile's place, never beside it)
+    index_only = block(draw, "void precompile_index_only() {", where="gpu/vk/vk_draw.cpp") \
+        if "void precompile_index_only() {" in draw else ""
+    if draw.count("pipe_notes_refs(") - index_only.count("pipe_notes_refs(") != 2 or index_only.count("pipe_notes_refs(") > 1:
         raise SystemExit("FAIL: pipe_notes_refs() is called somewhere other than start_note_refs: a second walk a start")
     # (a start that leaves the load-at-create pass without taking them, the warm pass's marker unwritten, lets them go before the
     # precompile and play: kept, they were held for the session)

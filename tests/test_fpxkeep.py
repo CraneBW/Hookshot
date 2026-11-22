@@ -168,6 +168,7 @@ def main():
         fs.skip("no C compiler" if not cc else "no C++ compiler")
     t0 = time.time()
     failed, ran = [], []
+    no_lane_routes = set()
     with tempfile.TemporaryDirectory(prefix="hookshot-fpxkeep-") as tmp:
         probe = os.path.join(tmp, "fpxkeep_cpu.exe")
         fs.build([cc] + fs.target_flags(cc, tmp) + ["-march=x86-64", os.path.join(ROOT, "tests", "fpxkeep_cpu.c"), "-o", probe],
@@ -185,10 +186,19 @@ def main():
                 r = fs.run([exe] + args, timeout=3600)
                 print("%-10s %s" % (march, r.stdout.rstrip()))
                 ran.append(march)
+                if (r.returncode == 4 and args[0] == "lanes" and " 0 mismatches" in r.stdout
+                        and "lane routes 0;" in r.stdout):
+                    # (Hookshot's kit: its own fast float code takes the lanes before the kit's lane routes, so
+                    # fpxkeep's lane-route keep is never reached here; the lanes are still checked bit-exact)
+                    no_lane_routes.add(march)
+                    continue
                 if r.returncode:
                     failed.append("%s %s (exit %d)" % (march, args[0], r.returncode))
         if not a.no_faults and "x86-64-v3" in ran:
             for i, (what, old, new) in enumerate(FAULTS):
+                if what.startswith("lane route") and "x86-64-v3" in no_lane_routes:
+                    print("fault %-55s skipped (no lane route on this kit)" % what)
+                    continue
                 if header.count(old) != 1:
                     raise SystemExit("fpxkeep: the fault %r: its text is in a64_fpx.h %d times" % (what, header.count(old)))
                 d = os.path.join(tmp, "fault%d" % i)

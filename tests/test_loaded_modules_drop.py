@@ -47,7 +47,7 @@ def check_load_work():
     for needle, why in (
             ("if (built && !left && drop_loaded_modules_on()) census.load_modules_dropped += (int64_t)program_cache_drop_loaded(*p);",
              "load_work does not let a loaded program's modules go once its noted pipelines are built"),
-            ("census.load_pipes += pipeline_keep_ready(n.key, pl), built++;", "a built noted pipeline is not counted"),
+            ("census.load_pipes += pipeline_keep_ready(n.key, pl, p.get()), built++;", "a built noted pipeline is not counted"),
             ("else census.load_pipes_cold++, left++;", "a cold noted pipeline does not keep the modules"),
             ("census.load_pipes_deferred++, left++;", "a noted pipeline deferred to its draw does not keep the modules"),
             ("if (!pipe_note_at(notes_in, n.at, note.get())) { left++; continue; }", "a note that did not read does not keep them")):

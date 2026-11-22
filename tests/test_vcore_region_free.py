@@ -57,6 +57,8 @@ static void pages_mark_used_locked(uint64_t addr, uint64_t size) { (void)addr, (
 #define HOS_HEAP_BASE 0x1000000000ULL
 static uint64_t hos_heap_size = 0x100000000ULL, region_floor = ~0ULL, low_hole[2][2];
 static int hos_commit(uint64_t addr, uint64_t size) { (void)addr, (void)size; return 1; }
+static int env_on(const char *name) { (void)name; return 0; }   /* (hookshot_env.h's switches: all off here) */
+void rx_guest_release(uint64_t lo, uint64_t hi) { (void)lo, (void)hi; }   /* (host/rx_backend.c: the renderer told; none here) */
 static void hos_fatal(void *c, const char *what, ...) { (void)c; printf("FAIL: %s\n", what); exit(1); }
 
 /* the thread's virtual core, as hos_vcore_away / hos_vcore_back keep it (host/hos_thread.c) */
@@ -183,7 +185,11 @@ def main():
     parser.add_argument("--source", type=Path, default=ROOT / "host/hos_mem.c")
     args = parser.parse_args()
     src = args.source.read_text(encoding="utf-8")
-    fixture = (HARNESS.replace("@ALLOC@", block(src, "uint64_t hos_region_alloc(uint64_t size, uint64_t align) {"))
+    # (Hookshot's hos_region_alloc is region_alloc with the pages committed: both, the wrapper last)
+    alloc = block(src, "uint64_t hos_region_alloc(uint64_t size, uint64_t align) {")
+    if "region_alloc(size, align, 1)" in alloc and "static uint64_t region_alloc(uint64_t size, uint64_t align, int commit) {" in src:
+        alloc = (block(src, "static uint64_t region_alloc(uint64_t size, uint64_t align, int commit) {") + "\n" + alloc)
+    fixture = (HARNESS.replace("@ALLOC@", alloc)
                .replace("@FREE@", block(src, "void hos_region_free(uint64_t addr) {")))
     compiler = shutil.which(args.cxx)
     if not compiler:

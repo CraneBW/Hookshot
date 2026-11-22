@@ -56,6 +56,7 @@ uint64_t texture_frame_no() { return frame; }
 unsigned preset = 11;
 unsigned wanted_preset() { return preset; }
 void logf(const char*, ...) {}
+bool temporal_prewarm_on() { return true; }   // (vk_temporal.cpp: RX_VK_DLSS_PREWARM on, as by default)
 void note_work() {}
 void temporal_later(std::function<void()> f) { f(); }
 void NVSDK_NGX_VULKAN_ReleaseFeature(NVSDK_NGX_Handle*) {}

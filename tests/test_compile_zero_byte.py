@@ -35,7 +35,7 @@ class ZeroByteTests(unittest.TestCase):
         self.compiler.write_text('import sys\nfrom pathlib import Path\nPath(sys.argv[1]).write_text("ran")\n'
                                  'Path(sys.argv[-1]).write_bytes(b"authored object fixture")\n', encoding='utf-8')
         self.env = dict(os=os, subprocess=subprocess, time=time, GATE=None, PLANNED={},
-                        OBJ_CACHE=str(self.folder / 'cache'), no_throttle=lambda handle: None,
+                        OBJ_CACHE=str(self.folder / 'cache'), no_throttle=lambda handle: None, below_normal=lambda handle: None,
                         object_key=lambda src, flags, deps: hashlib.sha1(repr((src, flags, deps)).encode()).hexdigest())
         exec(compile(ast.Module(body=body, type_ignores=[]), str(BUILD), 'exec'), self.env)
 
@@ -47,7 +47,7 @@ class ZeroByteTests(unittest.TestCase):
         src.write_bytes(text)
         obj = self.folder / 'code_009.o'
         return src, obj, self.env['compile_one']((sys.executable, str(src), str(obj),
-                                                  [str(self.compiler), str(self.ran)], 'authored deps'))
+                                                  [str(self.compiler), str(self.ran)], b'authored deps'))   # (main's deps are bytes: DEPFILE_DEPS)
 
     def test_a_zero_byte_is_refused_by_its_place(self):
         src, obj, (name, _, error) = self.compile(b'void f(void) {\n    g(c,\0_b+_o),x8_);\n}\n')

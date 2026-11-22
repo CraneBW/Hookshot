@@ -55,7 +55,13 @@ def main():
         (tmp / "fallback_actual.inc").write_text(cut(a.source.read_text(encoding="utf-8")), encoding="utf-8")
         exe = tmp / ("capacity.exe" if os.name == "nt" else "capacity")
         # (the recompiler's flags; no SPIR-V header is read, so its folder is one already on the list)
-        f = flags(argparse.Namespace(cxx=cxx, headers=ROOT / "gpu" / "vk"))
+        try:
+            f = flags(argparse.Namespace(cxx=cxx, headers=ROOT / "gpu" / "vk"))
+        except SystemExit as e:   # (a compiler with no C++23 mode: skipped, as tests/test_mesh_fallback_layout.py is there)
+            if "no C++23 mode" not in str(e):
+                raise
+            print("SKIP: %s" % str(e)[6:])
+            return
         made = subprocess.run([cxx, *f, "-I" + str(tmp), str(ROOT / "tests" / "mesh_fallback_capacity_test.cpp"),
                                "-o", str(exe)], capture_output=True, text=True, env=env, creationflags=creation)
         if made.returncode:

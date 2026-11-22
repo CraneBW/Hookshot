@@ -247,8 +247,6 @@ static uint8_t *guest(uint64_t a) {
 }
 #define GP(a) ((void *)guest(a))
 #define G64(a) (*(uint64_t *)GP(a))
-#define HOS_HEAP_BASE 0x1000000000ULL   /* (hos.h; hos_oot_note_link's walk: no Link here) */
-static int hos_guest_range(uint64_t a, uint64_t n) { (void)a, (void)n; return 0; }
 typedef int SRWLOCK;
 #define SRWLOCK_INIT 0
 static void AcquireSRWLockExclusive(SRWLOCK *l) { (void)l; }
@@ -260,7 +258,6 @@ static int env_on(const char *name) { (void)name; return 0; }
 static int env_value_off(const char *v) { (void)v; return 0; }
 volatile uint64_t hos_step_probe = 0;   /* (host/nn_vi.c's: the game clock's object, which the cloth's step reads) */
 volatile uint32_t hos_frame_seconds_bits;
-volatile uint64_t hos_step_probe;   /* (host/nn_vi.c's: the game clock's object, none here) */
 /* (host/hos.h's, for the takeoff and ledge steps beside the music manager's: their guest memory is this mem) */
 #define HOS_HEAP_BASE 0x1000000000ULL
 static void *hos_guest_range(uint64_t a, uint64_t n) { return a + n <= sizeof mem ? mem + a : NULL; }

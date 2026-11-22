@@ -273,6 +273,8 @@ Dropped check(const std::string&, uint64_t) { return {0, 0}; }
 // (pcache_load_off's rule, gpu/vk/pcache_load.h, and whether programs load at their create calls: not here)
 #include "pcache_load.h"
 bool programs_load_at_create() { return false; }
+#include "nvidia_cache_limit.h"
+nvidia_cache_limit::Limit nvidia_limit() { return {}; }   // (no NVIDIA cache limit here)
 // (init's conditional read uses the read-result stub; play writes keep the real mapped-file writer)
 #define PipelineCacheFile ReadPart
 #include "pcache_init.inc"
