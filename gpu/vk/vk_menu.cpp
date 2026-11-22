@@ -1490,7 +1490,8 @@ const char* hn_intel_compiles(int v, int variant) {
     if (variant <= 0 && getenv("RX_VK_NO_INTEL_SERIAL"))
         return "Set by RX_VK_NO_INTEL_SERIAL (hookshot_env.txt or the environment): remove that line to choose here.";
     static const char* const t[] = {"Side by side on the Arc B-series (driver 101.9154 or newer), where it was measured; one at "
-                                    "a time on other Intel graphics.",
+                                    "a time on other Intel graphics, but for the shader preparation's graphics pipelines from "
+                                    "driver 101.9175.",
                                     "Shaders are built faster on a CPU with many cores, but Intel's driver can crash the game "
                                     "while it builds them.",
                                     "The safe choice, and the best on a CPU with 4 cores or fewer: a shader Intel's compiler "
@@ -6431,6 +6432,10 @@ bool menu_render_thread() { return threaded_choice().render_thread; }
 bool menu_recorder_thread() { return threaded_choice().recorder_thread; }
 bool intel_compiles_side_by_side() {   // (RX_VK_NO_INTEL_SERIAL in the row: menu_init. Asked once the device is made)
     return intel_side_by_side_chosen(opts.intel_compiles, dev.props.deviceID, dev.props.driverVersion);
+}
+// (the shader preparation's graphics builds: Auto is side by side there from driver 101.9175 too, intel_compiles.h)
+bool intel_prepare_side_by_side() {
+    return intel_prepare_side_by_side_chosen(opts.intel_compiles, dev.props.deviceID, dev.props.driverVersion);
 }
 // (Intel's Windows driver only, where the row shows: Mesa's ANV ignores DISABLE_OPTIMIZATION, same instructions, spills and
 // compile time on an Iris Xe, its slow part register allocation at SIMD32)
