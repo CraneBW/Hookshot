@@ -21,6 +21,7 @@
 #include "game_layout.h"
 #include "options_path.h"
 #include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
+#include "ws_floor.h"        /* (the game's memory kept in RAM: HOS_WS_FLOOR_MB) */
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
 #include "../gpu/vk/oot_teleport_capture.h"
@@ -97,6 +98,22 @@ static void process_priority(void) {
                                              repeats 0.51 and 0.36 a second against 0.65 and 0.55) */
     const DWORD cls = level >= 2 ? HIGH_PRIORITY_CLASS : level == 1 ? ABOVE_NORMAL_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS;
     if (level > 0 && SetPriorityClass(GetCurrentProcess(), cls)) hos_log("process priority class: %s", level >= 2 ? "high" : "above normal");
+}
+#endif
+
+#ifdef _WIN32
+/* (hookshot) The game's memory kept in RAM under memory pressure: a soft working-set minimum (host/ws_floor.h, HOS_WS_FLOOR_MB) */
+static void ws_floor(void) {
+    uint64_t mb, ram_mb;
+    unsigned long err;
+    const int r = ws_floor_apply(getenv("HOS_WS_FLOOR_MB"), &mb, &ram_mb, &err);
+    if (r > 0)
+        hos_log("mem: the working set's minimum is %llu MB of the PC's %llu MB: Windows keeps that much of the game in RAM before "
+                "it trims below it (HOS_WS_FLOOR_MB=0: Windows' own)", (unsigned long long)mb, (unsigned long long)ram_mb);
+    else if (!r)
+        hos_log("mem: the working set's minimum is Windows' own (HOS_WS_FLOOR_MB=0)");
+    else
+        hos_log("mem: a working set minimum of %llu MB was refused (error %lu): Windows' own stays", (unsigned long long)mb, err);
 }
 #endif
 
@@ -2597,6 +2614,7 @@ static int game_main(int argc, char **argv) {
     timeBeginPeriod(1);   /* 1 ms timer resolution: the 60 Hz vsync and the game's frame pacing sleep in short steps */
     no_power_throttling();
     process_priority();
+    ws_floor();   /* (the game's memory kept in RAM under memory pressure: host/ws_floor.h) */
 #endif
     void hos_display_start(void);
     hos_display_start();  /* the game's window; HOS_HEADLESS=1 for none */
