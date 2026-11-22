@@ -28,7 +28,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
 from srccut import between, block  # noqa: E402
 
-RUN_ALL_ARGS = ["--cc", "{cc}", "--cxx", "{cxx}"]
+RUN_ALL_ARGS = ["--cc", "gcc", "--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 NO_GPU_H = ROOT / "gpu" / "vk" / "compat" / "hookshot_no_gpu.h"
