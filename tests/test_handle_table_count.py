@@ -176,8 +176,9 @@ def main():
         'namespace Shader {',
         block(info_h, 'enum class HandleOp : u32 {') + ';',
         block(info_h, 'template <typename ReadCbuf, typename ReadStorage>\nstd::optional<u32> EvaluateHandleProgram('),
-        info_h[info_h.index('inline constexpr u32 kSimTurfStorageBit'):info_h.index('[[nodiscard]] constexpr u32 SimTurfStorageOrig(')],
-        block(info_h, '[[nodiscard]] constexpr u32 SimTurfStorageOrig('),
+        # (the simulated turf's storage remap, where the source has it: Hookshot's has none, its descriptors' offsets are their own)
+        *([info_h[info_h.index('inline constexpr u32 kSimTurfStorageBit'):info_h.index('[[nodiscard]] constexpr u32 SimTurfStorageOrig(')],
+           block(info_h, '[[nodiscard]] constexpr u32 SimTurfStorageOrig(')] if 'SimTurfStorageOrig(' in info_h else []),
         '}',
         block(shader, 'uint64_t stage_storage_base('),
         block(shader, 'uint32_t stage_storage_word('),
