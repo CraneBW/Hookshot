@@ -6705,6 +6705,7 @@ bool system_heap_usage(uint64_t* used, uint64_t* budget);   // (vk_vma.cpp; said
 // can be destroyed here. The budget and spare sizes are estimates, so leave the ordinary
 // import and fallback in charge when there is too little reclaimable memory.
 bool allocation_in_vram(VmaAllocation allocation);   // (vk_vma.cpp: in a device-local heap)
+namespace {   // (declared in the anonymous namespace above import_dma_buf, its one caller)
 void radv_import_headroom(uint64_t bytes) {
     constexpr uint64_t large_import = 64ull << 20, submit_reserve = 64ull << 20;
     if (dev.driver_id != VK_DRIVER_ID_MESA_RADV || bytes < large_import) return;
@@ -6731,6 +6732,7 @@ void radv_import_headroom(uint64_t bytes) {
                  (unsigned long long)(released >> 20), (unsigned long long)(need >> 20));
     }
 }
+}  // namespace
 #endif
 
 /// Whether retired imports are kept, given back at once, or given back after a wait (retired_give_back.h)
