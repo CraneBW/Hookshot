@@ -9776,6 +9776,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_GFX_CONTACT_SHADOWS) return opts.gfx_contact_shadows;
         if (id == HOS_OPT_GFX_BASE_QUALITY) return opts.gfx_base_quality;
         if (id == HOS_OPT_GFX_UNCAPPED) return opts.gfx_uncapped;
+        if (id == HOS_OPT_NATIVE_ZSTD) return native_zstd_default.load(std::memory_order_acquire);   // (host/hos_zstd.c)
         /* (hookshot) Vibration (host/vibration.h), and what plays the controller used last as the host wrote it back */
         if (id == HOS_OPT_VIBRATION) return opts.vibration;
         if (id == HOS_OPT_VIBRATION_STATUS) return menu_vibration_status_option();

@@ -142,7 +142,7 @@ SW(HOS_MUTEX_TRACE, diag, int, "0: off", "Logs mutex waits longer than <ms>, wit
 SW(HOS_MUTEX_WATCH, diag, string, "off", "Logs every operation on the mutex at that guest address (hex) and its condition variables' signals.")
 SW(HOS_MW_WAKE, kill, enum, "only changes to objects linked into a multi-wait wake WaitAny", "=all: every event, semaphore or queue change wakes every WaitAny, as before.")
 SW(HOS_NAMES_NATIVE, kill, enum, "1: the name searches of f_805aeea0 run natively", "0 runs them lifted; 2 runs both and compares.")
-SW(HOS_NATIVE_ZSTD, kill, enum, "on: the game's zstd streams are decoded on the host's libzstd, the virtual core kept meanwhile (2)", "0 runs the game's own zstd (lifted code); 1 decodes on the host and gives the core up meanwhile (it froze loads on an Arc iGPU).")
+SW(HOS_NATIVE_ZSTD, hw, enum, "the game's zstd streams decoded on the host's libzstd, the virtual core given up meanwhile (1), kept (2) on an Intel integrated GPU", "1 gives the virtual core up while it decodes, 2 keeps it, 0 decodes with the game's own zstd.")
 SW(HOS_NATIVE_ZSTD_FRAMES, kill, bool, "on: the resource loaders' whole-buffer zstd is decoded on the host's libzstd", "=0 runs the game's own zstd for them (lifted code).")
 SW(HOS_NFP_SEARCH, diag, bool, "off", "=1 has the game's reader look for a tag from the start, without the game's own NFC screen (a test of the Switch 2 Pro Controller's reader).")
 SW(HOS_NFP_TRACE, diag, bool, "off", "=1 logs nn::nfp's application area calls.")
