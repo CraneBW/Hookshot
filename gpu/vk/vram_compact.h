@@ -115,7 +115,7 @@ inline uint64_t texture_min_floor(uint64_t allowed) {
 
 /// A texture floor as the rules may hold it: none once the driver's count is past its allowance. There the driver pages VRAM out
 /// to system memory and every frame reads some of it over PCIe, which costs more than textures made again: a GTX 1060 6 GB
-/// (#939) sat at 6128 MB of the 5231 it allowed with 1606 MB of textures, under the 1800 MB floor, so no rule could take one,
+/// sat at 6128 MB of the 5231 it allowed with 1606 MB of textures, under the 1800 MB floor, so no rule could take one,
 /// and Hyrule Field went from 31 to 14 fps until a restart. Past it the textures used in the eviction's last 60 presents are
 /// what stays (vk_texture.cpp texture_frame's min_unused); within it the floor keeps the working set from a downward ratchet
 inline uint64_t floor_within(uint64_t floor, uint64_t used, uint64_t allowed) { return allowed && used > allowed ? 0 : floor; }

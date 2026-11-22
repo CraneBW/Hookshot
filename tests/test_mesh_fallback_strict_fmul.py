@@ -1,6 +1,6 @@
 """AMD's older Windows proprietary shader compiler (RDNA 1 and 2, RX 5000 and RX 6000) reassociates NoContraction
 OpFMul inside compute-fallback mesh stages even with DISABLE_OPTIMIZATION_BIT, causing grass blade tips to differ
-by 1 ULP between depth pre-pass and colour pass and flash white under EQUAL depth testing (issues #1710, #1799, #1934).
+by 1 ULP between depth pre-pass and colour pass and flash white under EQUAL depth testing.
 
 EmitFPMul32 works around this by emitting OpFma(a, b, -0.0f) when ctx.mesh_fallback, mesh_fallback_strict_fmul, and
 no_contraction are all true. This game-free check verifies:

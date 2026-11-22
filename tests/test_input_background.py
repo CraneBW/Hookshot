@@ -14,7 +14,7 @@ menu-side-buttons: while one of the game's menus has the mouse, its side buttons
 confirms a choice); the left button stays that menu's click.
 
 held-input: an input held down is the player's input (the game menus' cursor hides by it) when it goes down, not at every
-read while it stays down, so the mouse's hover works while ZL is held for the ocarina's song sheet (Hookshot #1253).
+read while it stays down, so the mouse's hover works while ZL is held for the ocarina's song sheet.
 
 python -I -B tests/test_input_background.py [--cc gcc]
 """

@@ -94,7 +94,7 @@ static int64_t st_bg_waits, st_prefetch_sent, st_prefetch_used, st_prefetch_drop
 static std::vector<Pool*> mirror_wanted, sparse_wanted;
 static uint64_t mem_rec_value = 7, mirror_epoch = 10;
 static int failures;
-[[maybe_unused]] static std::atomic<int64_t> st_imports_made{0}, st_imports_refused{0}, st_imports_held{0};   // (pool_lookup's attempts, #859)
+[[maybe_unused]] static std::atomic<int64_t> st_imports_made{0}, st_imports_refused{0}, st_imports_held{0};   // (pool_lookup's attempts)
 static thread_local bool import_cooling;
 static thread_local VkResult import_result = VK_SUCCESS;
 static Pool* pool_lookup(uint64_t, uint64_t);

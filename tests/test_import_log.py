@@ -1,4 +1,4 @@
-"""Run pool_lookup's import attempts (vk_memory.cpp) against a driver that refuses, and check what they count and log (#859).
+"""Run pool_lookup's import attempts (vk_memory.cpp) against a driver that refuses, and check what they count and log.
 
 import_pool returns false at once, with no driver call, while ImportHolds holds a range that failed within kGapMs
 (import_cooling set). pool_lookup counted every call as an import and logged "imported in" every 256th, so a range the
@@ -117,7 +117,7 @@ static bool attempt(uint64_t at, uint64_t size) {
 int main() {
     using namespace mkwvk;
     const uint64_t base = 0x80000000ull, mb = 1ull << 20;
-    // The driver refuses one range (#859's VkResult): logged as not imported, counted as refused, not as an import.
+    // The driver refuses one range (its VkResult): logged as not imported, counted as refused, not as an import.
     driver_answer = VK_ERROR_INVALID_EXTERNAL_HANDLE;
     check(!attempt(base, mb), "a refused import gave a pool");
     check(driver_calls == 1, "the first lookup did not ask the driver once");

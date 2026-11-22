@@ -5,12 +5,12 @@
 // workgroups each: 739acd678ae08655 (21 vertex lines, records of 22 words) and a6a688bae3c9b80c (6 vertex lines, 7 words).
 // Every program takes its records from the same fixed area, so a 22-word program fits a third as many as a 7-word one: past
 // that fit, the epilogue (emit_spirv_mesh.cpp MeshFallbackEpilogue) drops the workgroups that no longer fit, and the blades'
-// program draws fewer primitives than its partner. Measured on the fallback with the Grass distance at 4x (#1877): 739a held
+// program draws fewer primitives than its partner. Measured on the fallback with the Grass distance at 4x: 739a held
 // at 762528 records a frame, a6a6 at 1002492 to 1023009, and the blades white where the partner drew alone. (The model's
 // workgroups are all 288 records, the game's are not: it stops at 762336, the last whole workgroup under the same fit, 762600.)
 //
 // grass_pair_*: both programs given the same full workgroups of 96 triangles (288 records) up to a load must draw the same
-// records, every one: at the load measured at 4x, and at the load #1877's caps let through (~1.29M records, extrapolated
+// records, every one: at the load measured at 4x, and at the load the caps let through (~1.29M records, extrapolated
 // from the measured one).
 // buffers_*: the records buffer that area needs is made, with mma_layout.h's attribute pool and the shared warp's counters
 // off and on: fallback_buffers_of refuses a records buffer past its limit, every program's fallback then.
@@ -119,7 +119,7 @@ int main(int argc, char** argv) {
     const std::string name{argv[1]};
     try {
         if (name == "grass_pair_measured") GrassPair(1023009);   // (a6a6's most a frame at 4x, standing in the field)
-        else if (name == "grass_pair_cap") GrassPair(1290000);   // (the most #1877's caps let through: extrapolated)
+        else if (name == "grass_pair_cap") GrassPair(1290000);   // (the most the caps let through: extrapolated)
         else if (name == "buffers") Buffers(false, false);
         else if (name == "buffers_pool") Buffers(true, false);
         else if (name == "buffers_warp") Buffers(false, true);

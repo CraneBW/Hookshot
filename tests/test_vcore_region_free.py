@@ -6,7 +6,7 @@ a large region. With the core held through it, the threads that share the core w
 threads of a higher priority than the one freeing (the game frees on its resource memory thread). And the region left the
 list before its discard: an AllocateAddressRegion meanwhile could be handed the same pages and lose what it wrote to the
 discard. Kept listed, the region is marked as being freed: a second free of the same address meanwhile (the guest freeing
-it twice) must do nothing, not unlist it while the first discard runs (#1610). The actual hos_region_free and
+it twice) must do nothing, not unlist it while the first discard runs. The actual hos_region_free and
 hos_region_alloc are compiled with stand-ins that record, in the discard, whether the thread holds its core, whether the
 region is still listed and whether the list's lock is held:
 
@@ -132,7 +132,7 @@ int main(void) {
     alloc_size = 0x2000000, alloc_in_discard = 0;
     free_region(0x7FFDFF0000ULL, 1);
     check(alloc_in_discard && (alloc_in_discard + 0x2000000 <= 0x7FFDFF0000ULL || alloc_in_discard >= 0x7FFFFF0000ULL),
-          "an allocation while the region is discarded is not handed its pages (#1610)");
+          "an allocation while the region is discarded is not handed its pages");
     check(nregions == 3 && listed(alloc_in_discard, 0x2000000) && !listed(0x7FFDFF0000ULL, 0x2000000),
           "after the discard the region allocated meanwhile stays listed and the freed one is gone");
 

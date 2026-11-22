@@ -1,7 +1,7 @@
-"""A C++ exception that leaves the renderer (#1280, #947). Nothing above hookshot_vk.dll catches one: the host is C, and a renderer
+"""A C++ exception that leaves the renderer. Nothing above hookshot_vk.dll catches one: the host is C, and a renderer
 thread's body is the top of its stack. A std::length_error, a std::system_error from a thread that could not be started or a
 std::bad_alloc then ended the game with exception 0x20474343 ("An unexpected error"), saying nothing of what was thrown; v3.0.0
-still did after the renderer's new_handler (#1291). Now every function the renderer gives the host (gpu/vk/renderer_guard.h),
+still did after the renderer's new_handler. Now every function the renderer gives the host (gpu/vk/renderer_guard.h),
 mkwvk_init, and the bodies of the replay's threads catch a std::exception and stop the game with its type and what() in the log
 (gpu/vk/cxx_escape.h escaped): out of memory through the host's line and notice for std::bad_alloc and a thread that could not be
 started, the renderer's FATAL line for any other. The texture decode's helper threads go through fork_join, where a helper that

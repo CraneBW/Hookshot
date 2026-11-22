@@ -171,7 +171,7 @@ extern Device dev;
 /// ask: a create that compiles nothing (VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT), on the replay thread so a
 /// draw or dispatch never waits for a compile. It never waits here either: while a worker holds the gate, busy is set and
 /// the caller answers VK_PIPELINE_COMPILE_REQUIRED (cold) without asking the driver.
-/// (The UHD's 0x170 read was the pipeline cache's data fetched beside builds, #252, which pcache_fetch_lock keeps apart
+/// (The UHD's 0x170 read was the pipeline cache's data fetched beside builds, which pcache_fetch_lock keeps apart
 /// on its own: the preparation's graphics builds pass the gate on Auto from driver 101.9175, IntelPrepareLane below.)
 bool intel_compiles_side_by_side();   // (vk_menu.cpp: the row as this run started with it)
 bool intel_quick_compute();   // (vk_menu.cpp: the Intel quick compute builds row, as it is now: vk_draw.cpp compute_optimize)
@@ -195,7 +195,7 @@ inline bool intel_gate_on() {
 }
 /// (hookshot) The shader preparation's threads (vk_draw.cpp prepare_run, precompile_warm, precompile_run) while they build:
 /// where intel_prepare_open, their graphics pipelines and shader modules pass the gate side by side (intel_compiles.h
-/// intel_prepare_side_by_side_chosen: on Auto from driver 101.9175, #1706, #2011). Their compute pipelines still take it
+/// intel_prepare_side_by_side_chosen: on Auto from driver 101.9175). Their compute pipelines still take it
 inline thread_local bool intel_prepare_lane_on = false;
 struct IntelPrepareLane {
     bool was = intel_prepare_lane_on;
@@ -279,7 +279,7 @@ void memory_table_begin();                         // (hookshot: a recording's p
 bool memory_table_flush();
 uint64_t memory_guest_pages();                        // (hookshot: the device address of guest memory's page table, 0: none)
 void page_table_census_log(const char* when);         // (hookshot: the guest pools outside the page table's windows, page_table_census.h)
-void import_stats_log(const char* when);              // (hookshot, #859: guest-memory imports made, refused by the driver, held)
+void import_stats_log(const char* when);              // (hookshot: guest-memory imports made, refused by the driver, held)
 void memory_sync();                                   // (at each submit: pools the game made or let go)
 extern std::atomic<int> native_zstd_default;          // (HOS_OPT_NATIVE_ZSTD: 1 or 2 once the device's policy is made, 0 before)
 extern std::atomic<int64_t> memsync_lock_wait_ns;     // (hookshot, diagnostics: time memory_sync waited for its two locks; the slow-submit line)

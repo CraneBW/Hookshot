@@ -1,4 +1,4 @@
-// A C++ exception that leaves the renderer (gpu/vk/cxx_escape.h, renderer_guard.h; #1280, #947), with the real headers and hooks
+// A C++ exception that leaves the renderer (gpu/vk/cxx_escape.h, renderer_guard.h), with the real headers and hooks
 // of its own: the log printed, out of memory printed and exit 4, the FATAL line printed and exit 3 (in the game neither returns).
 // The functions are the real MkwVkRenderer table's members behind guard_renderer, called as the host calls them; the threads are
 // real ones. No game, window or GPU. One case a process: tests/test_cxx_escape.py runs each and reads what it printed.

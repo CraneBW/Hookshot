@@ -501,7 +501,7 @@ static void realtime_step(int64_t now) {
     }
     const uint64_t mod = hos_gfx_module;
     if (!mod) return;
-    {   /* (hookshot, issue #1639) The game's alternating pacing mode: bit 0 of the graphics module's +0x24f, asked for at +0x24e
+    {   /* (hookshot) The game's alternating pacing mode: bit 0 of the graphics module's +0x24f, asked for at +0x24e
            (2: on, 1: off; f_80670d00 from its config's +0xa30 bit 0, carried out by f_8348c680). While it is on, bit 1 flips every
            frame (f_8348c680) and the frame wait (f_8042cd20) takes turns: a frame with both bits sleeps to its frame mark (+0x108)
            plus 1 / the limiter (+0xfc), the next waits for the vsync event (vsync_main, free-running). The frame-time

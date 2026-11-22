@@ -1,8 +1,8 @@
 """The workers a build was asked for (make_game.py --jobs, HOOKSHOT_JOBS), for every step that runs work side by side.
 
-A launcher's "Build workers" (LongshotLauncher's Automatic leaves a quarter of the CPU threads free) reached the compile alone:
+A launcher's "Build workers" (an Automatic that leaves a quarter of the CPU threads free) reached the compile alone:
 the lift's processes, the discovery's, the prompts' and the shader preparation's sized themselves from the CPU count, so an
-update filled every thread whatever the player chose (LongshotLauncher issues 148 and 163: the PC unusable while it built).
+update filled every thread whatever the player chose (the PC unusable while it built).
 make_game.py now puts a count it was given in HOOKSHOT_JOBS for the steps it starts, and each step takes at most that many:
 
   - nx2/chunks.py file_jobs: the lift's emit, its per-file passes and its side process, and nx2/discover.py's walks;

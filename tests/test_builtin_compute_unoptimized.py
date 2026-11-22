@@ -1,7 +1,7 @@
 """The renderer's own compute pipelines are made without the driver's optimizer where it refuses them with it
 (gpu/vk/vk_draw.cpp extern_guarded_compute, gpu/vk/vk_texture.cpp texture_compute_pipeline).
 
-Intel's Windows driver on the Arc A-series (an A580 on 101.9175, #1874) answers VK_ERROR_UNKNOWN (-13) for some optimized
+Intel's Windows driver on the Arc A-series (an A580 on 101.9175) answers VK_ERROR_UNKNOWN (-13) for some optimized
 compute builds that it makes without the optimizer: the game's own dispatches show it in the log ("the optimized build was
 not made (-13); the one without the optimizer stays"). The renderer's own compute pipelines - the GPU ASTC decoder, the BC
 encoders, the GPU unswizzle, the upscale and mask helpers, the write-back diff, the late pages' fix, FSR 3's inputs - were

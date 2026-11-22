@@ -121,7 +121,7 @@ inline bool native_fadd_listed(VkDriverId driver, uint32_t device, uint32_t vers
 /// Intel's Windows driver needs 64 units on older/integrated families where depth and colour programs do not match to the
 /// last bit (issue 17, Arc B390). On discrete Battlemage (0xE2xx, e.g. Arc B570 / B580) the margin's LESS_OR_EQUAL lets
 /// alpha-tested Z-prepass cutouts (fallen leaves, Link's hair, distant tree cards) pass depth where the prepass
-/// discarded them, rendering opaque rectangles (issue #1413); keep it 0 there.
+/// discarded them, rendering opaque rectangles; keep it 0 there.
 inline float equal_depth_bias(VkDriverId driver, uint32_t device) {
     if (driver != VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS) return 0.0f;
     if ((device & 0xFF00u) == 0xE200u) return 0.0f;
@@ -309,7 +309,7 @@ struct DevicePolicy {
     // issue 17, Arc B390); 64 units towards the camera. Not Mesa's (Iris Xe, Mesa 26.2.7: Kakariko, the Death Mountain
     // gate and trail without a hole) and not Battlemage (Arc B570, 101.9175: Castle Town Market and Hyrule Field without
     // a hole), where the margin's LESS_OR_EQUAL passes discarded alpha-tested Z-prepass cutouts as opaque rectangles
-    // (issue #1413) or draws terrain in front of rocks. RX_VK_EQ_BIAS=<units>, 0 off. Read (vk_draw.cpp dynamic_state)
+    // or draws terrain in front of rocks. RX_VK_EQ_BIAS=<units>, 0 off. Read (vk_draw.cpp dynamic_state)
     float equal_depth_bias = 0;
     // AMD but RADV: task and mesh programs built without the driver's optimizer, which hung the GPU (RX 6600, issues 461
     // and 484); on RADV they reset it built without (issue 1000). RX_VK_MESH_OPT. Site (vk_draw.cpp), step 4
@@ -516,7 +516,7 @@ struct DevicePolicy {
     // Linux with 20 GB of RAM or less: the shader modules are let go after the precompile (1.5-1.8 GB); a memory shortfall
     // then does the same on any PC, at the site. RX_VK_DROP_MODULES, RX_VK_KEEP_MODULES. Site (vk_draw.cpp), step 2
     bool drop_modules_small_ram = false;
-    // An unset HOS_NATIVE_ZSTD keeps the zstd decode's virtual core on an Intel integrated GPU (#1632's load freezes) and gives
+    // An unset HOS_NATIVE_ZSTD keeps the zstd decode's virtual core on an Intel integrated GPU (its load freezes) and gives
     // it up elsewhere. Site (host/hos_zstd.c, through HOS_OPT_NATIVE_ZSTD)
     bool native_zstd_keep_core = false;
 };

@@ -34,7 +34,7 @@ int main() {
     CHECK(held_budget(4096 * MB, 5600 * MB, 10023 * MB, 215 * MB, allowed, 85) == 4096 * MB);   // (never more than it was)
     CHECK(held_budget(budget, 300 * MB, 10800 * MB, 0, allowed, 85) == texture_min_floor(allowed)); // (clamped at floor)
     CHECK(held_budget(budget, 5600 * MB, 10023 * MB, 215 * MB, 0, 85) == budget);               // (no allowance known: left alone)
-    {   // past the allowance no floor holds the textures (#939: a GTX 1060 6 GB at 6128 MB of the 5231 it allowed, 1606 MB of
+    {   // past the allowance no floor holds the textures (a GTX 1060 6 GB at 6128 MB of the 5231 it allowed, 1606 MB of
         // textures, under the 1800 MB floor of a card under 8 GB: no rule could take one while the driver paged)
         const uint64_t a = 5231 * MB, total = 1606 * MB, big = 3584 * MB;
         CHECK(texture_min_floor(a) == 1800 * MB);

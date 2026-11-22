@@ -1,8 +1,8 @@
 """The workers a build is asked for reach every step that runs work side by side, not only the compile (nx2/build_jobs.py).
 
-LongshotLauncher's Build workers (its Automatic leaves a quarter of the CPU threads free) gives make_game.py --jobs on Linux and
+A launcher's Build workers (an Automatic that leaves a quarter of the CPU threads free) gives make_game.py --jobs on Linux and
 HOOKSHOT_JOBS on Windows. Only nx2/build.py took it: the lift's processes, the prompts' and the shader preparation's sized
-themselves from the CPU count, so an update filled every thread whatever the player chose (LongshotLauncher #148, #163).
+themselves from the CPU count, so an update filled every thread whatever the player chose.
 Checked here, with no game:
   - build_jobs.requested and cap: 1 or more is a ceiling, None, "" and 0 are automatic, anything else is refused;
   - make_game.main puts a count it was given (--jobs, or HOOKSHOT_JOBS already set) in HOOKSHOT_JOBS for its steps, and none

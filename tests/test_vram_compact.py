@@ -1,7 +1,7 @@
 """Compile and run the VRAM compaction's rules (gpu/vk/vram_compact.h; no game/GPU required), and check that vk_texture.cpp and
 vk_vma.cpp still use them: the textures in a pool of their own unless RX_VK_COMPACT=0, nothing of that pool freed while a pass is
 open, and the budget holding the driver's count with the textures' free space alone taken off, with no texture floor once the
-count is past the allowance (#939).
+count is past the allowance.
 
 python -I -B tests/test_vram_compact.py [--cxx g++]
 """

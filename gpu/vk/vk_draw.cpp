@@ -5422,7 +5422,7 @@ VkResult extern_guarded_graphics(VkPipelineCache cache, const VkGraphicsPipeline
 }
 /// extern_guarded_compute makes the renderer's own compute pipelines (the texture pipelines, the upscale and mask helpers,
 /// the write-back diff, the late pages' fix, FSR 3's inputs, frame generation's passes): one the driver refuses with its
-/// optimizer is asked once more without it. Intel's Windows driver on the Arc A-series (an A580 on 101.9175, #1874) answered
+/// optimizer is asked once more without it. Intel's Windows driver on the Arc A-series (an A580 on 101.9175) answered
 /// VK_ERROR_UNKNOWN (-13) for optimized builds it made without the optimizer: the ASTC decoder refused so, every ASTC texture
 /// was decoded on the CPU (a frame's uploads 30.9 s, the screen black after the opening cutscene); the write-back diff, the
 /// late pages' fix and the upscale helper standing in for a network left out were off. Where the optimized build is made
@@ -9283,7 +9283,7 @@ void mask_stabilize(VkCommandBuffer cmd, Texture* tex, uint32_t level, uint32_t 
         ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr};
         ci.layout = layout;
         // (vk_texture.cpp: through the pipeline cache, and without the optimizer where the driver refuses it. Asked once,
-        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit, #1874)
+        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit)
         if (!m || texture_compute_pipeline(ci, pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
         vkDestroyShaderModule(dev.device, m, nullptr);
         logf("vk: tree-shadow mask blend %s", pipe ? "ready" : "not made");
@@ -10529,7 +10529,7 @@ bool movie_upscale(VkCommandBuffer cmd, uint32_t in_handle, uint32_t out_handle,
         ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr};
         ci.layout = layout;
         // (vk_texture.cpp: through the pipeline cache, and without the optimizer where the driver refuses it. Asked once,
-        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit, #1874)
+        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit)
         if (!m || texture_compute_pipeline(ci, pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
         vkDestroyShaderModule(dev.device, m, nullptr);
         VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -10821,7 +10821,7 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr};
         ci.layout = layout;
         // (vk_texture.cpp: through the pipeline cache, and without the optimizer where the driver refuses it. Asked once,
-        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit, #1874)
+        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit)
         if (!m || texture_compute_pipeline(ci, pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
         vkDestroyShaderModule(dev.device, m, nullptr);
         VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -11381,7 +11381,7 @@ bool pcache_saved_now() {
 /// (hookshot) The threads a preparation step builds graphics pipelines on: want, or where Intel's compiler takes them side by
 /// side only while its gate holds play's (intel_prepare_open: an Arc A-series or Core Ultra on Auto, driver 101.9175 or
 /// newer), as many as the free memory allows (intel_compiles.h intel_prepare_workers: 16 workers side by side on a 16 GB
-/// A730M ran into the commit limit, #1717). Said once a step
+/// A730M ran into the commit limit). Said once a step
 unsigned prepare_pipeline_threads(unsigned want, const char* step) {
     if (!intel_prepare_open()) return want;
     const uint64_t avail = memory_available_mb();

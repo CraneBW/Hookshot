@@ -3,7 +3,7 @@ start smaller and grow.
 
 Frame interpolation's images (vk_framegen.cpp) and FSR 3.1's (vk_fsr3fi.cpp) were let go only when the window's size changed:
 about 150 MB at 2560x1440 2x, 800 MB at 4K 8x, kept for the run by a player who tried it and turned it off. (The BC3 scratch's
-size is #384's.)
+size is an earlier fix's.)
 
 python -I -B tests/test_vram_held_idle.py
 """

@@ -1,5 +1,5 @@
 """A heap past its own budget no longer gets host-visible buffers, and a submit the driver refuses for want of memory is made
-again instead of dropped (a Legion Go, Radeon 780M with 8 GB UMA on AMD's Windows driver; #947, the ROG Ally in #668).
+again instead of dropped (a Legion Go, Radeon 780M with 8 GB UMA on AMD's Windows driver; the ROG Ally too).
 
 On that device the driver has a second device-local heap of 256 MB the CPU can write, of which it allows 243 MB. VMA put the
 staging arenas there (host-visible, read by the GPU's ASTC decoder) whatever that heap held: a save load's staging took it to
@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
         // (the Legion Go's: refused for want of device memory, taken once the GPU is idle and memory given back)
         VkResult r = run({VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_SUCCESS});
         if (driver_calls == 1)
-            std::printf("FAIL: a submit refused for want of memory (-2) is dropped, not made again (#1879)\n"), failures++;
+            std::printf("FAIL: a submit refused for want of memory (-2) is dropped, not made again\n"), failures++;
         expect(r == VK_SUCCESS, "refused twice, then taken: the submit's result is VK_SUCCESS");
         expect(driver_calls == 3 && waits == 2 && told == 2, "each try after a refusal waits for the GPU and tells the next present");
         r = run({VK_ERROR_OUT_OF_HOST_MEMORY, VK_SUCCESS});

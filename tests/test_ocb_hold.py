@@ -13,7 +13,7 @@ time), and so do another manager and a pause in the updates longer than OCB_GAP_
 
 Which map is held, read from a manager laid out as the game's constructor (f_80d32c00) lays it out: the next one asked for,
 else the current one while it loads or is loaded (states 1-4), found among the units in use by its path; none with a direct
-request in. A map that two units name (Hyrule Field lists Gerudo Valley twice; ballotstomper's report on #1870): the
+request in. A map that two units name (Hyrule Field lists Gerudo Valley twice; a player's report): the
 update's choice when it is one of them, else the one that asked for it (+1), else the first; with the rest of the update
 modelled (it asks for the unit it goes on with and lets go of the other units asked for, by path), standing in the second
 unit's radius, or on the edge of another neighbour's, never cancels that map's load (it did at every other update). A manager laid out otherwise (another vtable: another build or class; a path that points away from its own
@@ -210,7 +210,7 @@ int main(void) {
     CHECK(outside == 0);
 
     {   /* (TWO UNITS NAMING ONE MAP, as Hyrule Field lists Gerudo Valley: unit 1, the Lake Hylia side, and unit 4, the
-           valley's gate; ballotstomper's report on #1870. Inside unit 4's radius the update chooses 4 and asks for G, so G
+           valley's gate; a player's report. Inside unit 4's radius the update chooses 4 and asks for G, so G
            is held; were the held unit 1, the first naming G, choice 4 would be held back for unit 1 and the update's
            release of unit 4, by path, would cancel G's load at every other update) */
         const char *G = "Work/Banc/Scene/GerudoValley_Child/GerudoValley_Child.bcett.json";

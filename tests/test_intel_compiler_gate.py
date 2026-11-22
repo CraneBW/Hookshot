@@ -74,7 +74,7 @@ def main():
     linux = block(draw, "VkResult guarded_shader_module(", linux_at)
     need("sigsetjmp(fault_jmp, 1)" in linux and "vkCreateShaderModule" in linux,
          "Linux does not guard vkCreateShaderModule")
-    # (a graphics build passes the gate on a preparation thread where intel_prepare_open, #1706; a compute one never)
+    # (a graphics build passes the gate on a preparation thread where intel_prepare_open; a compute one never)
     for fn, gate_line in (("VkResult cached_graphics(", "IntelDriverGate gate(compiles_nothing(ci->flags), true);"),
                           ("VkResult cached_compute(", "IntelDriverGate gate(compiles_nothing(ci->flags));")):
         body = block(draw, fn)

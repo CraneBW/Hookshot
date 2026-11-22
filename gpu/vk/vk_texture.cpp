@@ -1378,7 +1378,7 @@ void bc_encode_into(VkCommandBuffer cmd, uint32_t w, uint32_t h, uint32_t n, Tex
     // (the buffer's rows and layers given in whole blocks, as the encoder wrote them: blocks_x * blocks_y blocks a layer.
     // Left at 0, the driver worked the layers' pitch out from the extent, and a level not a multiple of 4 leaves that to
     // its rounding: the terrain's material arrays are 1365 x 1365, and on AMD's Windows driver (an RX 6700 XT; an RX 6600
-    // before, ec89f92e) every layer after a run's first came out wrong, Hyrule Field's ground in a grid of dark lines, #2006)
+    // before, ec89f92e) every layer after a run's first came out wrong, Hyrule Field's ground in a grid of dark lines)
     const VkBufferImageCopy c{0, pc.blocks_x * 4, pc.blocks_y * 4, {VK_IMAGE_ASPECT_COLOR_BIT, level, layer, n}, {dx, dy, 0}, {w, h, 1}};
     vkCmdCopyBufferToImage(cmd, bc_out, dst.image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
     full_barrier(cmd);   // (the scratch and the buffer are the next part's)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // (hookshot) When frame generation's images are let go (vk_framegen.cpp framegen_idle): after kIdlePresents presents in a row with
 // it off. A present that recorded made frames counts as on whatever the row says by then: its set is busy until the display thread
-// shows it, and a drain then would wait for a job that is only queued after (the hang #1158's review found: off for 119 presents, a
+// shows it, and a drain then would wait for a job that is only queued after (the hang a review found: off for 119 presents, a
 // present that records with it on and reads Off after). Nothing of Vulkan here: tests/test_framegen_idle.py runs it.
 #pragma once
 #include <cstdint>
@@ -29,7 +29,7 @@ struct Present {
 /// framegen_idle's two counts, and what one present lets go. The shared images (the built-in interpolation's frames and sets,
 /// which every one of them records into) count any recorded present as on; FSR 3.1's own images only a present that used FSR. A
 /// set recorded by DLSS-G or the built-in interpolation leaves them unused: fed `recorded`, the FSR count stayed 0 while another
-/// one ran and its images were kept for the run (#1158's second review)
+/// one ran and its images were kept for the run (a second review)
 struct Counts {
     uint32_t off = 0, fsr_off = 0;
 };

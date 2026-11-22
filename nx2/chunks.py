@@ -80,7 +80,7 @@ def save(img_dir, starts):
     os.makedirs(img_dir, exist_ok=True)
     text = ("# first guest address of each lifted C chunk after the first (nx2/chunks.py)\n"
             + "".join("%08x\n" % s for s in sorted(starts)))
-    whole_write.write_whole(os.path.join(img_dir, FILE), text, sync=True)   # (read by every later lift: issue #765)
+    whole_write.write_whole(os.path.join(img_dir, FILE), text, sync=True)   # (read by every later lift)
 
 
 # (the dev-loop proposal) chunks of ~4 MB, not 24: a change to two functions compiled their two chunks again, 14 and 24 MB, ~4

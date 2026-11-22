@@ -298,7 +298,7 @@ static void menu_side_case(void) {
 /* The player's input hides the game menus' cursor until the mouse moves (host/display.c gm_cursor_shown), so an input
    counts when it goes down, not at every read while it stays down: the ocarina's song sheet is open while ZL is held,
    and a ZL held on a pad or the Z key counted at every read, so the cursor the mouse had just shown was hidden again
-   before the menu used it and its hover failed (Hookshot #1253). Through the real read_input. */
+   before the menu used it and its hover failed. Through the real read_input. */
 static void held_input_case(void) {
     const uint64_t zl = 1ULL << B_ZL, l = 1ULL << B_L;
     front = controls_case = 1;

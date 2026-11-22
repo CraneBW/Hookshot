@@ -2,16 +2,16 @@
 the Core Ultra GPUs (row on Auto, driver 101.9175 or newer); its compute pipelines and play's builds stay one at a time
 (no game/GPU required).
 
-#1706 (Arc A730M) and #2011 (an Arc iGPU, Core Ultra 7 155H), both on driver 101.9175: the preparation took hours, its
+Reports from an Arc A730M and an Arc iGPU (Core Ultra 7 155H), both on driver 101.9175: the preparation took hours, its
 CPU and GPU at 5-8%, as IntelDriverGate (gpu/vk/vk_internal.h) let one thread at a time into the compiler there: the
-row's Auto is side by side only on the Arc B-series (intel_compiles.h). The fault the gate was put in for (#252) was the
-pipeline cache's data fetched beside builds, which pcache_fetch_lock keeps apart by itself (#190).
+row's Auto is side by side only on the Arc B-series (intel_compiles.h). The fault the gate was put in for was the
+pipeline cache's data fetched beside builds, which pcache_fetch_lock keeps apart by itself.
 
 The real gate (vk_internal.h: intel_gate_on, IntelDriverGate and, where there, IntelPrepareLane and intel_prepare_open),
 the real row questions (gpu/vk/vk_menu.cpp) and the real cached_graphics and cached_compute (gpu/vk/vk_draw.cpp) are cut
 out and compiled with stand-ins: a "driver" that counts the builds inside it at once. Four threads build, on a preparation
 thread (IntelPrepareLane) or not, a graphics or a compute pipeline, for an Intel GPU, driver and row value each run. And
-intel_prepare_workers (intel_compiles.h): the workers held to the free memory (#1717, a 16 GB A730M at its commit limit).
+intel_prepare_workers (intel_compiles.h): the workers held to the free memory (a 16 GB A730M at its commit limit).
 
     python -I -B tests/test_intel_prepare_side_by_side.py [--cxx g++]
 """
@@ -35,9 +35,9 @@ B580, A730M, A770, MTL, IRIS_XE, UHD = 0xE20B, 0x5691, 0x56A0, 0x7D55, 0x9A49, 0
 SIDE, ONE = 2, 1
 CASES = [
     (0, A730M, D9175, 1, "g", SIDE, "the preparation's graphics pipelines are one at a time on an Arc A730M, driver 101.9175, "
-                                    "on Auto (#1706: hours, the GPU at 5%)"),
+                                    "on Auto (hours, the GPU at 5%)"),
     (0, MTL, D9175, 1, "g", SIDE, "the preparation's graphics pipelines are one at a time on a Core Ultra's Arc iGPU, driver "
-                                  "101.9175, on Auto (#2011: over 7 hours, the CPU at 8%)"),
+                                  "101.9175, on Auto (over 7 hours, the CPU at 8%)"),
     (0, A770, D9175 + 30, 1, "g", SIDE, "a newer driver than 101.9175 keeps the preparation one at a time"),
     (0, B580, D9154, 1, "g", SIDE, "the Arc B-series (Auto side by side already) is held in the preparation"),
     (1, UHD, D7088, 1, "g", SIDE, "the row's Side by side does not hold in the preparation"),
@@ -158,7 +158,7 @@ def need(cond, why):
 
 def gate_source():
     """vk_internal.h's gate, from intel_gate_on to the end of IntelDriverGate (with the lane between where it is there),
-    Windows' half taken; the lane a stand-in that does nothing where vk_internal.h has none (main before #1706's fix)"""
+    Windows' half taken; the lane a stand-in that does nothing where vk_internal.h has none (main before this fix)"""
     internal = (VK / "vk_internal.h").read_text(encoding="utf-8")
     start = internal.index("inline bool intel_gate_on() {")
     gate = block(internal, "struct IntelDriverGate {")

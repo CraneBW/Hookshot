@@ -868,7 +868,7 @@ static void vc_name_prio(HosThread *t) {
    efficiency ones (i5-1235U) would keep one of the two from the game; then none is kept. The calling thread's
    processor group's cores: the masks the affinity calls take are its group's. On Linux the same choice from
    /sys/devices/cpu_core/cpus (Intel's hybrid CPUs; last_fastest_core below); without that file, the last core, as before.
-   Every way, only among the cores the process may run on wholly (its affinity mask: process_cpus, #522). */
+   Every way, only among the cores the process may run on wholly (its affinity mask: process_cpus). */
 /* (hookshot) The cores that share the largest L3, on a CPU whose cores do not all share one of the same size: AMD's X3D CPUs
    with two CCDs (7900X3D, 7950X3D, 9900X3D, 9950X3D) have the 3D V-Cache on one CCD only (96 MB against 32 MB). Windows
    moves a game there only when its Game Bar knows the program as a game; this one it does not know, so its threads ran on
@@ -911,7 +911,7 @@ static uint64_t process_cpus(void) {
 /* (the choice: the cores' logical processor masks and EfficiencyClass, n of them, among the cores whose logical processors
    are all in allowed (process_cpus); 0 for none. A core outside the process's mask is no candidate and is not counted: the
    replay thread cannot be pinned there (Windows refuses the mask; Linux lets the thread leave the set it was given), and
-   the game's threads would lose a core of the mask's for nothing. As #522's fallback below, which the enhanced choice
+   the game's threads would lose a core of the mask's for nothing. As the earlier fallback below, which the enhanced choice
    skipped: under 0x0FFF of 16 the last core of all, 0xC000, was kept, the replay's pin was refused and the log said it held.
    tests/test_reserved_core.py, tests/test_reserved_core_mask.py) */
 static uint64_t pick_reserved_core(const uint64_t *masks, const unsigned char *classes, int n, uint64_t allowed) {

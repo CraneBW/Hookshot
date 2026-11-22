@@ -6,7 +6,7 @@ next file the game opened (the guest memory's memfd) then took its descriptor, 2
 Steam's Gaming mode hands a non-Steam game its own log pipe on stderr (measured on Deck hardware 2026-11-17: fd/2 is
 an anonymous FIFO drained into Steam's console-linux.txt, a sink the player cannot see). That is not an stderr the
 player controls: the game writes its own log anyway, keyed on Steam's own environment markers — the case the
-steam-pipe and shell-pipe runs check here (#1259).
+steam-pipe and shell-pipe runs check here.
 
 The code is cut out of hos_main.c and run with stubs for the Windows calls it makes. The log's path is made unopenable
 by a file named logs where the folder would be, which no user, root included, can open a file under; the fixture checks
@@ -79,7 +79,7 @@ int main(int real_argc, char **real_argv) {
     strcat(log, "/logs/hookshot_log.txt");
     if (steampipe || shellpipe || steamtty || steamprep) {
         /* (stderr as a pipe, like Steam's srt-logger FIFO or a shell's `game | tee`. Steam sets its marker variable in
-           everything it starts; the game's own log replaces an invisible Steam pipe (#1259) and leaves a chosen pipe
+           everything it starts; the game's own log replaces an invisible Steam pipe and leaves a chosen pipe
            alone. stdin tells Steam's seat from a developer's session holding Steam's markers in a terminal: Steam gives
            its started programs /dev/null on stdin (measured on Deck hardware), a terminal session has a tty there) */
         int fds[2];

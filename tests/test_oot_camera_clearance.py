@@ -1,4 +1,4 @@
-"""The camera's two near-plane clearance inputs retain the game's 16:9 shape (issue 1703).
+"""The camera's two near-plane clearance inputs retain the game's 16:9 shape.
 
 Run the real oot_wide.install and compile its generated after-load code with authored
 registers. Matching picture ratios become 16:9; other values and every other register

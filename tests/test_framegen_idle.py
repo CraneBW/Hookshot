@@ -2,7 +2,7 @@
 that recorded made frames, and the call after the present's queue (gpu/vk/vk_replay.cpp). FSR 3.1's own images by the present's
 own use of FSR (fsr3fi::generate called), not by any recorded set.
 
-Compiles the rule with a small fixture and runs it through present sequences, among them the one #1158's review found: off for
+Compiles the rule with a small fixture and runs it through present sequences, among them the one a review found: off for
 119 presents, then a present that records made frames with it on and reads it Off before the idle check. Before, that present
 counted as the 120th off and drained, waiting for its own set, which only the queue call after it would hand to the display thread.
 And the one its second review found: FSR's count was fed `recorded`, true for a set the built-in interpolation or DLSS-G made, so

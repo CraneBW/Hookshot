@@ -22,14 +22,14 @@ inline bool intel_side_by_side_chosen(int row, uint32_t device, uint32_t version
     return row == 1 || (row == 0 && intel_side_by_side_measured(device, version));
 }
 
-// (hookshot) The shader preparation on the other Intel GPUs, with the row on Auto (#1706, #2011). With one thread in the
+// (hookshot) The shader preparation on the other Intel GPUs, with the row on Auto. With one thread in the
 // compiler it took hours: an Arc iGPU (Core Ultra 7 155H, driver 101.9175) at 77% after 7 h 35 min, its CPU and GPU both
 // at 8%; an Arc A730M at 34% of its pipelines with "about 1187 min left". The same A730M on the same driver with the row
 // on Side by side built 25,005 of 32,623 noted pipelines in 2,753 s on 16 workers (5 to 35 a second) with no driver
-// fault: what ended that run was memory (a 16 GB PC at its commit limit, pipelines refused with -3, #1717).
-// The fault the gate was put in for (#252: igvk64 read 0x170 on a UHD, driver 101.7088) was the pipeline cache's data
+// fault: what ended that run was memory (a 16 GB PC at its commit limit, pipelines refused with -3).
+// The fault the gate was put in for (igvk64 read 0x170 on a UHD, driver 101.7088) was the pipeline cache's data
 // fetched while other threads built into it, which the fetch lock now keeps apart on every Intel GPU on Windows
-// (device_policy.h pcache_fetch_lock, #190). So from driver 101.9175, where side by side was run, the preparation's
+// (device_policy.h pcache_fetch_lock). So from driver 101.9175, where side by side was run, the preparation's
 // graphics pipelines and shader modules go side by side on Auto (vk_internal.h IntelPrepareLane), as many at once as
 // the free memory allows (intel_prepare_workers); play keeps the row's choice. Compute pipelines stay one at a time
 // (the gate, and compute_builds_serial: four at once froze a PC). Before 101.9175 (the Iris Xe's and UHD's legacy

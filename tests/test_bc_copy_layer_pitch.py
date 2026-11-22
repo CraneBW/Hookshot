@@ -4,7 +4,7 @@ An ASTC array kept as BC3 is decoded into a scratch a run of layers at a time, e
 (host_shaders/bc_encoder.comp: block (z * blocks_y + y) * blocks_x + x, 16 bytes each) and copied into the image by
 bc_encode_into. The copy left bufferRowLength and bufferImageHeight at 0, so the layers' pitch in the buffer was the
 driver's to work out from the extent. The terrain's material arrays are 1365 x 1365 x 90: no level is a multiple of 4,
-and on AMD's Windows driver (an RX 6700 XT, #2006; an RX 6600 before, ec89f92e) every layer after a run's first came out
+and on AMD's Windows driver (an RX 6700 XT; an RX 6600 before, ec89f92e) every layer after a run's first came out
 wrong, Hyrule Field's ground in a grid of dark lines, gone at one layer a run (RX_VK_BC_SMALL_LAYERS=1). The check runs
 the real bc_encode_into against stubbed Vulkan calls and needs the copy's rows and layers to be the encoder's, in whole
 blocks, for levels that are and aren't a multiple of 4.

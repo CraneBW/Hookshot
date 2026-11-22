@@ -1,4 +1,4 @@
-"""A thread's stack at Windows' commit limit (issue 1772). A thread's stack is only reserved (the guest's 64 MB,
+"""A thread's stack at Windows' commit limit. A thread's stack is only reserved (the guest's 64 MB,
 host/hos_thread.c), each page committed as it grows. At the commit limit Windows can't commit the next one and raises a stack
 overflow (0xc00000fd) with the stack nearly unused: a 24 GB PC at its limit crashed so on PreActorModelCompose. Guest memory
 already waits there for the renderer to give commit back (commit_wait); a stack now does too, and goes on.

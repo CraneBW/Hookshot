@@ -1,4 +1,4 @@
-"""A damaged chunks.txt is ignored, and chunks.save replaces it whole (nx2/chunks.py, issue #765).
+"""A damaged chunks.txt is ignored, and chunks.save replaces it whole (nx2/chunks.py).
 
 <work>/image/chunks.txt (the lift's chunk boundaries) outlives the lift, and the launcher's completely cold build keeps image/.
 On Windows a PC that went down while the file was being written left it full of null bytes, and every later lift stopped in

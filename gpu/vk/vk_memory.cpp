@@ -595,7 +595,7 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
 #endif
     // (the memory types this pointer can be imported as: asked for each pointer, the driver answers per pointer)
     VkMemoryHostPointerPropertiesEXT hp{VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
-    // (#859: each driver refusal leaves its VkResult in import_result, for pool_lookup's "not imported" line)
+    // (each driver refusal leaves its VkResult in import_result, for pool_lookup's "not imported" line)
     if (const VkResult r = vkGetMemoryHostPointerPropertiesEXT(dev.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
                                                                ptr, &hp);
         r != VK_SUCCESS) {
@@ -4575,7 +4575,7 @@ std::deque<std::pair<uint64_t, uint64_t>> bg_queue;
 std::map<uint64_t, uint64_t> bg_inflight;   // [lo, hi) queued or being imported, under bg_mu
 std::vector<std::pair<uint64_t, Pool>> bg_ready;
 int64_t st_bg_imports, st_bg_waits, st_prefetch_sent, st_prefetch_used, st_prefetch_dropped;
-// (hookshot, #859) pool_lookup's import attempts, counted apart by how they ended: made, refused by the driver (import_pool
+// (hookshot) pool_lookup's import attempts, counted apart by how they ended: made, refused by the driver (import_pool
 // failed after asking it), or held: the range failed within ImportHolds::kGapMs, so import_pool returned at once without
 // asking the driver. A held retry is no import: counted as one, a range the driver refused showed as a million imports in
 // 0.0 ms. Read at close (import_stats_log) from another thread, so atomic.

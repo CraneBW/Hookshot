@@ -2341,7 +2341,7 @@ static int game_main(int argc, char **argv) {
             if (!strcmp(argv[i], "--prepare-shaders")) prepare_only = 1;
         /* (Steam's Gaming mode hands the game its own log pipe on stderr — measured on Deck hardware 2026-11-17: fd/2 is an
            anonymous FIFO shared with Steam, drained into Steam's console-linux.txt. The player cannot see that sink, and a
-           Gaming-mode crash report came with no game log (#1259): the game saw "external stderr" and wrote no file, while
+           Gaming-mode crash report came with no game log: the game saw "external stderr" and wrote no file, while
            the report collector read the game folder's logs/ and found nothing. Steam's own pipe counts as
            nowhere-to-log-to like /dev/null does: the game writes its own log, and the crash report's readlink of fd/2
            then finds a regular file, exactly as in Desktop mode. Two things say this pipe is STEAM's rather than a
@@ -2665,7 +2665,7 @@ static DWORD WINAPI game_thread(void *p) {
    it to the limit (1026 MB) and the pipelines it dropped were compiled again in play. Mesa's (RADV, ANV) has the same 1 GiB default.
    Raised for this process only, before anything loads Vulkan; a value the player set (or hookshot_env.txt) is kept. Windows: the
    NVIDIA driver takes its size from the control panel's Shader Cache Size alone (no environment variable), for every program;
-   the launcher raises it through NVIDIA's driver settings (LongshotLauncher's DriverSettings.RaiseShaderCache), and the game
+   a launcher can raise it through NVIDIA's driver settings, and the game
    reads it for the log and the pipeline cache file's rule (gpu/vk/nvidia_cache_limit.h) */
 static void driver_cache_room(void) {
     setenv("__GL_SHADER_DISK_CACHE_SIZE", "10737418240", 0);   /* (10 GiB, bytes) */

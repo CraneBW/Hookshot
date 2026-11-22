@@ -62,7 +62,7 @@ def check_source():
         raise SystemExit("guarded_compute_held is reached by something else than the three gated callers: %r"
                          % callers["guarded_compute_held"])
     # (the two wrappers: guarded_compute_held, which counts the driver running out of memory, and extern_guarded_compute,
-    # which asks once more without the optimizer when the driver refuses the optimized build, #1874)
+    # which asks once more without the optimizer when the driver refuses the optimized build)
     wrapper_lines = ("return note_out_of_memory(guarded_compute(cache, ci, pl));", "VkResult r = guarded_compute(cache, ci, pl);",
                      "const VkResult p = guarded_compute(cache, &plain, pl);")
     wrappers = [line for line in callers["guarded_compute"] if line in wrapper_lines]

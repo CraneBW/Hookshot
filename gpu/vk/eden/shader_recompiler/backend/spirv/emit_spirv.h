@@ -63,7 +63,7 @@ constexpr u32 MESH_FALLBACK_ALLOC_WORD = 4;       // (records taken, past the en
 constexpr u32 MESH_FALLBACK_DISPATCH_WORD = 5;
 constexpr u32 MESH_FALLBACK_HEADER_WORDS = 8;
 // (128 MB. Every program takes records from it, so a program with longer records fits fewer: MeshFallbackFit. At 16M words
-// the floor grass at the Grass distance's 4x (#1877) lost its blades: their program's records are 22 words and fit 762600,
+// the floor grass at the Grass distance's 4x lost its blades: their program's records are 22 words and fit 762600,
 // its partner's 7 words, and each drew ~1.02M records a frame, so the blades past the fit were left out and drawn white.
 // 32M words fit 1.52M of 22 words)
 constexpr u32 MESH_FALLBACK_RECORD_WORDS = 32u << 20;

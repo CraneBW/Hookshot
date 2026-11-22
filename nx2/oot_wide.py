@@ -49,7 +49,7 @@ def _ratio(vreg, base=None):
 
 
 def _clearance(vreg):
-    """The camera's near-plane clearance sphere keeps the game's ratio, not the picture's (issue 1703)."""
+    """The camera's near-plane clearance sphere keeps the game's ratio, not the picture's."""
     return VectorOnly("{ extern volatile float hos_wide_ratio; const float _w = hos_wide_ratio; "
             "if (_w > 0.0f && _w != (16.0f / 9.0f)) { float _r; memcpy(&_r, c->vreg[%d], 4); "
             "if (_r == _w) { "

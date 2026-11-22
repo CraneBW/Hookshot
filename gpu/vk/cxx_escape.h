@@ -1,8 +1,8 @@
-// (hookshot, #1280, #947) A C++ exception that leaves the renderer. Nothing above hookshot_vk.dll catches one: the host is C, and
+// (hookshot) A C++ exception that leaves the renderer. Nothing above hookshot_vk.dll catches one: the host is C, and
 // a renderer thread's body is the top of its stack. So a std::length_error from a vector, a std::system_error from a thread that
 // could not be started, or a std::bad_alloc ended the game with exception 0x20474343 (llvm-mingw's code for a C++ exception nothing
 // caught), "An unexpected error", and no word of what was thrown or where. v3.0.0 still did, with the renderer's new_handler
-// (vk_main.cpp new_refused, #1291), and several of its reports have no "a C++ allocation refused" line before the crash: what
+// (vk_main.cpp new_refused), and several of its reports have no "a C++ allocation refused" line before the crash: what
 // was thrown there was not a refused operator new.
 // Here the ways out of the renderer catch a std::exception and stop the game with what it was: every function it gives the host
 // (renderer_guard.h, and mkwvk_init), and the bodies of the replay's own threads (the replay, the presenter, the order watch:

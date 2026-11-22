@@ -66,7 +66,7 @@ static int deep(int n) {
     return deep(n - 1) + buf[0];
 }
 /* (512-byte frames: the stack pointer itself is in the page Windows committed when the next one is refused, so the handler
-   has under 4 KB to run on, as in the game's ucrtbase.dll frames of #1772 and #1919) */
+   has under 4 KB to run on, as in the game's ucrtbase.dll frames in the reports) */
 static int shallow(int n) {
     volatile char buf[480];
     buf[0] = (char)n;

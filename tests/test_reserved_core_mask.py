@@ -1,6 +1,6 @@
 """The reserved core is one the process may run on, on every path, and the replay thread's log says where it really runs.
 
-hos_reserved_cpus (host/hos_thread.c) keeps a core for the replay. #522 kept its fallback to the cores whose logical
+hos_reserved_cpus (host/hos_thread.c) keeps a core for the replay. An earlier fix kept its fallback to the cores whose logical
 processors are all in the process's affinity mask (a launcher's, `start /affinity`, Process Lasso's, taskset's), but the
 Windows choice of the last core of the fastest kind (last_fastest_core, its legacy twin) and Linux's hybrid one returned
 before that check: under 0x0FFF of 16 the last core of all, 0xC000, was kept. The replay thread's SetThreadAffinityMask to it
@@ -266,7 +266,7 @@ int main() {
     RESERVED(lon, 0xFFF00, 0x80000); // (the efficiency cores alone: the fastest kind the process has)
     eight_smt();
     RESERVED(lon, 0xFFFF, 0xC000);
-    RESERVED(lon, 0x0FFF, 0x0C00);   // (#522's fallback, as before)
+    RESERVED(lon, 0x0FFF, 0x0C00);   // (the earlier fallback, as before)
 
     // (checker) no mask, a mask that cannot be read (0: Windows, a process with threads in several groups; Linux, a process
     // on CPUs >= 64 only) and a failing call: exactly the core the base kept, on every path

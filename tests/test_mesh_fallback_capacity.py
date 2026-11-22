@@ -1,9 +1,9 @@
-"""The compute fallback's records area holds the floor grass at the Grass distance's 4x (#1877), without game files or a GPU.
+"""The compute fallback's records area holds the floor grass at the Grass distance's 4x, without game files or a GPU.
 
 Every mesh program on the fallback takes its records from one fixed area (emit_spirv.h MESH_FALLBACK_RECORD_WORDS), so a program
 with long records fits fewer: the grass's blades (records of 22 words) were held at 762528 records a frame at 4x while their
 partner program (7 words) drew ~1.02M, and the blades it left out were drawn white. tests/mesh_fallback_capacity_test.cpp
-gives both programs the same workgroups at the measured load and at the load #1877's caps reach, with the real
+gives both programs the same workgroups at the measured load and at the load the caps reach, with the real
 MeshFallbackFit, and checks they draw the same records, every one. Then it calls vk_draw.cpp's real fallback_buffers_of (cut
 out here), with the attribute pool and the shared warp's counters off and on, and checks the records buffer that area needs is
 made: past its limit fallback_buffers_of refuses it, and every program's fallback with it.
