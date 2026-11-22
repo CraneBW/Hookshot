@@ -2373,8 +2373,7 @@ static int game_main(int argc, char **argv) {
                           window that can't be reserved, an image that can't be opened) writes its line direct —
                           physically before the queued banner, so the crash dialog's reader gated at the run's
                           run_id would never see the failure it is there to explain. The flush costs one write at
-                          start, and the report keeps both the version and the startup-failure line (issue #1374,
-                          review round three)) */
+                          start, and the report keeps both the version and the startup-failure line) */
     hos_game_layout_log();
     driver_env_log();
     void hos_crash_record_log_notes(void);

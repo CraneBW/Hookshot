@@ -263,8 +263,7 @@ static int log_is_run(const char *path, const char *run_id, uint64_t *at) {
     uint64_t taken = 0;
     uint64_t banner_at = 0;   /* (this run's own "] hookshot <version>" line: the one nearest before its run_id.
                                 The run logs the banner first and the run id next, back to back, and the report
-                                needs the version — a gate that starts at the run_id line always drops it (issue
-                                #1374, review round three). Facts of an earlier run in an inherited log sit before
+                                needs the version — a gate that starts at the run_id line always drops it. Facts of an earlier run in an inherited log sit before
                                 this banner, so they stay out; the line parser takes "] hookshot " as the version. */
     int have_banner = 0;
     for (; taken < (256ull << 20) && fgets(line, sizeof line, f);) {

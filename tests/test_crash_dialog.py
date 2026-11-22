@@ -733,7 +733,7 @@ def behaviour(cc, tmp):
     assert boxes(got) == ["Hookshot couldn't start"] and "Vulkan 1.3" in got[0][1], got
     _, got = game("relaunch", ends=2)
     assert boxes(got) == [], "a restart in the same process (execve) says nothing, from the old helper or the new"
-    # issue #1374: the run after a Restart now appends to the log the run before left, at that run's offset; any
+    # the run after a Restart now appends to the log the run before left, at that run's offset; any
     # play session is past 8 KB, and the report searched only the log's first 8192 bytes for its run_id line, so its
     # own crash said "the game logged to no file" while its lines sat in the file past the window.
     filler = ["filler line %04d and some more text to reach past the window" % i for i in range(400)]
@@ -746,7 +746,7 @@ def behaviour(cc, tmp):
     assert clip.startswith("Hookshot crash report"), ("Report manually copies the full report", clip[:120])
     assert "Not found: the game logged to no file" not in clip, \
         "the restarted run's report says the game logged to no file: its run_id line sits at %d bytes, past the " \
-        "old 8 KB head window, and find_run_log never looked further (issue #1374)" % sum(len(x) + 1 for x in filler)
+        "old 8 KB head window, and find_run_log never looked further" % sum(len(x) + 1 for x in filler)
     assert "RESTARTED-TAIL-MARKER" in clip, "the restarted run's report must carry its own log tail"
     print("PASS: the run after a Restart now: its crash report finds the deep run_id line and carries the log tail")
     # round two (review): the file holds TWO runs now — the facts the report reads (map, stage) must come from this
@@ -760,7 +760,7 @@ def behaviour(cc, tmp):
     assert "during the start" in box, \
         "the restarted run's box names the stage from its own run: the run before loaded a map, this one never did"
     assert "Map: Kokiri" not in clip and "Map: Title and intro" in clip, \
-        "the restarted run's report keeps the run before's map as its own (issue #1374, review): the facts must be " \
+        "the restarted run's report keeps the run before's map as its own: the facts must be " \
         "read from the located run_id line on, not from byte zero of the shared log"
     assert "RESTARTED-START-MARKER" in clip, "the restarted run's own line is still in its tail"
     print("PASS: the run after a Restart now: facts (map, stage) come from its own lines, not the run before")
@@ -776,11 +776,9 @@ def behaviour(cc, tmp):
     clip = next((e[1] for e in got if e[0] == "CLIP"), "")
     assert "Version: vlog-9" in clip and "Version: vrec-7" not in clip, \
         "the restarted run's report lost the version from its own log: the gate started at the run_id line, one " \
-        "line after the version banner, and the report fell back to the crash record (issue #1374, review round " \
-        "three): %s" % [l for l in clip.splitlines() if l.startswith("Version")][:1]
+        "line after the version banner, and the report fell back to the crash record: %s" % [l for l in clip.splitlines() if l.startswith("Version")][:1]
     assert "Map: Kokiri" not in clip, \
-        "reaching back to this run's banner must not reach back past it: the run before's map is still out " \
-        "(issue #1374, review round three)"
+        "reaching back to this run's banner must not reach back past it: the run before's map is still out"
     print("PASS: the report's version comes from the run's own banner, and the gate still excludes the run before")
     # round three, P2 (Windows): hos_log batches up to 250 ms, and the startup failures write straight to stderr —
     # physically BEFORE the queued banner — so a reader gated at the run's boundary would never see the failure.
@@ -790,8 +788,7 @@ def behaviour(cc, tmp):
     at_banner = main_c.index('hos_log("run_id: %s"')
     assert "hos_log_flush();" in main_c[at_banner:at_banner + 900], \
         "the run's banner and run_id are not on disk before the direct-stderr startup diagnostics can write: on " \
-        "Windows the batched logger lands after them and the startup-failure box loses its log (issue #1374, " \
-        "review round three)"
+        "Windows the batched logger lands after them and the startup-failure box loses its log"
     for mode, extra in (("crash", {"HOS_HEADLESS": "1"}), ("crash", {"HOS_CRASH_WATCH": "0"}), ("prepare", {}),
                         ("crash", {"HOS_PGO": str(tmp / "pgo")}), ("crash", {"GAMESCOPE_WAYLAND_DISPLAY": "gamescope-0"}),
                         ("crash", {"XDG_CURRENT_DESKTOP": "gamescope"})):
