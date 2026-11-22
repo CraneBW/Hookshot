@@ -697,7 +697,7 @@ SW(RX_VK_MMA_B_ORDER, diag, string, "the element order measured on the GPU at st
 SW(RX_VK_MMA_C_ORDER, diag, string, "the element order measured on the GPU at start-up", "Gives matrix C's cooperative-matrix element order as a comma list instead of the measured one, and skips the layout test.")
 SW(RX_VK_MMA_NO_COOP, attempt, bool, "off (cooperative matrices used when the device has them)", "1 pretends the device has no cooperative matrices, so the software multiplies are used.")
 SW(RX_VK_MMA_SOFTWARE, attempt, bool, "off (native cooperative matrices where the device has and passes them)", "1 forces the upscale networks' matrix multiplies into a software shader function, with no cooperative matrices.")
-SW(RX_VK_MMA_UNROLL, hw, bool, "on for Mesa RADV, off (the loop) elsewhere; only where matrix multiplies run in software", "0 keeps the looped software matrix multiply, 1 tries the unrolled forms on any GPU.")
+SW(RX_VK_MMA_UNROLL, hw, bool, "on for Mesa RADV and AMD RDNA 4 on AMD's proprietary driver, off (the loop) elsewhere; only where matrix multiplies run in software", "0 keeps the looped software matrix multiply, 1 tries the unrolled forms on any GPU.")
 GONE(RX_VK_MODULE_IDS, "2026-11-16", "it does nothing: shader module identifiers are used wherever the device has them")
 GONE(RX_VK_MOVIE_BLIT, "2026-11-16", "it does nothing: the movie's linear upscale always runs in the compute shader")
 SW(RX_VK_MOVIE_UPSCALE, attempt, enum, "automatic: movie networks are replaced by a linear upscale only where they cannot run or measure too slow", "=linear always replaces the movie upscaler networks with a linear upscale; anything else is automatic.")
