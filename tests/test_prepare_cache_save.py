@@ -1,4 +1,4 @@
-"""Exercise the Builder's state-list import and cache save with game-free call stubs."""
+"""Exercise FSR 4 warm-up ordering, state-list import and cache save with game-free call stubs."""
 import argparse, os, struct, subprocess, tempfile
 from pathlib import Path
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
@@ -79,6 +79,7 @@ bool state_list_pending(){return false;}   // (no shipped list newer than the pr
 void state_list_run(){std::exit(4);}
 void pipeline_cache_save(bool force){if(!force)std::exit(2);calls.push_back(3);}
 std::string skipped_path(){return "sentinel";}
+void fsr4_prepare_shaders(){calls.push_back(7);}
 void prepare_watchdog(){}   // (vk_main.cpp: the run's watchdog, tests/test_prepare_stall.py)
 void prepare_moved(int,size_t,size_t){}
 bool prepare_left_workers(){return false;}
@@ -112,7 +113,7 @@ int main(int argc,char** argv){
  empty_states=mode=="empty";
  pending=mode=="pending";
  all_mode=std::string(argv[2])=="all";
- std::vector<int> want{1};
+ std::vector<int> want{7,1};
  if(!fresh_seed)want.push_back(6);
  if(std::string(argv[3])=="1")want.push_back(5);
  for(int call:{2,3,4})want.push_back(call);
