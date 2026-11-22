@@ -156,8 +156,8 @@ Without mesh shaders, Hookshot draws through its compute fallback, which leaves 
 2. **Look in `hookshot_log.txt` for `is damaged in this copy of the game`.** Game files that Hookshot Builder didn't
    unpack (copied from another tool, or by hand) get no `hookshot_damaged_files.txt`. The game then reads a similar
    texture in place of each damaged one as it plays, writes nothing to your game files, and logs one line per file.
-   Without it, the Great Fairy Fountain's damaged floor cost about a third of the frame rate in Kokiri Forest and
-   Castle Town's market.
+   Without it, the Great Fairy Fountain's damaged floor cost about a third of the frame rate in the starting forest
+   and the castle town's market.
 3. **Dump the game again** and build from the new dump. The file and the lines go once the dump is whole.
 
 [Search texture reports](https://hookshot.magicbean.dev/progress/#problem-search?q=texture)
