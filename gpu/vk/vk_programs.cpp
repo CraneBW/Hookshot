@@ -362,7 +362,7 @@ std::atomic<bool> struck_last_session{false};   // (load_default.h: the session 
 void programs_load_decide(bool native_mesh) {
     struck_last_session = load_default::strike_take(load_fallback_path());
     const load_default::Choice c = load_default::choose(getenv("RX_VK_LOAD"), native_mesh, load_default::marker_there(load_fallback_path()),
-                                                        env_on("RX_VK_PROGRAM_CACHE_ZSTD"));   // (as vk_progcache.cpp disk_init reads it)
+                                                        env_on("RX_VK_PROGRAM_CACHE_ZSTD"), precompile_wanted());   // (as vk_progcache.cpp disk_init reads it)
     load_mode.store(c.create ? 1 : 0, std::memory_order_release);
     logf("vk: programs are loaded %s: %s (RX_VK_LOAD=create or start says which)",
          c.create ? "when the game makes them (create)" : "before the title (start)", c.why);
@@ -376,6 +376,7 @@ namespace {
 std::atomic<int64_t> wait_worst_ns{0}, wait_long_ns{0};
 std::atomic<bool> wait_marked{false}, wait_struck{false};
 void load_wait_note(int64_t ns) {
+    if (!precompile_wanted()) return;
     int64_t worst = wait_worst_ns.load(std::memory_order_relaxed);
     while (ns > worst && !wait_worst_ns.compare_exchange_weak(worst, ns)) {}
     if (!load_default::counts(ns / 1e6)) return;
@@ -401,6 +402,7 @@ void load_wait_note(int64_t ns) {
 }
 
 void programs_index(std::vector<NoteRef> notes, const std::unordered_set<uint64_t>& compute_keys) {
+    if (index_ready.load(std::memory_order_acquire)) return;
     const auto t0 = Clock::now();
     std::unordered_set<uint64_t> seen;
     for (const NoteRef& n : notes) {
@@ -455,7 +457,7 @@ void module_ids_on() {
 }
 
 void programs_frames_note() {
-    if (!programs_load_at_create()) return;
+    if (!programs_load_at_create() || !precompile_wanted()) return;
     // (what the loads at create calls asked of the caches and no cache had: load_work counts them)
     const long long lacked = census.load_pipes_cold.load(std::memory_order_relaxed) + census.load_computes_cold.load(std::memory_order_relaxed);
     if (!load_default::caches_lacked(lacked) || wait_marked.exchange(true)) return;

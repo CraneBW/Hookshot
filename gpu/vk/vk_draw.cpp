@@ -13856,6 +13856,7 @@ void program_fingerprinted(uint64_t fp) {
 }
 
 void pipeline_cache_play() {
+    pcache_init();   // (the play cache's generations need the pipeline cache's dir, also where no preparation or index ran)
     play_cache_begin();
     programs_play_begin();   // (the census: what is made from here on is made in play)
 #ifdef __linux__
