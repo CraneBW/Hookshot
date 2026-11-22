@@ -453,7 +453,8 @@ bool pick_device() {
 /// an Arc B390, 0xB080, with 101.9150 in Kokiri Forest, the loop lost adds of the same light sums, the
 /// scene's exposure came out about 8x too high from the sky on, and a milky white haze covered the picture; the native add
 /// gave the picture a B580 shows, and the device was not lost in 40 minutes of play, where the loop lost it at 499dbfd0 on
-/// Battlemage). Intel's other GPUs on Windows (Iris Xe and UHD, Arc A-series, Lunar Lake), older drivers, AMD's RDNA 3
+/// Battlemage); and the Xe2 iGPUs of Lunar Lake (PCI device 0x64xx) from 101.8991 on (an Arc 140V, 0x64A0). Intel's other
+/// GPUs on Windows (Iris Xe and UHD, Arc A-series), older drivers, AMD's RDNA 3
 /// and later and Mesa's Intel driver report the feature too but were not tried: they keep the loop unless the switch asks,
 /// until runs on them say otherwise
 static bool native_fadd_wanted(const char* env, VkDriverId driver, uint32_t device, uint32_t version) {
@@ -605,7 +606,7 @@ bool create_device() {
     // (hookshot) the GPU's own float add on storage buffers: the game's RED/ATOM.ADD.F32 become one OpAtomicFAddEXT instead
     // of a compare-exchange loop, which gives up after CAS_LOOP_MAX_TRIES attempts and loses that add (eden
     // spirv_emit_context.cpp DefineStorageBuffers). By default with NVIDIA's driver, and Intel's Windows driver on the
-    // Meteor Lake, Arrow Lake and Panther Lake iGPUs and the Arc B-series (native_fadd_wanted); RX_VK_NATIVE_FADD=1 asks for it on any GPU, =0 keeps the loop
+    // Meteor Lake, Arrow Lake, Panther Lake and Lunar Lake iGPUs and the Arc B-series (native_fadd_wanted); RX_VK_NATIVE_FADD=1 asks for it on any GPU, =0 keeps the loop
     // on every one, the extension not even enabled
     const char* const fadd_env = getenv("RX_VK_NATIVE_FADD");
     const bool fadd_wanted = native_fadd_wanted(fadd_env, fadd_driver.driverID, dev.props.deviceID, dev.props.driverVersion);
@@ -829,10 +830,10 @@ bool create_device() {
                                                      : "compare-exchange loop (no VK_EXT_shader_atomic_float)";
         if (fadd_env) logf("vk: float atomic add on storage buffers: %s, RX_VK_NATIVE_FADD=%s", how, fadd_env);
         else logf("vk: float atomic add on storage buffers: %s, %s", how,
-                  !fadd_wanted ? "by default only with NVIDIA's driver and Intel's Windows driver on Meteor Lake, Arrow Lake, Panther Lake and Battlemage "
+                  !fadd_wanted ? "by default only with NVIDIA's driver and Intel's Windows driver on Meteor Lake, Arrow Lake, Panther Lake, Lunar Lake and Battlemage "
                                  "(RX_VK_NATIVE_FADD=1: native where the GPU has it)"
                   : fadd_driver.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY ? "NVIDIA's driver"
-                                                                            : "Intel's Windows driver, Meteor Lake, Arrow Lake, Panther Lake or Battlemage");
+                                                                            : "Intel's Windows driver, Meteor Lake, Arrow Lake, Panther Lake, Lunar Lake or Battlemage");
     }
     // (bounds-checked buffer access: an out-of-range access dropped instead of faulting the device. On by default: the GPU
     // culling pass 53caac5f faulted the device while a save loaded, about one start in three, and the scene's lighting read garbage
