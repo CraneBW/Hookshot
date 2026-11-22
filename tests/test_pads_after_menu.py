@@ -144,7 +144,7 @@ def main():
         block(hid, "void hos_filter_stick("),
         re.search(r"^static volatile int xinput_pads_now;.*$", hid, re.M).group(0),
         block(hid, "static void pads_read("),
-        merge, "static void game_pads(uint64_t *buttons, int32_t stick[4]) { (void)pads_merge(buttons, stick); }",
+        merge, "static void game_pads(uint64_t *buttons, int32_t stick[4]) { (void)pads_merge(buttons, stick, NULL); }",
         MAIN))
     with tempfile.TemporaryDirectory(prefix="hookshot-pads-after-menu-") as tmp:
         src = Path(tmp) / "t.c"

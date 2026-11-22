@@ -13,6 +13,9 @@ another window as in front, the pads are the Insert menu's while it is open, and
 menu-side-buttons: while one of the game's menus has the mouse, its side buttons stay their controls' (Mouse 4 on A
 confirms a choice); the left button stays that menu's click.
 
+held-input: an input held down is the player's input (the game menus' cursor hides by it) when it goes down, not at every
+read while it stays down, so the mouse's hover works while ZL is held for the ocarina's song sheet (Hookshot #1253).
+
 python -I -B tests/test_input_background.py [--cc gcc]
 """
 import argparse
@@ -35,7 +38,7 @@ CASES = ("foreground", "script-background", "script-background-switch", "headles
          "no-script-background", "exclusive-foreground", "exclusive-background", "pads-env", "pads-menu", "pads-off",
          "pads-insert",
          "frame-hold", "live-frame", "reuse-frame", "wall", "zero", "empty", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle",
-         "hold-taps", "menu-side-buttons")
+         "hold-taps", "menu-side-buttons", "held-input")
 
 
 def game_keys(hid):
@@ -102,7 +105,7 @@ void hos_oot_autoload_input(void) {}
     host_spies = """
 static void host_stick_read(int32_t stick[4]) { (void)stick; }
 static void host_drag_read(int32_t stick[4]) { (void)stick; }
-static void player_used(void) {}
+static void player_used(void) { player_stamps++; }
 uint64_t hos_pausebtn_buttons(uint64_t buttons, uint64_t a) { (void)a; return buttons; }   /* (host/oot_pause_menu.c: not on a pause menu) */
 uint64_t hos_wheel_input(uint64_t buttons, int32_t stick[4]) { (void)stick; return buttons; }   /* (host/oot_wheel.c: the item wheel closed) */
 """
@@ -147,7 +150,7 @@ uint64_t hos_wheel_input(uint64_t buttons, int32_t stick[4]) { (void)stick; retu
              "-I" + str(folder), str(ROOT / "tests/input_background_test.c"), "-o", str(exe)])
         for case in ((a.case,) if a.case else CASES):
             case_env = dict(env)
-            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "pads-insert", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle", "hold-taps", "menu-side-buttons"):
+            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "pads-insert", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle", "hold-taps", "menu-side-buttons", "held-input"):
                 case_env["HOS_INPUT_SCRIPT"] = "0:A+LUP/200"
             if case in ("frame-hold", "live-frame", "reuse-frame"):
                 case_env["HOS_INPUT_FRAME_CLOCK"] = "1"

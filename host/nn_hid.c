@@ -1042,10 +1042,11 @@ static uint64_t oc_pad_word(uint64_t buttons) {
    are its own, as the keyboard is (key()), and after it closed until they are let go (the press that closed it never
    reaches the game). They are read either way, so the letting go is seen. Whether they were used (a button, or a stick
    past a third) */
-static int pads_merge(uint64_t *buttons, int32_t stick[4]) {
+static int pads_merge(uint64_t *buttons, int32_t stick[4], uint64_t *down) {
     uint64_t pb = 0;
     int32_t ps[4] = {0};
     pads_read(&pb, ps);
+    if (down) *down |= pb;   /* (the pads' buttons down at this read: read_input's player's input check) */
     /* (each input the Insert menu had waits until it is let go; the others and the sticks count again at once, so one input
        that stays down, a worn trigger or a second pad, no longer keeps the rest from the game) */
     static int menu_was;
@@ -1057,8 +1058,8 @@ static int pads_merge(uint64_t *buttons, int32_t stick[4]) {
         *buttons |= pad_after_menu ? bound_pad_buttons(pad_raw_game & ~pad_after_menu) : pb;
         stick_max(stick, ps);
     }
-    return pb || ps[0] > 12000 || ps[0] < -12000 || ps[1] > 12000 || ps[1] < -12000 || ps[2] > 12000 || ps[2] < -12000 ||
-           ps[3] > 12000 || ps[3] < -12000;
+    return ps[0] > 12000 || ps[0] < -12000 || ps[1] > 12000 || ps[1] < -12000 || ps[2] > 12000 || ps[2] < -12000 ||
+           ps[3] > 12000 || ps[3] < -12000;   /* (a stick pushed; the buttons count by *down) */
 }
 /* (hookshot) Walking on the keyboard. The movement keys push the left stick to its edge, so on the keyboard Link always
    ran. While the Walk control's key is held (Caps Lock unless the Controls page changes it), or with the Controls tab's
@@ -1133,14 +1134,20 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
         static const char *env;
         static int looked;
         if (!looked) looked = 1, env = getenv("HOS_INPUT_BACKGROUND");
-        if (pads_in_background(env, rx_option(4, 0))) pads_merge(buttons, stick);
+        if (pads_in_background(env, rx_option(4, 0))) pads_merge(buttons, stick, NULL);
         walk_held(0, 0, rx_option(HOS_OPT_WALK_MODE, 0) == 1);   /* (behind: a toggled walk is kept) */
         return;
     }
-    if (pads_merge(buttons, stick)) player_used();
+    uint64_t down = 0;   /* (the pads' buttons and the bound keys down at this read) */
+    if (pads_merge(buttons, stick, &down)) player_used();
     binds_load();   /* (the keys: key_default's, or hookshot_options.ini's; the mouse's buttons once its capture is known) */
     for (int i = 0; i < HOS_SW_N; i++)
-        if (bound_down(i, 0)) *buttons |= 1ULL << i, player_used();
+        if (bound_down(i, 0)) *buttons |= 1ULL << i, down |= 1ULL << i;
+    /* (a button or a key counts as the player's input when it goes down, not at every read while it stays down: held, as
+       ZL is for the ocarina's song sheet, it kept the game menus' cursor hidden, which the mouse shows by moving) */
+    static uint64_t down_was;
+    if (down & ~down_was) player_used();
+    down_was = down;
     int32_t mouse[4] = {0};
     /* the mouse's motion: the camera itself (mouse_native.c) with the menu's Mouse camera on Native, else the right
        stick; also the stick while the game does not give the camera free control (a menu, a lock-on, the pause menu,
