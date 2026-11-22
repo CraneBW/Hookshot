@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
         CHECK(t.option(7) == 21 && option_calls == 1);
         const uint64_t h[2] = {1, 2};
         t.nvn_submit(h, 2);
-        CHECK(!t.nvn_present && !t.start && !t.nvn_present_trial);
+        CHECK(!t.nvn_present && !t.start && !t.guest_release);
         guard_renderer(t);   // (again: not wrapped twice)
         CHECK(t.option(8) == 24 && option_calls == 2);
         CHECK(logs == 0);

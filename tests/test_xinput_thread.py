@@ -27,8 +27,7 @@ RUN_ALL_ARGS = ["--cc", "gcc"]
 ROOT = Path(__file__).resolve().parents[1]
 ENV_ON_H = str(ROOT / "gpu" / "vk" / "compat" / "hookshot_env.h")
 
-PRELUDE = r"""#define _POSIX_C_SOURCE 200809L
-#include <pthread.h>
+PRELUDE = r"""#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,9 +106,8 @@ int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) {   /* (SDL has no pads) *
 }
 static void binds_load(void) {}
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
-static int pad_bind[HOS_KEY_N][2] = {[HOS_KEY_TOGGLE_HUD] = {-1, -1}};
+static int pad_bind[HOS_KEY_N][2];
 static int sampled_pad(int i, int k) { return pad_bind[i][k]; }
-static LONG hud_bind_generation;
 static uint64_t oc_consumed_pads;
 """
 
@@ -122,7 +120,7 @@ int main(void) {
     while (hos_now_ns() - start < 1500000000LL) {   /* (past the empty slots' one-second retry) */
         uint64_t buttons = 0;
         int32_t stick[4] = {0};
-        pads_read(&buttons, stick, NULL);
+        pads_read(&buttons, stick);
         a_seen |= (__atomic_load_n(&pad_raw_now, __ATOMIC_RELAXED) >> HOS_PAD_SOUTH) & 1;
         Sleep(3);   /* (past pads_read's 2 ms cache) */
     }
@@ -150,10 +148,9 @@ def main():
     code = "\n".join((
         block(api, "enum { HOS_SW_A") + ";", block(api, "enum { HOS_PAD_SOUTH") + ";",
         block(api, "enum { HOS_KEY_MOVE_UP") + ";",
-        re.search(r"^enum \{ HOS_PAD_TOUCHPAD = \d+ \};", api, re.M).group(0),
         PRELUDE,
         block(hid, "static const signed char pad_default[HOS_SW_N] =") + ";",
-        block(hid, "static void stick_max("), block(hid, "static uint64_t hud_pad_mask("),
+        block(hid, "static void stick_max("),
         block(hid, "static uint64_t bound_pad_buttons("), state,
         block(hid, "void hos_filter_stick("),
         xinput,
@@ -163,7 +160,7 @@ def main():
         src = Path(tmp) / "t.c"
         src.write_text(code, encoding="utf-8")
         exe = Path(tmp) / "t.exe"
-        subprocess.run([a.cc, "-std=c11", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
+        subprocess.run([a.cc, "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-variable",
                         "-pthread", "-o", str(exe), str(src)], check=True)
         r = subprocess.run([str(exe)], capture_output=True, text=True)
         sys.stdout.write(r.stdout)

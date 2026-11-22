@@ -101,13 +101,11 @@ enum { HOS_OPT_VIBRATION = 63 };
 enum { HOS_OPT_VIBRATION_STATUS = 64 };
 /* (HOS_OPT_HUD_LAYOUT, 75: Graphics' HUD layout, host/hos_wide_ui.c reads it at each present by its number: on a screen
    that is not 16:9, 0 the HUD's corners at the screen's edges, 1 the HUD in the middle 16:9 as before (on a narrower
-/* (HOS_OPT_NATIVE_ZSTD, 76: an unset HOS_NATIVE_ZSTD on this GPU, host/hos_zstd.c: 1 or 2; 0 until the device is made) */
-enum { HOS_OPT_NATIVE_ZSTD = 76 };
-/* (HOS_OPT_HUD_LAYOUT, 71: Graphics' HUD layout, host/hos_wide_ui.c reads it at each present by its number: on a screen
-   that is not 16:9, 0 the HUD's corners at the screen's edges, 1 the HUD in the middle 16:9 as before #95 (on a narrower
    screen fitted to its width, as the menus). HOS_WIDE_UI, when set, stands over it. The existing option callback: no new
    member. 71 is Uncap detail sliders', 72 and 73 the item wheel's, 74 the Travel page's pictures.) */
 enum { HOS_OPT_HUD_LAYOUT = 75 };
+/* (HOS_OPT_NATIVE_ZSTD, 76: an unset HOS_NATIVE_ZSTD on this GPU, host/hos_zstd.c: 1 or 2; 0 until the device is made) */
+enum { HOS_OPT_NATIVE_ZSTD = 76 };
 
 /* (hookshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of hookshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

@@ -113,7 +113,7 @@ def check_sites():
         if needle not in body:
             problems.append("vk_main.cpp init_body: no " + needle)
     if "guard_renderer(table);" in body:
-        if body.index("host = &host_storage;") > body.index("cxx_escape::g_hooks.out_of_memory ="):
+        if body.index("host = h;") > body.index("cxx_escape::g_hooks.out_of_memory ="):
             problems.append("vk_main.cpp init_body: the hooks are set before the host is kept")
         if body.index("fill_replay_table(table);") > body.index("guard_renderer(table);"):
             problems.append("vk_main.cpp init_body: the table is guarded before it is filled")

@@ -229,7 +229,7 @@ BROKEN = [
 
 
 def fixture(replay, windows):
-    present = block(replay, "void present_image_with_trial(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool source_srgb, bool allow_scale, OutputTrialSource trial) {")
+    present = block(replay, "void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view) {")
     acquire = between(present, "    uint32_t index = 0;", "    if (vkResetCommandPool(dev.device, f.pool, 0)")
     submit = between(present, "    if (vkEndCommandBuffer(f.cmd) == VK_ERROR_DEVICE_LOST) device_lost();",
                      "    std::unique_lock qk(dev.present_mu);")
