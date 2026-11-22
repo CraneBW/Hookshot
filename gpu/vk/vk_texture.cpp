@@ -433,6 +433,9 @@ static uint64_t linux_avail_reserve() {
 }
 static bool linux_pressed = false;
 static bool linux_entered_pressure = false;
+// (hookshot) set by a submit the driver refused for want of memory (texture_memory_refused, vk_replay.cpp submit_give_back);
+// texture_frame takes it: the idle staging arenas go as when Linux's memory pressure begins, and the reaper's queue with them
+static std::atomic<bool> memory_refused{false};
 static std::atomic<uint64_t> linux_shortfall_bytes{0}, linux_shortfall_seq{0};
 uint64_t pool_cap() {
     // (hookshot) RX_VK_TARGET_POOL_MB=<MB>, else a twelfth of what the driver allows, 256 to 768 MB (target_pool.h)
@@ -769,6 +772,8 @@ std::mutex gpu_wrote_mu;
 std::atomic<uint64_t> st_gw_events{0}, st_gw_kb{0}, st_gw_whole_kb{0};
 }  // namespace
 bool gpu_wrote_into(Texture& tex, std::vector<std::pair<uint64_t, uint64_t>>* out = nullptr);
+uint64_t gpu_wrote_into(const Texture& tex);
+void texture_memory_refused() { memory_refused.store(true, std::memory_order_relaxed); }
 void helper_thread_start() {
 #ifndef _WIN32
     GetCurrentThreadId();
@@ -6401,6 +6406,11 @@ void texture_frame(uint64_t completed) {
     frame_no++;
     drawn_writeback_frame();
     reuse_retire_frame();
+    if (memory_refused.exchange(false, std::memory_order_relaxed)) {   // (a submit refused for want of memory since the last)
+        linux_entered_pressure = true;   // (every idle arena below)
+        static int told;
+        if (told++ < 16) logf("vk: a submit was refused for want of memory: the idle staging arenas freed");
+    }
     {   // (staging arenas the GPU is done with, beyond 256 MB of them, and any over 64 MB: freed. A scene change stages
         // hundreds of MB to over a GB (the course maps, the terrain's ASTC arrays), and that host memory was kept)
         // (hookshot: 128 where the driver allows 6.5 GB or less, device_policy.h staging_keep. On one with resizable BAR the arenas are VRAM: VMA puts a host-visible buffer the GPU
