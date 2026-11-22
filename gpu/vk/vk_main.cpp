@@ -31,6 +31,8 @@
 #include "vk_new.h"
 #include "presenter_queue.h"
 static_assert(mkwvk::kQueueGraphics == VK_QUEUE_GRAPHICS_BIT && mkwvk::kQueueCompute == VK_QUEUE_COMPUTE_BIT);
+#include "cxx_escape.h"
+#include "renderer_guard.h"
 #include "gpu_choice.h"
 #include "vk_menu.h"
 #include "auto_settings.h"
@@ -2303,6 +2305,7 @@ void mkwvk_close_asked(void) {
     dlss_fg_close();   // (NVIDIA DLSS Frame Generation through NGX: its feature let go before the process exits, vk_dlss.cpp)
 }
 
+static const MkwVkRenderer* init_body(const MkwVkHost* h);
 extern "C"
 #ifdef _WIN32
 __declspec(dllexport)
@@ -2310,6 +2313,14 @@ __declspec(dllexport)
 __attribute__((visibility("default")))
 #endif
 const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
+    try {
+        return init_body(h);
+    } catch (const std::exception& e) {
+        mkwvk::cxx_escape::escaped("mkwvk_init", e);   // (said, then the game stops; before the hooks are set, on stderr)
+    }
+}
+/// mkwvk_init's work, behind its catch
+static const MkwVkRenderer* init_body(const MkwVkHost* h) {
     using namespace mkwvk;
     if (!h) return nullptr;
     if (h->version != MKWVK_API_VERSION) {
@@ -2318,6 +2329,18 @@ const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
     }
     host = h;
     std::set_new_handler(new_refused);   // (a refused C++ allocation waits, then says out of memory)
+    // (a C++ exception out of the renderer: said with its type and what(), then out of memory or the FATAL line: cxx_escape.h)
+    cxx_escape::g_hooks.log = [](const char* line) { logf("%s", line); };
+    cxx_escape::g_hooks.out_of_memory = [](const char* what) {
+        if (host && host->version >= 28 && host->out_of_memory) host->out_of_memory(what);   // (does not return)
+    };
+    cxx_escape::g_hooks.fatal = [](const char* why) {   // (as vk_replay.cpp's replay_fatal: the crash window reads its "vk: FATAL:")
+        logf("vk: FATAL: %s", why);
+        if (host && host->log_flush) host->log_flush();
+        std::fprintf(stderr, "vk: FATAL: %s\n", why);
+        std::fflush(stderr);
+        std::_Exit(3);
+    };
     if (!load_global()) {
 #ifdef _WIN32
         logf("vk: load_global failed (Vulkan loader library or vkCreateInstance missing)");
@@ -2366,6 +2389,7 @@ const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
     table.resize = resize;
     table.describe = describe;
     fill_replay_table(table);
+    guard_renderer(table);   // (each function's exceptions said and stopped on, not left to the host's C: renderer_guard.h)
     return &table;
 }
 
