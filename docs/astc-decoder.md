@@ -17,3 +17,9 @@ Eden/yuzu GPL notices remain in the shader.
 header against it, and decodes a CPU reference over all 14 block sizes; with `--gpu` it runs the shader on the
 GPU and compares its output with `Tegra::Texture::ASTC::DecompressSerial` (odd sizes, linear and native tiling,
 1 to 4 partitions, dual plane, void extent, error blocks).
+
+## Native measurement scope
+
+The RTX 5070 Ti runs of 2026-11-12 in docs/tested-configurations.md measured the earlier hoisting: matched ASTC
+upload GPU spans in a Kokiri Forest checkpoint load, taken with private GPU timestamps on identical builds. They are
+upload times for that decoder, not FPS or start-up claims, and they do not describe the decoder above.
