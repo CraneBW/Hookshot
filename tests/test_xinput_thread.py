@@ -101,8 +101,8 @@ static int64_t hos_now_ns(void) {
     return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
 int rx_option(int id, int otherwise) { return id == 11 || id == 16 || id == 17 ? 0 : otherwise; }
-int hos_sdl_pads(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input) {   /* (SDL has no pads) */
-    (void)buttons; (void)stick; (void)deck_builtin_input;
+int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) {   /* (SDL has no pads) */
+    (void)buttons; (void)stick;
     return 0;
 }
 static void binds_load(void) {}
