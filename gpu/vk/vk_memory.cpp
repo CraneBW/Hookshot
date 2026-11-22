@@ -1454,6 +1454,52 @@ bool cap_fit() {
 uint64_t cap_now_ms() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+// (hookshot, RX_VK_CAP_FREE_ASYNC, on; =0: as before) A capture buffer let go past the spares is destroyed on a thread of its
+// own, not on the thread that retired it (the replay's take, holding pools_mu): freeing a 64-256 MB host-cached memory object is
+// the driver unmapping and releasing every page of it. Only buffers the GPU is done with get here (a retire waits for that), and
+// nothing else holds them; the memory goes back a moment later. At the process's exit (cap_shutting_down) what is queued is left
+bool cap_free_async_on() {
+    static const bool on = [] {
+        const bool v = env_on_or("RX_VK_CAP_FREE_ASYNC", 1);
+        if (!v) logf("vk: capture buffers past the spares destroyed on the replay's thread, as before (RX_VK_CAP_FREE_ASYNC=0)");
+        return v;
+    }();
+    return on;
+}
+std::mutex cap_gone_mu;   // (a leaf: the queue alone)
+std::condition_variable cap_gone_cv;
+std::vector<std::pair<VkBuffer, VmaAllocation>> cap_gone;
+bool cap_gone_started = false;
+void destroy_buffer_later(VkBuffer buffer, VmaAllocation alloc) {
+    {
+        std::lock_guard lk(cap_gone_mu);
+        cap_gone.push_back({buffer, alloc});
+        if (!cap_gone_started) {
+            cap_gone_started = true;
+            try {
+                std::thread([] {
+                    std::vector<std::pair<VkBuffer, VmaAllocation>> batch;
+                    for (;;) {
+                        {
+                            std::unique_lock lk(cap_gone_mu);
+                            cap_gone_cv.wait(lk, [] { return !cap_gone.empty(); });
+                            batch.swap(cap_gone);
+                        }
+                        for (const auto& [b, a] : batch)
+                            if (!cap_shutting_down.load()) destroy_buffer(b, a);
+                        batch.clear();
+                    }
+                }).detach();
+            } catch (...) {   // (no thread: destroyed here, as before)
+                cap_gone_started = false;
+                cap_gone.pop_back();
+                destroy_buffer(buffer, alloc);
+                return;
+            }
+        }
+    }
+    cap_gone_cv.notify_one();
+}
 void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size, bool from_worker = false) {
     FreeBuf old[12];
     int n_old = 0;
@@ -1501,8 +1547,14 @@ void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size
             buffer = VK_NULL_HANDLE;
         }
     }
-    if (buffer) destroy_buffer(buffer, alloc);
-    for (int i = 0; i < n_old; i++) destroy_buffer(old[i].buffer, old[i].alloc);
+    if (buffer) {
+        if (cap_free_async_on() && !cap_shutting_down.load()) destroy_buffer_later(buffer, alloc);
+        else destroy_buffer(buffer, alloc);
+    }
+    for (int i = 0; i < n_old; i++) {
+        if (cap_free_async_on() && !cap_shutting_down.load()) destroy_buffer_later(old[i].buffer, old[i].alloc);
+        else destroy_buffer(old[i].buffer, old[i].alloc);
+    }
 }
 void cap_buf_retire(std::map<uint32_t, CapBuf>::iterator it) {
     if (it->second.hash && cap_hash_free.size() < 32) cap_hash_free.push_back(std::move(it->second.hash));
@@ -3754,6 +3806,27 @@ void stamp_block_make(Pool& p, uint64_t guest) {
         logf("vk: late pages' fix: stamps for %#llx (pool %#llx; %zu blocks, %llu KB)", (unsigned long long)(key << kStampShift),
              (unsigned long long)p.lo, stamp_blocks.size(), (unsigned long long)(stamp_bytes >> 10));
 }
+// (hookshot, RX_VK_LATE_STAMPS_AHEAD, on; =0: as before) A late page with no stamp block yet makes its capture wait (the first
+// time), and with it the blocks of the rest of its pool (all of a pool of 16 MB or less, else the 2 MB around the page), not only
+// the late pages' own: arriving in an area, the game writes 100-190 pages a capture of a new 4-8 MB pool the GPU writes back too,
+// each capture's late pages in other 64 KB blocks, and each new block cost a wait (4 cores: 6-20 waits an arrival, 20-250 ms each
+// while the GPU works through the arrival). The blocks are the same ones a later late page would make, sooner; the fixes' rules
+// (since, the shadow, the pool) are unchanged. Within kStampMax, as any block. tests/test_late_stamps_ahead.py
+bool late_stamps_ahead_on() {
+    static const bool on = [] {
+        const bool v = env_on_or("RX_VK_LATE_STAMPS_AHEAD", 1);
+        if (!v) logf("vk: late pages' fix: a late page's missing stamps made for its own block only, as before (RX_VK_LATE_STAMPS_AHEAD=0)");
+        return v;
+    }();
+    return on;
+}
+void stamp_blocks_around(Pool& p, uint64_t guest) {   // (pools_mu held)
+    constexpr uint64_t kAround = 2ull << 20;   // (a pool past 16 MB: the 2 MB around the page)
+    const uint64_t base = guest & ~(kAround - 1);
+    uint64_t lo = p.lo, hi = p.hi;
+    if (hi - lo > (16ull << 20)) lo = std::max(lo, base), hi = std::min(hi, base + kAround);
+    for (uint64_t b = (lo + kStampMask) & ~kStampMask; b + kStampBlock <= hi; b += kStampBlock) stamp_block_make(p, b);
+}
 struct LateFix { uint64_t dst, src, stamps; uint32_t count, after; };   // (shaders/late_fix.comp's Fix)
 static_assert(sizeof(LateFix) == 32, "late_fix.comp's Fix");
 std::vector<LateFix> late_fixes;   // (of the captures taken, for the next recording; pools_mu)
@@ -3920,6 +3993,7 @@ bool late_fix_build(Capture& c) {
                 const auto it = stamp_blocks.find(a >> kStampShift);
                 if (it == stamp_blocks.end()) {
                     stamp_block_make(*p, a);
+                    if (late_stamps_ahead_on()) stamp_blocks_around(*p, a);
                     fail(3);
                     continue;
                 }
@@ -8322,11 +8396,26 @@ void memory_end_submission(VkCommandBuffer cmd, uint64_t part) {
                  (long long)st_sync_gpu_pages, (long long)st_sync_gpu_live, (long long)st_prot_kept.load());
             l_cap = st_sync_cap_pages, l_live = st_sync_live_pages, l_old = st_sync_old_pages;
             msync_pass_report();   // (RX_VK_MSYNC_PASS: how its dispatches went)
-            if (shadow_bytes || st_wbd_runs)
-                logf("vk: write-back diff (600 submits): %lld runs, %.1f MB compared; %lld pages read into the shadows; %llu MB of shadows; "
-                     "pages the shadows knew that the CPU wrote: %lld in captures, %lld only in the collection, %lld only by the replay itself",
+            if (shadow_bytes || st_wbd_runs) {
+                // (hookshot) how much of the shadows holds anything: the pages they know, and the 1 MB parts with any page known,
+                // which is what shadows made of parts would take (each is the whole pool now)
+                uint64_t known_pages = 0, parts = 0;
+                for (const auto& [lo, sp] : imported) {
+                    if (!sp.shadow) continue;
+                    uint64_t part_bits = 0;   // (256 pages a 1 MB part: 4 words of the bitmap)
+                    for (size_t w = 0; w < sp.shadow_known.size(); w++) {
+                        known_pages += (uint64_t)__builtin_popcountll(sp.shadow_known[w]);
+                        part_bits |= sp.shadow_known[w];
+                        if ((w & 3) == 3 || w + 1 == sp.shadow_known.size()) parts += part_bits != 0, part_bits = 0;
+                    }
+                }
+                logf("vk: write-back diff (600 submits): %lld runs, %.1f MB compared; %lld pages read into the shadows; %llu MB of shadows "
+                     "(%llu MB of pages known, in %llu MB of 1 MB parts); pages the shadows knew that the CPU wrote: %lld in captures, %lld "
+                     "only in the collection, %lld only by the replay itself",
                      (long long)st_wbd_runs, st_wbd_bytes / 1048576.0, (long long)st_wbd_fill_pages, (unsigned long long)(shadow_bytes >> 20),
+                     (unsigned long long)(known_pages * 4096 >> 20), (unsigned long long)parts,
                      (long long)st_wbd_known_game, (long long)st_wbd_known_collected, (long long)st_wbd_known_replay);
+            }
             st_wbd_runs = st_wbd_bytes = st_wbd_fill_pages = 0;
             st_wbd_known_game = st_wbd_known_collected = st_wbd_known_replay = 0;
             if (wbd_observe_on()) {

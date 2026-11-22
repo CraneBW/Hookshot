@@ -4585,6 +4585,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         rec_open(tag);
         if (rb_writers_on()) rb_span_begin(tag, first.part);
         texture_ahead_run();   // (hookshot, RX_VK_TEX_AHEAD: into this recording's uploads, while the frames are light)
+        temporal_prewarm(first.cmd);   // (hookshot, RX_VK_DLSS_PREWARM: DLSS's feature, in a light frame before the first 3D one)
     }
     VkCommandBuffer cmd = rec_cur->cmd;
     const uint8_t* stop = nullptr;
@@ -6907,6 +6908,7 @@ void status_tick() {
         int64_t draws = 0, sk = 0, di = 0, pl = 0;
         draw_stats(&draws, &sk, &di, &pl);
         texture_ahead_frame(draws - l_draws);
+        temporal_note_frame(draws - l_draws);   // (and RX_VK_DLSS_PREWARM's)
         l_draws = draws;
     }
     static uint64_t frames = 0;
@@ -7338,6 +7340,7 @@ void do_present(const nvn_tex* t, const int crop[4], float cover) {
                  t ? t->d.width : 0, t ? t->d.height : 0, t ? t->d.format : 0,
                  tex ? (tex->gpu_written ? "rendered" : "never rendered") : "no image");
         if (tex) src = tex->image, sw = tex->width, sh = tex->height;
+        if (t) temporal_note_present(t->d.width, t->d.height);   // (RX_VK_DLSS_PREWARM: the size its feature is made for)
         // (the Insert menu's HDR set to Native: the game, told its display is HDR10, presents PQ codes in RGB10A2 (vk
         // A2B10G10R10); that picture goes to the HDR10 swapchain as PQ, not through the SDR-to-HDR expansion. Told by the format
         // the game presents, the one its view is made in (direct_view below), not by the cached image's: images are shared by
@@ -7493,6 +7496,9 @@ void do_present(const nvn_tex* t, const int crop[4], float cover) {
             framegen_queue(value);
         }
         else menu_note_frame(true);   // (the FPS counter's, as frame generation's thread counts what it shows)
+        // (and the built-in interpolation's and FSR 3.1's images, off for a while: after the queue, so a set this present recorded
+        // is the display thread's to show and free before any drain waits for it; and counted as on, whatever the row says now)
+        framegen_idle(interpolated);
         {   // (RX_VK_WAIT_GPU=<frames>: the replay no further ahead of the GPU than that)
             static uint64_t values[8];
             static const int ahead = [] {
