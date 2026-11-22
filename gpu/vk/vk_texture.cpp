@@ -776,11 +776,14 @@ void helper_thread_start() {
 }
 
 VkResult shared_compute_pipeline(const VkComputePipelineCreateInfo* ci, VkPipeline* out);   // (vk_draw.cpp: through the pipeline cache kept across runs)
-namespace {
 /// (hookshot) A texture pipeline (the ASTC decoder, the BC encoders, the GPU unswizzle) through the pipeline cache kept across
 /// runs, so that a later start finds it there; with none where that one is refused. Each was compiled without a cache the first
 /// time a texture needed it, inside a frame on the render thread: 274 ms for the ASTC decoder's, the whole of a 283 ms frame,
 /// and ~130 ms of a 494 ms one for the BC encoder's (an RTX 3090, 2026-11-18). texture_pipelines_warm makes them before the game.
+/// vk_draw.cpp's upscale and mask helpers are made here too. extern_guarded_compute asks once more without the optimizer
+/// where the driver refused the optimized build: Intel's Windows driver on the Arc A-series (an A580 on 101.9175) did, and
+/// with the ASTC decoder refused, every ASTC texture was decoded on the CPU (a frame's uploads 30.9 s, the screen black after
+/// the opening cutscene).
 /// The caller holds no IntelDriverGate: the shared path takes that lock itself
 VkResult texture_compute_pipeline(const VkComputePipelineCreateInfo& ci, VkPipeline& out) {
     out = VK_NULL_HANDLE;
@@ -789,6 +792,7 @@ VkResult texture_compute_pipeline(const VkComputePipelineCreateInfo& ci, VkPipel
     IntelDriverGate gate;
     return extern_guarded_compute(VK_NULL_HANDLE, &ci, &out);
 }
+namespace {
 Staging staging(uint64_t n, uint64_t align = 256) {
     // Separate slices may already be read by submitted parallel segments. A flush must not share their cache atom.
     align = std::max<uint64_t>(align, dev.props.limits.nonCoherentAtomSize);
@@ -953,7 +957,10 @@ bool astc_ready() {
     ci.layout = astc_layout;
     const VkResult r = texture_compute_pipeline(ci, astc_pipe);
     vkDestroyShaderModule(dev.device, m, nullptr);
-    if (r != VK_SUCCESS) return false;
+    if (r != VK_SUCCESS) {   // (said: on an Arc A580 its refusal was in no line, only in a frame's uploads of 30 s on the CPU)
+        logf("vk: the GPU ASTC decoder's pipeline was not made (%d): ASTC is decoded on the CPU", (int)r);
+        return false;
+    }
     state = 1;
     logf("vk: ASTC is decoded on the GPU (Eden's decoder, Switch 2 tiling)");
     return true;
