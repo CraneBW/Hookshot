@@ -58,6 +58,7 @@ import toolchain as _toolchain
 import disk as _disk
 import object_store as _object_store
 import lift_store as _lift_store
+import build_jobs as _build_jobs
 import game_title
 import log_redact as _log_redact
 # (hookshot) RX_TARGET=windows on Linux: the Windows game, with llvm-mingw's Linux release (HOOKSHOT_MINGW, or llvm-mingw
@@ -862,17 +863,8 @@ def check_linux_prerequisites(work=None):
 
 
 def requested_jobs(value):
-    """The builder's explicit worker override, or None to keep its automatic selection."""
-    if value is None or value == "":
-        return None
-    error = "HOOKSHOT_JOBS must be a whole number: use 1 or more, or 0 for automatic."
-    try:
-        jobs = int(value)
-    except ValueError:
-        raise ValueError(error) from None
-    if jobs < 0:
-        raise ValueError(error)
-    return jobs or None
+    """The builder's explicit worker override, or None to keep its automatic selection (nx2/build_jobs.py requested)"""
+    return _build_jobs.requested(value)
 
 
 def default_jobs():
@@ -885,6 +877,14 @@ def default_jobs():
     print("build: up to %d compilers at once (one per CPU thread but one), as the memory allows; HOOKSHOT_JOBS=<n> to change" % jobs,
           flush=True)
     return jobs
+
+
+def requested_jobs_or_none(value):
+    """requested_jobs, None for a value that is no count (chosen_jobs says so and stops the build)"""
+    try:
+        return requested_jobs(value)
+    except ValueError:
+        return None
 
 
 def chosen_jobs(given):
@@ -1625,8 +1625,10 @@ def prepare_shaders(cmd, folder=None, silence=PREPARE_SILENCE):
     the game's folder and environment, as the builders' Play starts it. A PC whose Vulkan can't (exit 3), a run silent for `silence` seconds (then stopped), or
     any other failure leaves the work to the first start, as before: never a failed build. Returns its exit code (None: stopped)"""
     try:
-        code = run(cmd, check=False, show=show_prepared, cwd=folder or os.path.dirname(cmd[0]) or None,
-                   base=game_env(), silence=silence)
+        # (a count asked for: the game started on that many CPUs, which its preparation's pools follow; nx2/build_jobs.py)
+        with _build_jobs.children_on_cpus(_build_jobs.asked()):
+            code = run(cmd, check=False, show=show_prepared, cwd=folder or os.path.dirname(cmd[0]) or None,
+                       base=game_env(), silence=silence)
     except OSError as e:
         not_prepared(str(e))
         return 1
@@ -2060,7 +2062,7 @@ LIFT_ENV_NAMES = ("RX_TARGET",   # (toolchain.py: the target the emitter and its
                   "OOT_EXEFS_PATCHES_SHA1")   # (the mods' ExeFS patches the lift writes into main, by their content)
 LIFT_PATH_ENV = ("OOT_WORK", "OOT_EXEFS", "OOT_ROMFS", "OOT_DUMP", "A64_HOT_FUNCS", "OOT_EXEFS_PATCHES")
 LIFT_ENV_NOT_OUTPUT = {   # (read by the lift's sources, and no change to what it writes)
-    "HOOKSHOT_LIFT_JOBS": "how many processes", "HOOKSHOT_LIFT_NO_FORK": "how they are started", "RX_JOBS": "how many processes",
+    "HOOKSHOT_LIFT_JOBS": "how many processes", "HOOKSHOT_JOBS": "how many processes (nx2/build_jobs.py)", "HOOKSHOT_LIFT_NO_FORK": "how they are started", "RX_JOBS": "how many processes",
     "EMSDK": "where the compiler is", "HOOKSHOT_MINGW": "where the compiler is",
     "A64_SITE_PROFILE": "the game's runtime (a64_rt.c), at play", "RX_VK_NAN_GUARD": "nx2/bake_ds's own run",
     "RX_VK_NO_F16": "nx2/bake_ds's own run",
@@ -2865,7 +2867,10 @@ def main(a=None):
     portable_home = portable_game_home(a.update or a.out) if not a.check and (a.update or a.out) else None
     if a.jobs is not None and a.jobs < 0:
         fail("--jobs must be 1 or more, or 0 for automatic.")
+    given = a.jobs or requested_jobs_or_none(os.environ.get("HOOKSHOT_JOBS"))
     a.jobs = chosen_jobs(a.jobs)
+    if given:   # (every step that runs work side by side takes at most this many, not only the compile: nx2/build_jobs.py)
+        os.environ["HOOKSHOT_JOBS"] = str(a.jobs)
     os.makedirs(a.work, exist_ok=True)
     no_throttle()
     if os.name == "nt":   # (the PC kept awake while this runs: a build is 45 minutes, and sleep stopped it)
