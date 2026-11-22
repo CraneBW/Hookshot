@@ -6628,7 +6628,8 @@ void texture_frame(uint64_t completed) {
             dynamic_floor = vram_compact::update_dynamic_floor(dynamic_floor, total_bytes, used, pressure, allowed);
         }
     }
-    const uint64_t active_floor = known ? dynamic_floor : 0;
+    // (and none past the allowance: vram_compact::floor_within)
+    const uint64_t active_floor = known ? vram_compact::floor_within(dynamic_floor, used, allowed) : 0;
     pool_pressure = !known ? 0 : (used > allowed / 100 * 97) ? 2 : (pressure > allowed / 10 * 9) ? 1 : 0;   // (target pool: halve at >90%, flush at >97%)
     compact.pressed = known && vram_compact::pressed(used, allowed);   // (hookshot, RX_VK_COMPACT: by the driver's own count)
     const uint64_t size_budget = budget;   // (the budget as a size, before the rules that take an excess off it: rule_target)
@@ -6680,7 +6681,7 @@ void texture_frame(uint64_t completed) {
     // count as it is, the same ratchet, past the allowance too: there no eviction can bring the count down (#2711))
     if (known && !kept_only && used > count_line && !room_in_blocks) {
         const uint64_t over = used - count_line;
-        const uint64_t floor = vram_compact::texture_min_floor(allowed);
+        const uint64_t floor = vram_compact::count_line_floor(used, allowed);   // (none past the allowance)
         uint64_t cut = total_bytes > over ? total_bytes - over : 0;
         if (floor && cut < floor) cut = floor;
         budget = std::min(budget, cut);
