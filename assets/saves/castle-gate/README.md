@@ -1,6 +1,6 @@
 castle-gate: Hyrule Field at Castle Town's gate, child Link on the drawbridge's town end facing the Field, by day
 
-Made fresh for the Test Farm from slot_01 of a new profile; scrubbed with hookshot_saves.py scrub.
+Made fresh for testing from slot_01 of a new profile; scrubbed with hookshot_saves.py scrub.
 
 How it was made (2026-11-19, CachyOS Linux, RTX 3090, NVIDIA 620.70.06; Hookshot v3.0.0-rc.7-111-gda91e7702, main da91e770): a new
 profile with only `kokiri-start` in it (`hookshot_ctl.py launch <game> --profile test --repo-save kokiri-start
