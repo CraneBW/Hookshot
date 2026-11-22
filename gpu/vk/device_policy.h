@@ -34,6 +34,7 @@
 #include "astc_bc_policy.h"
 #include "auto_settings.h"
 #include "fallback_size_policy.h"
+#include "gpu_arch.h"
 #include "gpu_clock.h"
 #include "intel_compiles.h"
 #include "mesh_mode.h"
@@ -45,14 +46,6 @@
 #include "vram_compact.h"
 
 namespace mkwvk {
-
-// AMD RDNA 4 (GFX12): Navi 48 (0x7550 RX 9070 series, 0x7551 Radeon AI PRO R9700) and Navi 44 (0x7590 RX 9060 series),
-// with name matching as a fallback for future or uncatalogued GFX12 cards.
-inline bool is_rdna4(uint32_t vendor_id, uint32_t device_id, const char* device_name) {
-    if (vendor_id != 0x1002) return false;
-    if (device_id == 0x7550 || device_id == 0x7551 || device_id == 0x7590) return true;
-    return device_name && (std::strstr(device_name, "RX 9") || std::strstr(device_name, "GFX12"));
-}
 
 struct DeviceFacts {
     // who
@@ -90,11 +83,17 @@ struct DeviceFacts {
     bool nvidia() const { return vendor_id == 0x10DE; }
     bool amd() const { return vendor_id == 0x1002; }
     bool intel() const { return vendor_id == 0x8086; }
+    bool amd_win() const { return windows && driver_id == VK_DRIVER_ID_AMD_PROPRIETARY; }
     bool radv() const { return driver_id == VK_DRIVER_ID_MESA_RADV; }
     bool radv_gcn() const { return radv() && !storage_io16; }
     bool deck_apu() const { return gpu_clock::deck_apu(device_name); }
     bool handheld() const { return (steam_deck_env && integrated()) || deck_apu(); }   // (auto_profile's hw.handheld)
-    bool rdna4() const { return is_rdna4(vendor_id, device_id, device_name); }
+    GpuArch arch() const { return classify_gpu_arch(vendor_id, device_id, device_name, radv_gcn()); }
+    const char* arch_name() const { return gpu_arch_name(arch()); }
+    bool rdna1() const { return arch() == GpuArch::AmdRdna1; }
+    bool rdna2() const { return arch() == GpuArch::AmdRdna2; }
+    bool rdna3() const { return arch() == GpuArch::AmdRdna3; }
+    bool rdna4() const { return arch() == GpuArch::AmdRdna4; }
 };
 
 // The rules that are a number or a yes from one or two facts, each as its site has it. device_policy() calls them with
@@ -760,10 +759,10 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
     const auto mb = [](uint64_t bytes) { return (unsigned long long)(bytes >> 20); };
     {
         PolicyLine l("facts");
-        l.add(" %04x:%04x, driver id %d, version %#x (%.100s), type %d, %s; VRAM %llu MB, allowed at the start %llu MB, RAM %llu MB,"
+        l.add(" %04x:%04x (arch %s), driver id %d, version %#x (%.100s), type %d, %s; VRAM %llu MB, allowed at the start %llu MB, RAM %llu MB,"
               " resizable BAR %d; CPUs %u (%u usable, %u cores); mesh shaders %d, float add %d, cooperative matrices %d, 16-bit stage"
               " inputs %d, lanes %u to %u (32 on stages %#x)",
-              (unsigned)f.vendor_id, (unsigned)f.device_id, (int)f.driver_id, (unsigned)f.driver_version, f.driver_info, (int)f.device_type,
+              (unsigned)f.vendor_id, (unsigned)f.device_id, f.arch_name(), (int)f.driver_id, (unsigned)f.driver_version, f.driver_info, (int)f.device_type,
               f.windows ? "Windows" : "not Windows", mb(f.vram_heap), mb(f.allowed_at_start), mb(f.ram), (int)f.rebar, f.cpus_all,
               f.cpus_usable, f.cores_usable, (int)f.mesh_shader, (int)f.float32_atomic_add, (int)f.coop_matrix_ext, (int)f.storage_io16,
               (unsigned)f.subgroup_size, (unsigned)f.subgroup_max, (unsigned)f.sg32_stages);
