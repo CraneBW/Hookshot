@@ -389,10 +389,12 @@ struct DevicePolicy {
     bool warp64 = false;
 
     // ---- measured on one card ----
-    // RADV but on GCN 1-4: the replay's submits held and sent as one (a Radeon 8060S on Bazzite, the submit 70 -> 6 ms a
+    // RADV but on GCN 1-4 and on a discrete RDNA 4 card: the replay's submits held and sent as one (a Radeon 8060S on Bazzite, the submit 70 -> 6 ms a
     // frame, issue 413; an RX 580 lost 4 fps). GCN is DeviceFacts::radv_gcn, the one definition; it was "no stage pinned
     // to 32 lanes and 64-lane waves" until this rule moved here, which RX_VK_NO_SUBGROUP_PIN made true of every 64-lane
-    // card and which took Vega (GFX9) for GCN too. RX_VK_BATCH. Read (vk_replay.cpp batch_on)
+    // card and which took Vega (GFX9) for GCN too. On an RX 9070 XT the gaps between held submits let the card's
+    // clock drop (median 1715 MHz held, 2589 MHz sent at once) and the frame was a quarter longer (62 -> 81 fps sent at
+    // once). RX_VK_BATCH. Read (vk_replay.cpp batch_on)
     bool batch_submits = false;
     // RADV and AMD RDNA 4 on AMD's proprietary driver: the software matrix multiplies' unrolled forms are tried (measured on the
     // Steam Deck and an RX 9060 XT); a test shader on the device then says which is used. RX_VK_MMA_UNROLL. Site
@@ -565,7 +567,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
 
     // measured on one card
     // (corrected: GCN by the one definition, radv_gcn. To go back: f.radv() && !(f.sg32_stages == 0 && f.subgroup_size > 32))
-    p.batch_submits = f.radv() && !f.radv_gcn();
+    p.batch_submits = f.radv() && !f.radv_gcn() && !(f.rdna4() && f.discrete());
     p.mma_unroll_try = f.radv() || (f.rdna4() && f.driver_id == VK_DRIVER_ID_AMD_PROPRIETARY);
     p.global_table_loop = f.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA && f.storage_buffer_array_dynamic_indexing;
     p.occ_copy = f.driver_id == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS && f.discrete();

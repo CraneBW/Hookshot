@@ -344,7 +344,7 @@ SW(RX_VK_BARRIER_DEDUPE_OFF, kill, bool, "off: a full barrier right after anothe
 SW(RX_VK_BARRIER_DEDUPE_PAR, attempt, bool, "off: inside a parallel replay every full barrier is recorded", "=1 leaves out a full barrier right after another on the same command buffer there too, by that command buffer's own work count.")
 SW(RX_VK_BARRIER_EVERY_DRAW, attempt, bool, "off", "Ends the pass before every draw, so each draw gets a pass of its own.")
 SW(RX_VK_BARRIER_TRUST, attempt, bool, "off: full barriers at a pass start and at a dispatch, as before", "=1 trusts the game's own barriers: attachment-only at a pass start after draws, none at a dispatch after draws and dispatches.")
-SW(RX_VK_BATCH, hw, bool, "on with Mesa RADV except on GCN 1-4 cards (no 16-bit stage inputs), off elsewhere", "Turns batching of queue submits on or off.")
+SW(RX_VK_BATCH, hw, bool, "on with Mesa RADV except on GCN 1-4 cards (no 16-bit stage inputs) and discrete RDNA 4 cards, off elsewhere", "Turns batching of queue submits on or off.")
 SW(RX_VK_BATCH_IDLE, kill, bool, "on", "=0: batched submits are held until a wait, present or the cap even while the GPU is idle, as before.")
 SW(RX_VK_BATCH_MAX, tune, int, "32 command buffers", "The most command buffers held in one batched submit before it is sent.")
 SW(RX_VK_BATCH_POLL_US, tune, int, "2000 us", "A progress poll sends held submits only once the oldest has waited this many microseconds (0: always).")
