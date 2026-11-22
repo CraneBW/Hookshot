@@ -759,9 +759,10 @@ def behaviour(cc, tmp):
     clip = next((e[1] for e in got if e[0] == "CLIP"), "")
     assert "during the start" in box, \
         "the restarted run's box names the stage from its own run: the run before loaded a map, this one never did"
-    assert "Map: Kokiri" not in clip and "Map: Title and intro" in clip, \
+    # (Hookshot's report has no Map: line of its own: then only that the old map is not given as this run's)
+    assert "Map: Kokiri" not in clip and ("Map: " not in clip or "Map: Title and intro" in clip), \
         "the restarted run's report keeps the run before's map as its own: the facts must be " \
-        "read from the located run_id line on, not from byte zero of the shared log"
+        "read from the located run_id line on, not from byte zero of the shared log: %s" % [l for l in clip.splitlines() if "Map" in l or "map" in l][:4]
     assert "RESTARTED-START-MARKER" in clip, "the restarted run's own line is still in its tail"
     print("PASS: the run after a Restart now: facts (map, stage) come from its own lines, not the run before")
     # round three (review): the gate starts at the run's OWN banner, not at its run_id line: the version line sits
@@ -774,9 +775,11 @@ def behaviour(cc, tmp):
                               "CRASH_TEST_LOG_VERSION": "vlog-9",       # (what the restarted run logs)
                               "CRASH_TEST_RECORD_VERSION": "vrec-7"})   # (what the crash record alone would say)
     clip = next((e[1] for e in got if e[0] == "CLIP"), "")
-    assert "Version: vlog-9" in clip and "Version: vrec-7" not in clip, \
+    # (Hookshot's report gives the version under "### Hookshot version", not on a Version: line)
+    shown = clip.split("### Hookshot version", 1)[1].strip().splitlines()[:1] if "### Hookshot version" in clip else []
+    assert shown == ["vlog-9"] or ("Version: vlog-9" in clip and "Version: vrec-7" not in clip), \
         "the restarted run's report lost the version from its own log: the gate started at the run_id line, one " \
-        "line after the version banner, and the report fell back to the crash record: %s" % [l for l in clip.splitlines() if l.startswith("Version")][:1]
+        "line after the version banner, and the report fell back to the crash record: %s" % [l for l in clip.splitlines() if "vlog" in l or "vrec" in l][:2]
     assert "Map: Kokiri" not in clip, \
         "reaching back to this run's banner must not reach back past it: the run before's map is still out"
     print("PASS: the report's version comes from the run's own banner, and the gate still excludes the run before")

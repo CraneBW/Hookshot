@@ -894,7 +894,8 @@ MENU_HINTS(hn_shadow_res, 0,
            "more.",
            "1600 pixels a side, the console's. About 31 MB of video memory.",
            "2200 pixels a side. About 58 MB of video memory.",
-           "3072 pixels a side, the game's own highest. About 113 MB of video memory.")
+           "3072 pixels a side, the game's own highest, and the shadows near you shimmer less while the camera moves. About "
+           "113 MB of video memory.")
 // detail caps: past them foliage flickers (GPU instance budget), grass thins, shadows step (fixed shadow map res)
 constexpr int kCapFoliage = 150, kCapObjects = 250, kCapGrass = 200, kCapShadows = 200;
 #define GFX_HINT(fn, cap) \
@@ -1769,7 +1770,8 @@ Row rows[] = {
      "little GPU time. Game's is the console's own (1x or 2x).", nullptr, false, true},
     {TAB_GRAPHICS, "Shadow resolution", &opts.shadow_res, 0, 3, 1, tx_shadow_res,
      "The size of the sun's shadow maps: higher keeps the shadows of thin things near you, such as chains, fences and "
-     "leaves, smooth instead of stair-stepped, for more video memory and a little GPU time. Applies at once.",
+     "leaves, smooth instead of stair-stepped, for more video memory and a little GPU time. Highest also makes them shimmer "
+     "less while the camera moves. Applies at once.",
      hn_shadow_res},
     {TAB_GRAPHICS, "Foliage distance", &opts.gfx_foliage, 25, 400, 25, tx_fov,
      "How far away small trees, bushes and flowers are drawn. Higher costs CPU and GPU time. Changes apply at once.",

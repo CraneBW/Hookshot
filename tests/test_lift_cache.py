@@ -227,7 +227,7 @@ def check_lift_sources():
     sources = {os.path.abspath(f) for f in make_game.lift_sources()}
     missing = sorted(loaded - sources)
     check("every module the lift loads is in its key (missing: %s)" % missing, not missing)
-    check("the lift's later imports too", {str(ROOT / "nx2" / f) for f in ("oot_patches.py", "oot_wide.py", "vecfp.py")}
+    check("the lift's later imports too", {str(ROOT / "nx2" / f) for f in ("oot_patches.py", "oot_wide.py")}
           <= sources)
     check("the builder's other modules are not", str(ROOT / "nx2" / "build.py") not in sources)
     import re

@@ -96,8 +96,8 @@ def main():
     need(queue, "destroy_buffer_later", ["void destroy_buffer_later(VkBuffer buffer, VmaAllocation alloc) {",
                                          "if (!cap_shutting_down.load()) destroy_buffer(b, a);"])
     free = block(src, "void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size, bool from_worker = false) {")
-    spare = free.find("cap_free.push_back({buffer, alloc, map, size});")
-    later = free.find("if (cap_free_async_on() && !cap_shutting_down.load()) return destroy_buffer_later(buffer, alloc);")
+    spare = free.find("cap_free.push_back({buffer, alloc, map, size")   # (main's spares carry their age too)
+    later = free.find("if (cap_free_async_on() && !cap_shutting_down.load()) destroy_buffer_later(buffer, alloc);")
     if spare < 0 or later < 0 or later < spare:
         raise SystemExit("cap_buf_free: the destroy no longer goes to destroy_buffer_later after the spares were offered it")
     need((ROOT / "gpu/vk/switches.def").read_text(encoding="utf-8"), "switches.def", ["SW(RX_VK_CAP_FREE_ASYNC,"])
